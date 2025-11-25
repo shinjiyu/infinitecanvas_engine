@@ -97,11 +97,28 @@ impl InfiniteCanvas {
     pub fn render(&self) -> Result<(), JsValue> {
         if let Some(ctx) = &self.canvas_ctx {
             ctx.clear();
-            // 未来会调用 self.engine.render()
+            
+            // 绘制测试内容
+            self.render_test_scene(ctx);
         } else {
             return Err(JsValue::from_str("Canvas not initialized. Call init() first."));
         }
         Ok(())
+    }
+
+    /// 绘制测试场景（用于验证渲染功能）
+    fn render_test_scene(&self, ctx: &CanvasContext) {
+        // 绘制一个蓝色矩形
+        ctx.fill_rect(100.0, 100.0, 200.0, 150.0, "#3b82f6");
+
+        // 绘制一个描边矩形
+        ctx.stroke_rect(350.0, 100.0, 200.0, 150.0, "#ef4444", 3.0);
+
+        // 绘制一个圆形
+        ctx.draw_circle(450.0, 350.0, 50.0, Some("#10b981"), Some("#059669"), 2.0);
+
+        // 绘制一个空心圆
+        ctx.draw_circle(200.0, 350.0, 60.0, None, Some("#f59e0b"), 3.0);
     }
     
     /// 获取 Canvas 宽度

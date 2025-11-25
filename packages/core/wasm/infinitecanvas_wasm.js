@@ -1,427 +1,562 @@
-/**
- * Canvas 2D Rendering Engine (JavaScript Implementation)
- * 
- * 注意：这是功能完整的 Canvas 2D 实现，用于在 Rust/WASM 未编译时提供完整功能
- * 未来会被 Rust + WebGPU 实现替代
- */
+let wasm;
 
-/**
- * 场景元素基类
- */
-class Element {
-  constructor(id, type, x, y) {
-    this.id = id;
-    this.type = type;
-    this.x = x;
-    this.y = y;
-    this.visible = true;
-  }
-
-  draw(ctx, viewport) {
-    // 子类实现
-  }
+function debugString(val) {
+    // primitive types
+    const type = typeof val;
+    if (type == 'number' || type == 'boolean' || val == null) {
+        return  `${val}`;
+    }
+    if (type == 'string') {
+        return `"${val}"`;
+    }
+    if (type == 'symbol') {
+        const description = val.description;
+        if (description == null) {
+            return 'Symbol';
+        } else {
+            return `Symbol(${description})`;
+        }
+    }
+    if (type == 'function') {
+        const name = val.name;
+        if (typeof name == 'string' && name.length > 0) {
+            return `Function(${name})`;
+        } else {
+            return 'Function';
+        }
+    }
+    // objects
+    if (Array.isArray(val)) {
+        const length = val.length;
+        let debug = '[';
+        if (length > 0) {
+            debug += debugString(val[0]);
+        }
+        for(let i = 1; i < length; i++) {
+            debug += ', ' + debugString(val[i]);
+        }
+        debug += ']';
+        return debug;
+    }
+    // Test for built-in
+    const builtInMatches = /\[object ([^\]]+)\]/.exec(toString.call(val));
+    let className;
+    if (builtInMatches && builtInMatches.length > 1) {
+        className = builtInMatches[1];
+    } else {
+        // Failed to match the standard '[object ClassName]'
+        return toString.call(val);
+    }
+    if (className == 'Object') {
+        // we're a user defined class or Object
+        // JSON.stringify avoids problems with cycles, and is generally much
+        // easier than looping through ownProperties of `val`.
+        try {
+            return 'Object(' + JSON.stringify(val) + ')';
+        } catch (_) {
+            return 'Object';
+        }
+    }
+    // errors
+    if (val instanceof Error) {
+        return `${val.name}: ${val.message}\n${val.stack}`;
+    }
+    // TODO we could test for more things here, like `Set`s and `Map`s.
+    return className;
 }
 
-/**
- * 矩形元素
- */
-class RectElement extends Element {
-  constructor(id, x, y, width, height, color = '#3b82f6') {
-    super(id, 'rect', x, y);
-    this.width = width;
-    this.height = height;
-    this.color = color;
-  }
+let WASM_VECTOR_LEN = 0;
 
-  draw(ctx, viewport) {
-    if (!this.visible) return;
-    
-    const screenPos = viewport.worldToScreen(this.x, this.y);
-    const screenWidth = this.width * viewport.zoom;
-    const screenHeight = this.height * viewport.zoom;
-    
-    ctx.fillStyle = this.color;
-    ctx.fillRect(screenPos.x, screenPos.y, screenWidth, screenHeight);
-    
-    // 边框
-    ctx.strokeStyle = '#1e40af';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(screenPos.x, screenPos.y, screenWidth, screenHeight);
-  }
+let cachedUint8ArrayMemory0 = null;
+
+function getUint8ArrayMemory0() {
+    if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
+        cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
+    }
+    return cachedUint8ArrayMemory0;
 }
 
-/**
- * 圆形元素
- */
-class CircleElement extends Element {
-  constructor(id, x, y, radius, color = '#10b981') {
-    super(id, 'circle', x, y);
-    this.radius = radius;
-    this.color = color;
-  }
+const cachedTextEncoder = new TextEncoder();
 
-  draw(ctx, viewport) {
-    if (!this.visible) return;
-    
-    const screenPos = viewport.worldToScreen(this.x, this.y);
-    const screenRadius = this.radius * viewport.zoom;
-    
-    ctx.beginPath();
-    ctx.arc(screenPos.x, screenPos.y, screenRadius, 0, Math.PI * 2);
-    ctx.fillStyle = this.color;
-    ctx.fill();
-    
-    ctx.strokeStyle = '#059669';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
+if (!('encodeInto' in cachedTextEncoder)) {
+    cachedTextEncoder.encodeInto = function (arg, view) {
+        const buf = cachedTextEncoder.encode(arg);
+        view.set(buf);
+        return {
+            read: arg.length,
+            written: buf.length
+        };
+    }
 }
 
-/**
- * 文字元素
- */
-class TextElement extends Element {
-  constructor(id, x, y, text, fontSize = 24, color = '#ef4444') {
-    super(id, 'text', x, y);
-    this.text = text;
-    this.fontSize = fontSize;
-    this.color = color;
-  }
+function passStringToWasm0(arg, malloc, realloc) {
 
-  draw(ctx, viewport) {
-    if (!this.visible) return;
-    
-    const screenPos = viewport.worldToScreen(this.x, this.y);
-    const screenFontSize = this.fontSize * viewport.zoom;
-    
-    ctx.font = `${screenFontSize}px -apple-system, sans-serif`;
-    ctx.fillStyle = this.color;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(this.text, screenPos.x, screenPos.y);
-  }
+    if (realloc === undefined) {
+        const buf = cachedTextEncoder.encode(arg);
+        const ptr = malloc(buf.length, 1) >>> 0;
+        getUint8ArrayMemory0().subarray(ptr, ptr + buf.length).set(buf);
+        WASM_VECTOR_LEN = buf.length;
+        return ptr;
+    }
+
+    let len = arg.length;
+    let ptr = malloc(len, 1) >>> 0;
+
+    const mem = getUint8ArrayMemory0();
+
+    let offset = 0;
+
+    for (; offset < len; offset++) {
+        const code = arg.charCodeAt(offset);
+        if (code > 0x7F) break;
+        mem[ptr + offset] = code;
+    }
+
+    if (offset !== len) {
+        if (offset !== 0) {
+            arg = arg.slice(offset);
+        }
+        ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
+        const view = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
+        const ret = cachedTextEncoder.encodeInto(arg, view);
+
+        offset += ret.written;
+        ptr = realloc(ptr, len, offset, 1) >>> 0;
+    }
+
+    WASM_VECTOR_LEN = offset;
+    return ptr;
 }
 
-/**
- * 视口管理器
- */
-class Viewport {
-  constructor(canvasWidth, canvasHeight) {
-    this.x = 0;           // 世界坐标偏移
-    this.y = 0;
-    this.zoom = 1.0;      // 缩放等级
-    this.canvasWidth = canvasWidth;
-    this.canvasHeight = canvasHeight;
-  }
+let cachedDataViewMemory0 = null;
 
-  /**
-   * 世界坐标转屏幕坐标
-   */
-  worldToScreen(worldX, worldY) {
-    return {
-      x: (worldX - this.x) * this.zoom + this.canvasWidth / 2,
-      y: (worldY - this.y) * this.zoom + this.canvasHeight / 2,
-    };
-  }
-
-  /**
-   * 屏幕坐标转世界坐标
-   */
-  screenToWorld(screenX, screenY) {
-    return {
-      x: (screenX - this.canvasWidth / 2) / this.zoom + this.x,
-      y: (screenY - this.canvasHeight / 2) / this.zoom + this.y,
-    };
-  }
-
-  /**
-   * 平移视口
-   */
-  pan(dx, dy) {
-    this.x += dx / this.zoom;
-    this.y += dy / this.zoom;
-  }
-
-  /**
-   * 缩放视口
-   */
-  zoomAt(factor, screenX, screenY) {
-    const worldPos = this.screenToWorld(screenX, screenY);
-    this.zoom *= factor;
-    this.zoom = Math.max(0.1, Math.min(10, this.zoom)); // 限制范围
-    const newScreenPos = this.worldToScreen(worldPos.x, worldPos.y);
-    this.pan((newScreenPos.x - screenX) / this.zoom, (newScreenPos.y - screenY) / this.zoom);
-  }
+function getDataViewMemory0() {
+    if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
+        cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }
+    return cachedDataViewMemory0;
 }
 
+let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+
+cachedTextDecoder.decode();
+
+const MAX_SAFARI_DECODE_BYTES = 2146435072;
+let numBytesDecoded = 0;
+function decodeText(ptr, len) {
+    numBytesDecoded += len;
+    if (numBytesDecoded >= MAX_SAFARI_DECODE_BYTES) {
+        cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+        cachedTextDecoder.decode();
+        numBytesDecoded = len;
+    }
+    return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
+}
+
+function getStringFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return decodeText(ptr, len);
+}
+
+function addToExternrefTable0(obj) {
+    const idx = wasm.__externref_table_alloc();
+    wasm.__wbindgen_externrefs.set(idx, obj);
+    return idx;
+}
+
+function handleError(f, args) {
+    try {
+        return f.apply(this, args);
+    } catch (e) {
+        const idx = addToExternrefTable0(e);
+        wasm.__wbindgen_exn_store(idx);
+    }
+}
+
+function isLikeNone(x) {
+    return x === undefined || x === null;
+}
+
+function takeFromExternrefTable0(idx) {
+    const value = wasm.__wbindgen_externrefs.get(idx);
+    wasm.__externref_table_dealloc(idx);
+    return value;
+}
+
+const InfiniteCanvasFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_infinitecanvas_free(ptr >>> 0, 1));
 /**
- * InfiniteCanvas 渲染引擎
+ * WASM 主接口，提供无限画布的所有功能
+ *
+ * # 职责
+ * - 初始化渲染引擎
+ * - 管理 Canvas 上下文
+ * - 接收并处理 JavaScript 事件
+ * - 管理渲染循环
+ *
+ * # 示例（JavaScript）
+ * ```js
+ * const canvas = new InfiniteCanvas();
+ * await canvas.init(document.getElementById('canvas'));
+ * canvas.render();
+ * ```
  */
 export class InfiniteCanvas {
-  constructor() {
-    console.log('[Canvas2D Engine] InfiniteCanvas initialized');
-    this.canvas = null;
-    this.ctx = null;
-    this.viewport = null;
-    this.elements = [];
-    this.elementIdCounter = 0;
-    this.frameCount = 0;
-    
-    // 交互状态
-    this.isDragging = false;
-    this.lastMouseX = 0;
-    this.lastMouseY = 0;
-  }
 
-  /**
-   * 初始化 Canvas
-   */
-  init(canvas) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
-    
-    // 设置高 DPI 支持
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    this.ctx.scale(dpr, dpr);
-    canvas.style.width = rect.width + 'px';
-    canvas.style.height = rect.height + 'px';
-    
-    // 初始化视口
-    this.viewport = new Viewport(rect.width, rect.height);
-    
-    // 添加测试元素
-    this.addTestElements();
-    
-    // 设置事件监听
-    this.setupEventListeners();
-    
-    console.log('[Canvas2D Engine] Canvas initialized', rect.width, 'x', rect.height);
-  }
-
-  /**
-   * 添加测试元素
-   */
-  addTestElements() {
-    // 中心文字
-    this.addElement(new TextElement(
-      this.elementIdCounter++,
-      0, -150,
-      'InfiniteCanvas Engine',
-      32,
-      '#6366f1'
-    ));
-    
-    // 矩形
-    this.addElement(new RectElement(
-      this.elementIdCounter++,
-      -100, -50,
-      200, 80,
-      '#3b82f6'
-    ));
-    
-    // 圆形
-    this.addElement(new CircleElement(
-      this.elementIdCounter++,
-      -150, 80,
-      50,
-      '#10b981'
-    ));
-    
-    this.addElement(new CircleElement(
-      this.elementIdCounter++,
-      150, 80,
-      50,
-      '#f59e0b'
-    ));
-    
-    // 提示文字
-    this.addElement(new TextElement(
-      this.elementIdCounter++,
-      0, 180,
-      '🎨 拖动画布 | 滚轮缩放',
-      16,
-      '#94a3b8'
-    ));
-    
-    console.log(`[Canvas2D Engine] Added ${this.elements.length} test elements`);
-  }
-
-  /**
-   * 添加元素
-   */
-  addElement(element) {
-    this.elements.push(element);
-    return element.id;
-  }
-
-  /**
-   * 设置事件监听
-   */
-  setupEventListeners() {
-    // 鼠标拖动
-    this.canvas.addEventListener('mousedown', (e) => {
-      this.isDragging = true;
-      this.lastMouseX = e.offsetX;
-      this.lastMouseY = e.offsetY;
-      this.canvas.style.cursor = 'grabbing';
-    });
-
-    this.canvas.addEventListener('mousemove', (e) => {
-      if (this.isDragging) {
-        const dx = e.offsetX - this.lastMouseX;
-        const dy = e.offsetY - this.lastMouseY;
-        this.viewport.pan(-dx, -dy);
-        this.lastMouseX = e.offsetX;
-        this.lastMouseY = e.offsetY;
-      }
-    });
-
-    this.canvas.addEventListener('mouseup', () => {
-      this.isDragging = false;
-      this.canvas.style.cursor = 'grab';
-    });
-
-    this.canvas.addEventListener('mouseleave', () => {
-      this.isDragging = false;
-      this.canvas.style.cursor = 'grab';
-    });
-
-    // 滚轮缩放
-    this.canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      this.viewport.zoomAt(factor, e.offsetX, e.offsetY);
-    });
-
-    this.canvas.style.cursor = 'grab';
-  }
-
-  /**
-   * 渲染一帧
-   */
-  render() {
-    if (!this.ctx || !this.viewport) return;
-    
-    this.frameCount++;
-    
-    // 清空画布
-    const rect = this.canvas.getBoundingClientRect();
-    this.ctx.clearRect(0, 0, rect.width, rect.height);
-    
-    // 绘制背景网格
-    this.drawGrid();
-    
-    // 绘制所有元素
-    for (const element of this.elements) {
-      element.draw(this.ctx, this.viewport);
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        InfiniteCanvasFinalization.unregister(this);
+        return ptr;
     }
-    
-    // 绘制调试信息
-    this.drawDebugInfo();
-    
-    if (this.frameCount % 60 === 0) {
-      console.log(`[Canvas2D Engine] Rendered ${this.frameCount} frames, ${this.elements.length} elements, zoom: ${this.viewport.zoom.toFixed(2)}x`);
-    }
-  }
 
-  /**
-   * 绘制背景网格
-   */
-  drawGrid() {
-    const rect = this.canvas.getBoundingClientRect();
-    const gridSize = 50;
-    const screenGridSize = gridSize * this.viewport.zoom;
-    
-    // 只在合适的缩放级别显示网格
-    if (screenGridSize < 10 || screenGridSize > 200) return;
-    
-    this.ctx.strokeStyle = '#e5e7eb';
-    this.ctx.lineWidth = 1;
-    
-    // 计算可见区域的网格范围
-    const startWorld = this.viewport.screenToWorld(0, 0);
-    const endWorld = this.viewport.screenToWorld(rect.width, rect.height);
-    
-    const startX = Math.floor(startWorld.x / gridSize) * gridSize;
-    const endX = Math.ceil(endWorld.x / gridSize) * gridSize;
-    const startY = Math.floor(startWorld.y / gridSize) * gridSize;
-    const endY = Math.ceil(endWorld.y / gridSize) * gridSize;
-    
-    // 绘制竖线
-    for (let x = startX; x <= endX; x += gridSize) {
-      const screenPos = this.viewport.worldToScreen(x, 0);
-      this.ctx.beginPath();
-      this.ctx.moveTo(screenPos.x, 0);
-      this.ctx.lineTo(screenPos.x, rect.height);
-      this.ctx.stroke();
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_infinitecanvas_free(ptr, 0);
     }
-    
-    // 绘制横线
-    for (let y = startY; y <= endY; y += gridSize) {
-      const screenPos = this.viewport.worldToScreen(0, y);
-      this.ctx.beginPath();
-      this.ctx.moveTo(0, screenPos.y);
-      this.ctx.lineTo(rect.width, screenPos.y);
-      this.ctx.stroke();
+    /**
+     * 创建新的画布实例
+     *
+     * # 返回
+     * - `Ok(InfiniteCanvas)`: 成功创建
+     * - `Err(JsValue)`: 初始化失败
+     */
+    constructor() {
+        const ret = wasm.infinitecanvas_new();
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0] >>> 0;
+        InfiniteCanvasFinalization.register(this, this.__wbg_ptr, this);
+        return this;
     }
-    
-    // 绘制原点
-    const origin = this.viewport.worldToScreen(0, 0);
-    this.ctx.strokeStyle = '#3b82f6';
-    this.ctx.lineWidth = 2;
-    
-    // X 轴
-    this.ctx.beginPath();
-    this.ctx.moveTo(0, origin.y);
-    this.ctx.lineTo(rect.width, origin.y);
-    this.ctx.stroke();
-    
-    // Y 轴
-    this.ctx.beginPath();
-    this.ctx.moveTo(origin.x, 0);
-    this.ctx.lineTo(origin.x, rect.height);
-    this.ctx.stroke();
-  }
+    /**
+     * 初始化画布
+     *
+     * # 参数
+     * - `canvas`: HTMLCanvasElement
+     *
+     * # 返回
+     * - `Ok(())`: 初始化成功
+     * - `Err(JsValue)`: Canvas 无效或初始化失败
+     * @param {HTMLCanvasElement} canvas
+     */
+    init(canvas) {
+        const ret = wasm.infinitecanvas_init(this.__wbg_ptr, canvas);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * 获取 Canvas 宽度
+     * @returns {number}
+     */
+    width() {
+        const ret = wasm.infinitecanvas_width(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * 获取 Canvas 高度
+     * @returns {number}
+     */
+    height() {
+        const ret = wasm.infinitecanvas_height(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * 渲染一帧
+     *
+     * # 返回
+     * - `Ok(())`: 渲染成功
+     * - `Err(JsValue)`: 渲染失败
+     */
+    render() {
+        const ret = wasm.infinitecanvas_render(this.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+}
+if (Symbol.dispose) InfiniteCanvas.prototype[Symbol.dispose] = InfiniteCanvas.prototype.free;
 
-  /**
-   * 绘制调试信息
-   */
-  drawDebugInfo() {
-    const rect = this.canvas.getBoundingClientRect();
-    
-    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    this.ctx.fillRect(10, rect.height - 80, 200, 70);
-    
-    this.ctx.fillStyle = '#fff';
-    this.ctx.font = '12px monospace';
-    this.ctx.textAlign = 'left';
-    
-    this.ctx.fillText(`Elements: ${this.elements.length}`, 20, rect.height - 60);
-    this.ctx.fillText(`Zoom: ${this.viewport.zoom.toFixed(2)}x`, 20, rect.height - 40);
-    this.ctx.fillText(`Pos: (${this.viewport.x.toFixed(0)}, ${this.viewport.y.toFixed(0)})`, 20, rect.height - 20);
-  }
+const EXPECTED_RESPONSE_TYPES = new Set(['basic', 'cors', 'default']);
 
-  /**
-   * 获取状态信息
-   */
-  getStats() {
-    return {
-      elements: this.elements.length,
-      zoom: this.viewport ? this.viewport.zoom : 1.0,
-      frameCount: this.frameCount,
+async function __wbg_load(module, imports) {
+    if (typeof Response === 'function' && module instanceof Response) {
+        if (typeof WebAssembly.instantiateStreaming === 'function') {
+            try {
+                return await WebAssembly.instantiateStreaming(module, imports);
+
+            } catch (e) {
+                const validResponse = module.ok && EXPECTED_RESPONSE_TYPES.has(module.type);
+
+                if (validResponse && module.headers.get('Content-Type') !== 'application/wasm') {
+                    console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+
+                } else {
+                    throw e;
+                }
+            }
+        }
+
+        const bytes = await module.arrayBuffer();
+        return await WebAssembly.instantiate(bytes, imports);
+
+    } else {
+        const instance = await WebAssembly.instantiate(module, imports);
+
+        if (instance instanceof WebAssembly.Instance) {
+            return { instance, module };
+
+        } else {
+            return instance;
+        }
+    }
+}
+
+function __wbg_get_imports() {
+    const imports = {};
+    imports.wbg = {};
+    imports.wbg.__wbg___wbindgen_debug_string_df47ffb5e35e6763 = function(arg0, arg1) {
+        const ret = debugString(arg1);
+        const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+        getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
     };
-  }
+    imports.wbg.__wbg___wbindgen_is_undefined_2d472862bd29a478 = function(arg0) {
+        const ret = arg0 === undefined;
+        return ret;
+    };
+    imports.wbg.__wbg___wbindgen_throw_b855445ff6a94295 = function(arg0, arg1) {
+        throw new Error(getStringFromWasm0(arg0, arg1));
+    };
+    imports.wbg.__wbg_arc_ff23fb4f334c2788 = function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
+        arg0.arc(arg1, arg2, arg3, arg4, arg5);
+    }, arguments) };
+    imports.wbg.__wbg_beginPath_ae4169e263573dcd = function(arg0) {
+        arg0.beginPath();
+    };
+    imports.wbg.__wbg_call_e762c39fa8ea36bf = function() { return handleError(function (arg0, arg1) {
+        const ret = arg0.call(arg1);
+        return ret;
+    }, arguments) };
+    imports.wbg.__wbg_clearRect_155b2e12f737565e = function(arg0, arg1, arg2, arg3, arg4) {
+        arg0.clearRect(arg1, arg2, arg3, arg4);
+    };
+    imports.wbg.__wbg_debug_f4b0c59db649db48 = function(arg0) {
+        console.debug(arg0);
+    };
+    imports.wbg.__wbg_devicePixelRatio_495c092455fdf6b1 = function(arg0) {
+        const ret = arg0.devicePixelRatio;
+        return ret;
+    };
+    imports.wbg.__wbg_error_7534b8e9a36f1ab4 = function(arg0, arg1) {
+        let deferred0_0;
+        let deferred0_1;
+        try {
+            deferred0_0 = arg0;
+            deferred0_1 = arg1;
+            console.error(getStringFromWasm0(arg0, arg1));
+        } finally {
+            wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
+        }
+    };
+    imports.wbg.__wbg_error_a7f8fbb0523dae15 = function(arg0) {
+        console.error(arg0);
+    };
+    imports.wbg.__wbg_fillRect_726041755e54e83d = function(arg0, arg1, arg2, arg3, arg4) {
+        arg0.fillRect(arg1, arg2, arg3, arg4);
+    };
+    imports.wbg.__wbg_fill_c1b94332a3f5eecc = function(arg0) {
+        arg0.fill();
+    };
+    imports.wbg.__wbg_getBoundingClientRect_eb2f68e504025fb4 = function(arg0) {
+        const ret = arg0.getBoundingClientRect();
+        return ret;
+    };
+    imports.wbg.__wbg_getContext_0b80ccb9547db509 = function() { return handleError(function (arg0, arg1, arg2) {
+        const ret = arg0.getContext(getStringFromWasm0(arg1, arg2));
+        return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+    }, arguments) };
+    imports.wbg.__wbg_height_ba3edd16b1f48a4a = function(arg0) {
+        const ret = arg0.height;
+        return ret;
+    };
+    imports.wbg.__wbg_info_e674a11f4f50cc0c = function(arg0) {
+        console.info(arg0);
+    };
+    imports.wbg.__wbg_instanceof_CanvasRenderingContext2d_c0728747cf1e699c = function(arg0) {
+        let result;
+        try {
+            result = arg0 instanceof CanvasRenderingContext2D;
+        } catch (_) {
+            result = false;
+        }
+        const ret = result;
+        return ret;
+    };
+    imports.wbg.__wbg_instanceof_Window_4846dbb3de56c84c = function(arg0) {
+        let result;
+        try {
+            result = arg0 instanceof Window;
+        } catch (_) {
+            result = false;
+        }
+        const ret = result;
+        return ret;
+    };
+    imports.wbg.__wbg_log_8cec76766b8c0e33 = function(arg0) {
+        console.log(arg0);
+    };
+    imports.wbg.__wbg_new_8a6f238a6ece86ea = function() {
+        const ret = new Error();
+        return ret;
+    };
+    imports.wbg.__wbg_new_no_args_ee98eee5275000a4 = function(arg0, arg1) {
+        const ret = new Function(getStringFromWasm0(arg0, arg1));
+        return ret;
+    };
+    imports.wbg.__wbg_scale_3871a59cbba989ce = function() { return handleError(function (arg0, arg1, arg2) {
+        arg0.scale(arg1, arg2);
+    }, arguments) };
+    imports.wbg.__wbg_setProperty_7b188d7e71d4aca8 = function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
+        arg0.setProperty(getStringFromWasm0(arg1, arg2), getStringFromWasm0(arg3, arg4));
+    }, arguments) };
+    imports.wbg.__wbg_set_fillStyle_2bb9477555f866ec = function(arg0, arg1) {
+        arg0.fillStyle = arg1;
+    };
+    imports.wbg.__wbg_set_height_89110f48f7fd0817 = function(arg0, arg1) {
+        arg0.height = arg1 >>> 0;
+    };
+    imports.wbg.__wbg_set_lineWidth_4059ac6bb1d807f8 = function(arg0, arg1) {
+        arg0.lineWidth = arg1;
+    };
+    imports.wbg.__wbg_set_strokeStyle_4d716c7d92c95b45 = function(arg0, arg1) {
+        arg0.strokeStyle = arg1;
+    };
+    imports.wbg.__wbg_set_width_dcc02c61dd01cff6 = function(arg0, arg1) {
+        arg0.width = arg1 >>> 0;
+    };
+    imports.wbg.__wbg_stack_0ed75d68575b0f3c = function(arg0, arg1) {
+        const ret = arg1.stack;
+        const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+        getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+    };
+    imports.wbg.__wbg_static_accessor_GLOBAL_89e1d9ac6a1b250e = function() {
+        const ret = typeof global === 'undefined' ? null : global;
+        return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+    };
+    imports.wbg.__wbg_static_accessor_GLOBAL_THIS_8b530f326a9e48ac = function() {
+        const ret = typeof globalThis === 'undefined' ? null : globalThis;
+        return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+    };
+    imports.wbg.__wbg_static_accessor_SELF_6fdf4b64710cc91b = function() {
+        const ret = typeof self === 'undefined' ? null : self;
+        return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+    };
+    imports.wbg.__wbg_static_accessor_WINDOW_b45bfc5a37f6cfa2 = function() {
+        const ret = typeof window === 'undefined' ? null : window;
+        return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+    };
+    imports.wbg.__wbg_strokeRect_788876bb2e67b691 = function(arg0, arg1, arg2, arg3, arg4) {
+        arg0.strokeRect(arg1, arg2, arg3, arg4);
+    };
+    imports.wbg.__wbg_stroke_2d2420886d092225 = function(arg0) {
+        arg0.stroke();
+    };
+    imports.wbg.__wbg_style_763a7ccfd47375da = function(arg0) {
+        const ret = arg0.style;
+        return ret;
+    };
+    imports.wbg.__wbg_warn_1d74dddbe2fd1dbb = function(arg0) {
+        console.warn(arg0);
+    };
+    imports.wbg.__wbg_width_cd308a6e89422ce8 = function(arg0) {
+        const ret = arg0.width;
+        return ret;
+    };
+    imports.wbg.__wbindgen_cast_2241b6af4c4b2941 = function(arg0, arg1) {
+        // Cast intrinsic for `Ref(String) -> Externref`.
+        const ret = getStringFromWasm0(arg0, arg1);
+        return ret;
+    };
+    imports.wbg.__wbindgen_init_externref_table = function() {
+        const table = wasm.__wbindgen_externrefs;
+        const offset = table.grow(4);
+        table.set(0, undefined);
+        table.set(offset + 0, undefined);
+        table.set(offset + 1, null);
+        table.set(offset + 2, true);
+        table.set(offset + 3, false);
+        ;
+    };
+
+    return imports;
 }
 
-/**
- * WASM 模块初始化
- */
-export default async function init() {
-  console.log('[Canvas2D Engine] Module initialized');
-  console.log('✅ 使用 Canvas 2D 完整实现');
-  return Promise.resolve();
+function __wbg_finalize_init(instance, module) {
+    wasm = instance.exports;
+    __wbg_init.__wbindgen_wasm_module = module;
+    cachedDataViewMemory0 = null;
+    cachedUint8ArrayMemory0 = null;
+
+
+    wasm.__wbindgen_start();
+    return wasm;
 }
 
+function initSync(module) {
+    if (wasm !== undefined) return wasm;
+
+
+    if (typeof module !== 'undefined') {
+        if (Object.getPrototypeOf(module) === Object.prototype) {
+            ({module} = module)
+        } else {
+            console.warn('using deprecated parameters for `initSync()`; pass a single object instead')
+        }
+    }
+
+    const imports = __wbg_get_imports();
+
+    if (!(module instanceof WebAssembly.Module)) {
+        module = new WebAssembly.Module(module);
+    }
+
+    const instance = new WebAssembly.Instance(module, imports);
+
+    return __wbg_finalize_init(instance, module);
+}
+
+async function __wbg_init(module_or_path) {
+    if (wasm !== undefined) return wasm;
+
+
+    if (typeof module_or_path !== 'undefined') {
+        if (Object.getPrototypeOf(module_or_path) === Object.prototype) {
+            ({module_or_path} = module_or_path)
+        } else {
+            console.warn('using deprecated parameters for the initialization function; pass a single object instead')
+        }
+    }
+
+    if (typeof module_or_path === 'undefined') {
+        module_or_path = new URL('infinitecanvas_wasm_bg.wasm', import.meta.url);
+    }
+    const imports = __wbg_get_imports();
+
+    if (typeof module_or_path === 'string' || (typeof Request === 'function' && module_or_path instanceof Request) || (typeof URL === 'function' && module_or_path instanceof URL)) {
+        module_or_path = fetch(module_or_path);
+    }
+
+    const { instance, module } = await __wbg_load(await module_or_path, imports);
+
+    return __wbg_finalize_init(instance, module);
+}
+
+export { initSync };
+export default __wbg_init;

@@ -125,4 +125,113 @@ impl CanvasContext {
             self.height as f64,
         );
     }
+
+    /// 绘制填充矩形
+    ///
+    /// # 参数
+    /// - `x`: X 坐标
+    /// - `y`: Y 坐标
+    /// - `width`: 宽度
+    /// - `height`: 高度
+    /// - `color`: 颜色（CSS 颜色字符串，如 "#ff0000"）
+    pub fn fill_rect(&self, x: f32, y: f32, width: f32, height: f32, color: &str) {
+        self.context.set_fill_style(&color.into());
+        self.context.fill_rect(
+            x as f64,
+            y as f64,
+            width as f64,
+            height as f64,
+        );
+    }
+
+    /// 绘制描边矩形
+    ///
+    /// # 参数
+    /// - `x`: X 坐标
+    /// - `y`: Y 坐标
+    /// - `width`: 宽度
+    /// - `height`: 高度
+    /// - `color`: 颜色
+    /// - `line_width`: 线宽
+    pub fn stroke_rect(&self, x: f32, y: f32, width: f32, height: f32, color: &str, line_width: f32) {
+        self.context.set_stroke_style(&color.into());
+        self.context.set_line_width(line_width as f64);
+        self.context.stroke_rect(
+            x as f64,
+            y as f64,
+            width as f64,
+            height as f64,
+        );
+    }
+
+    /// 绘制圆形
+    ///
+    /// # 参数
+    /// - `x`: 圆心 X 坐标
+    /// - `y`: 圆心 Y 坐标
+    /// - `radius`: 半径
+    /// - `fill_color`: 填充颜色（None 表示不填充）
+    /// - `stroke_color`: 描边颜色（None 表示不描边）
+    /// - `line_width`: 线宽
+    pub fn draw_circle(
+        &self,
+        x: f32,
+        y: f32,
+        radius: f32,
+        fill_color: Option<&str>,
+        stroke_color: Option<&str>,
+        line_width: f32,
+    ) {
+        self.context.begin_path();
+        self.context
+            .arc(
+                x as f64,
+                y as f64,
+                radius as f64,
+                0.0,
+                std::f64::consts::PI * 2.0,
+            )
+            .ok();
+
+        if let Some(color) = fill_color {
+            self.context.set_fill_style(&color.into());
+            self.context.fill();
+        }
+
+        if let Some(color) = stroke_color {
+            self.context.set_stroke_style(&color.into());
+            self.context.set_line_width(line_width as f64);
+            self.context.stroke();
+        }
+    }
+
+    /// 保存上下文状态
+    pub fn save(&self) {
+        self.context.save();
+    }
+
+    /// 恢复上下文状态
+    pub fn restore(&self) {
+        self.context.restore();
+    }
+
+    /// 应用变换矩阵
+    ///
+    /// # 参数
+    /// - `a`: 水平缩放
+    /// - `b`: 水平倾斜
+    /// - `c`: 垂直倾斜
+    /// - `d`: 垂直缩放
+    /// - `e`: 水平移动
+    /// - `f`: 垂直移动
+    pub fn set_transform(&self, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) {
+        self.context
+            .set_transform(a as f64, b as f64, c as f64, d as f64, e as f64, f as f64)
+            .ok();
+    }
+
+    /// 重置变换为单位矩阵
+    pub fn reset_transform(&self) {
+        self.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+    }
 }
