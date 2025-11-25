@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = ["crates/engine", "crates/wasm", "crates/math"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Yu Zhenyu"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+wgpu = "0.18"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+glam = { version = "0.25", features = ["serde"] }
+log = "0.4"
+console_log = "1.0"
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+

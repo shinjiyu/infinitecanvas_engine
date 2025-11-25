@@ -1,0 +1,13 @@
+[package]
+name = "infinitecanvas-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+wgpu = { workspace = true }
+glam = { workspace = true }
+serde = { workspace = true }
+log = { workspace = true }
+

@@ -1,0 +1,22 @@
+[package]
+name = "infinitecanvas-wasm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+infinitecanvas-engine = { path = "../engine" }
+infinitecanvas-math = { path = "../math" }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+web-sys = { workspace = true, features = ["console", "Window", "HtmlCanvasElement"] }
+wgpu = { workspace = true }
+glam = { workspace = true }
+log = { workspace = true }
+console_log = { workspace = true }
+

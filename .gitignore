@@ -1,0 +1,22 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# WASM
+*.wasm
+pkg/
+
+# Node
+node_modules/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
+

@@ -1,0 +1,17 @@
+{
+  "name": "infinitecanvas-engine",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["packages/*", "www"],
+  "scripts": {
+    "dev": "pnpm --filter www dev",
+    "build": "pnpm build:wasm && pnpm build:ts",
+    "build:wasm": "cd crates/wasm && wasm-pack build --target web",
+    "build:ts": "pnpm --recursive --filter './packages/**' build",
+    "test": "pnpm test:rust && pnpm test:ts",
+    "test:rust": "cargo test --all",
+    "test:ts": "pnpm --recursive test"
+  },
+  "packageManager": "pnpm@8.15.0"
+}
+
