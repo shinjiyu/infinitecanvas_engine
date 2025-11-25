@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@infinitecanvas/core": "workspace:*"
   },
   "devDependencies": {
     "vite": "^5.0.0"

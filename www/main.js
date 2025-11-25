@@ -2,7 +2,49 @@
  * InfiniteCanvas Demo
  */
 
-import { InfiniteCanvas } from '@infinitecanvas/core';
+// 直接导入 WASM（简化版本，不使用 @infinitecanvas/core）
+import init, { InfiniteCanvas as WasmCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
+
+/**
+ * 简化的 InfiniteCanvas 封装
+ */
+class InfiniteCanvas {
+  constructor() {
+    this.wasmInstance = null;
+    this.animationId = null;
+  }
+
+  async init(selector) {
+    const canvas = document.querySelector(selector);
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      throw new Error(`Element ${selector} is not a canvas`);
+    }
+    
+    await init();
+    this.wasmInstance = new WasmCanvas();
+    console.log('InfiniteCanvas initialized');
+  }
+
+  render() {
+    if (!this.wasmInstance) throw new Error('Not initialized');
+    this.wasmInstance.render();
+  }
+
+  startRenderLoop() {
+    const loop = () => {
+      this.render();
+      this.animationId = requestAnimationFrame(loop);
+    };
+    loop();
+  }
+
+  stopRenderLoop() {
+    if (this.animationId !== null) {
+      cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+    }
+  }
+}
 
 // 状态更新
 const updateStatus = (id, text, isError = false) => {
