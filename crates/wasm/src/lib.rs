@@ -14,6 +14,9 @@
 
 mod canvas;
 
+use infinitecanvas_engine::{
+    math::Vec2, AnyElement, Circle, Element, ElementStyle, Rectangle, Scene, Viewport,
+};
 use wasm_bindgen::prelude::*;
 use canvas::CanvasContext;
 
@@ -22,6 +25,7 @@ use canvas::CanvasContext;
 /// # 职责
 /// - 初始化渲染引擎
 /// - 管理 Canvas 上下文
+/// - 管理场景和视口
 /// - 接收并处理 JavaScript 事件
 /// - 管理渲染循环
 ///
@@ -34,6 +38,8 @@ use canvas::CanvasContext;
 #[wasm_bindgen]
 pub struct InfiniteCanvas {
     canvas_ctx: Option<CanvasContext>,
+    scene: Scene,
+    viewport: Viewport,
     engine: infinitecanvas_engine::Renderer,
 }
 
@@ -58,6 +64,8 @@ impl InfiniteCanvas {
         
         Ok(InfiniteCanvas {
             canvas_ctx: None,
+            scene: Scene::new(),
+            viewport: Viewport::default(),
             engine: infinitecanvas_engine::Renderer::new(),
         })
     }
@@ -82,10 +90,43 @@ impl InfiniteCanvas {
             canvas_ctx.dpr()
         );
         
+        // 更新视口尺寸
+        self.viewport.resize(Vec2::new(canvas_ctx.width() as f32, canvas_ctx.height() as f32));
+        
         self.canvas_ctx = Some(canvas_ctx);
+        
+        // 初始化测试场景
+        self.init_test_scene();
         
         log::info!("InfiniteCanvas initialization complete");
         Ok(())
+    }
+    
+    /// 初始化测试场景
+    fn init_test_scene(&mut self) {
+        let id1 = self.scene.next_id();
+        let rect = Rectangle::new(id1, Vec2::new(100.0, 100.0), Vec2::new(200.0, 150.0))
+            .with_style(ElementStyle::fill_only("#3b82f6"));
+        self.scene.add_rect(rect);
+        
+        let id2 = self.scene.next_id();
+        let rect2 = Rectangle::new(id2, Vec2::new(375.0, 125.0), Vec2::new(200.0, 150.0))
+            .with_style(ElementStyle::stroke_only("#ef4444", 3.0));
+        self.scene.add_rect(rect2);
+        
+        let id3 = self.scene.next_id();
+        let mut circle_style = ElementStyle::fill_only("#10b981");
+        circle_style.stroke = Some("#059669".to_string());
+        circle_style.stroke_width = 2.0;
+        let circle = Circle::new(id3, Vec2::new(450.0, 350.0), 50.0).with_style(circle_style);
+        self.scene.add_circle(circle);
+        
+        let id4 = self.scene.next_id();
+        let circle2 = Circle::new(id4, Vec2::new(200.0, 350.0), 60.0)
+            .with_style(ElementStyle::stroke_only("#f59e0b", 3.0));
+        self.scene.add_circle(circle2);
+        
+        log::info!("Test scene initialized with {} elements", self.scene.count());
     }
     
     /// 渲染一帧
@@ -96,29 +137,84 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn render(&self) -> Result<(), JsValue> {
         if let Some(ctx) = &self.canvas_ctx {
+            // 清空画布
             ctx.clear();
             
-            // 绘制测试内容
-            self.render_test_scene(ctx);
+            // 渲染场景
+            self.render_scene(ctx);
         } else {
             return Err(JsValue::from_str("Canvas not initialized. Call init() first."));
         }
         Ok(())
     }
 
-    /// 绘制测试场景（用于验证渲染功能）
-    fn render_test_scene(&self, ctx: &CanvasContext) {
-        // 绘制一个蓝色矩形
-        ctx.fill_rect(100.0, 100.0, 200.0, 150.0, "#3b82f6");
-
-        // 绘制一个描边矩形
-        ctx.stroke_rect(350.0, 100.0, 200.0, 150.0, "#ef4444", 3.0);
-
-        // 绘制一个圆形
-        ctx.draw_circle(450.0, 350.0, 50.0, Some("#10b981"), Some("#059669"), 2.0);
-
-        // 绘制一个空心圆
-        ctx.draw_circle(200.0, 350.0, 60.0, None, Some("#f59e0b"), 3.0);
+    /// 渲染场景
+    fn render_scene(&self, ctx: &CanvasContext) {
+        // 获取所有元素（按 z-index 排序）
+        let elements = self.scene.elements_sorted();
+        
+        for element in elements {
+            // 视口裁剪（未来优化）
+            // if !self.viewport.is_visible(&element.as_element().world_bounds()) {
+            //     continue;
+            // }
+            
+            // 渲染元素
+            self.render_element(ctx, element);
+        }
+    }
+    
+    /// 渲染单个元素
+    fn render_element(&self, ctx: &CanvasContext, element: &AnyElement) {
+        match element {
+            AnyElement::Rectangle(rect) => self.render_rectangle(ctx, rect),
+            AnyElement::Circle(circle) => self.render_circle(ctx, circle),
+        }
+    }
+    
+    /// 渲染矩形
+    fn render_rectangle(&self, ctx: &CanvasContext, rect: &Rectangle) {
+        let props = rect.props();
+        if !props.visible {
+            return;
+        }
+        
+        let pos = props.transform.translation;
+        let size = rect.size();
+        
+        // 计算左上角坐标
+        let x = pos.x - size.x / 2.0;
+        let y = pos.y - size.y / 2.0;
+        
+        // 填充
+        if let Some(fill) = &rect.style.fill {
+            ctx.fill_rect(x, y, size.x, size.y, fill);
+        }
+        
+        // 描边
+        if let Some(stroke) = &rect.style.stroke {
+            ctx.stroke_rect(x, y, size.x, size.y, stroke, rect.style.stroke_width);
+        }
+    }
+    
+    /// 渲染圆形
+    fn render_circle(&self, ctx: &CanvasContext, circle: &Circle) {
+        let props = circle.props();
+        if !props.visible {
+            return;
+        }
+        
+        let pos = props.transform.translation;
+        let radius = circle.radius();
+        
+        ctx.draw_circle(
+            pos.x,
+            pos.y,
+            radius,
+            circle.style.fill.as_deref(),
+            circle.style.stroke.as_deref(),
+            circle.style.stroke_width,
+        );
     }
     
     /// 获取 Canvas 宽度

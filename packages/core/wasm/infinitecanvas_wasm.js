@@ -192,6 +192,7 @@ const InfiniteCanvasFinalization = (typeof FinalizationRegistry === 'undefined')
  * # 职责
  * - 初始化渲染引擎
  * - 管理 Canvas 上下文
+ * - 管理场景和视口
  * - 接收并处理 JavaScript 事件
  * - 管理渲染循环
  *
