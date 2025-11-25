@@ -98,8 +98,9 @@ export class InfiniteCanvas {
    * # 返回
    * - `Ok(())`: 初始化成功
    * - `Err(JsValue)`: Canvas 无效或初始化失败
+   * 初始化（异步）
    */
-  init(canvas: HTMLCanvasElement): void;
+  init(canvas: HTMLCanvasElement): Promise<void>;
   /**
    * 获取 Canvas 宽度
    */
@@ -143,13 +144,31 @@ export interface InitOutput {
   readonly infinitecanvas_get_viewport_center_y: (a: number) => number;
   readonly infinitecanvas_get_zoom: (a: number) => number;
   readonly infinitecanvas_height: (a: number) => number;
-  readonly infinitecanvas_init: (a: number, b: any) => [number, number];
+  readonly infinitecanvas_init: (a: number, b: any) => any;
   readonly infinitecanvas_new: () => [number, number, number];
   readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
   readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
   readonly infinitecanvas_render: (a: number) => [number, number];
   readonly infinitecanvas_width: (a: number) => number;
   readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
+  readonly wgpu_render_bundle_draw: (a: number, b: number, c: number, d: number, e: number) => void;
+  readonly wgpu_render_bundle_draw_indexed: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+  readonly wgpu_render_bundle_set_pipeline: (a: number, b: bigint) => void;
+  readonly wgpu_render_bundle_draw_indirect: (a: number, b: bigint, c: bigint) => void;
+  readonly wgpu_render_bundle_set_bind_group: (a: number, b: number, c: bigint, d: number, e: number) => void;
+  readonly wgpu_render_bundle_set_vertex_buffer: (a: number, b: number, c: bigint, d: bigint, e: bigint) => void;
+  readonly wgpu_render_bundle_set_push_constants: (a: number, b: number, c: number, d: number, e: number) => void;
+  readonly wgpu_render_bundle_draw_indexed_indirect: (a: number, b: bigint, c: bigint) => void;
+  readonly wgpu_render_bundle_insert_debug_marker: (a: number, b: number) => void;
+  readonly wgpu_render_bundle_pop_debug_group: (a: number) => void;
+  readonly wgpu_render_bundle_push_debug_group: (a: number, b: number) => void;
+  readonly wgpu_render_bundle_set_index_buffer: (a: number, b: bigint, c: number, d: bigint, e: bigint) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h3735a06cf22e48d8: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__hfcd40ba4ce2cbfce: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h82aa00e7eead16c7: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__hb412cfce5006bd76: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h6a51da06d273246a: (a: number, b: number) => number;
+  readonly wasm_bindgen__convert__closures_____invoke__ha372d6c15454185e: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;

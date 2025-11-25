@@ -23,6 +23,8 @@ web-sys = { workspace = true, features = [
     "DomRect",
     "CssStyleDeclaration",
 ] }
+wgpu = { workspace = true }
+bytemuck = "1.14"
 glam = { workspace = true }
 log = { workspace = true }
 console_log = { workspace = true }
