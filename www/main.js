@@ -22,6 +22,7 @@ class InfiniteCanvas {
     
     await init();
     this.wasmInstance = new WasmCanvas();
+    this.wasmInstance.init(canvas); // 传递 canvas 元素
     console.log('InfiniteCanvas initialized');
   }
 
@@ -43,6 +44,10 @@ class InfiniteCanvas {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
+  }
+  
+  getStats() {
+    return this.wasmInstance ? this.wasmInstance.getStats() : null;
   }
 }
 
