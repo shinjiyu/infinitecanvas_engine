@@ -140,12 +140,37 @@ impl InfiniteCanvas {
             // 清空画布
             ctx.clear();
             
+            // 绘制背景网格
+            self.render_grid(ctx);
+            
             // 渲染场景
             self.render_scene(ctx);
         } else {
             return Err(JsValue::from_str("Canvas not initialized. Call init() first."));
         }
         Ok(())
+    }
+
+    /// 渲染背景网格
+    fn render_grid(&self, ctx: &CanvasContext) {
+        let width = ctx.width() as f32;
+        let height = ctx.height() as f32;
+        let grid_size = 20.0; // 网格大小
+        let grid_color = "#e5e7eb"; // 浅灰色
+
+        // 绘制垂直线
+        let mut x = 0.0;
+        while x <= width {
+            ctx.draw_line(x, 0.0, x, height, grid_color, 1.0);
+            x += grid_size;
+        }
+
+        // 绘制水平线
+        let mut y = 0.0;
+        while y <= height {
+            ctx.draw_line(0.0, y, width, y, grid_color, 1.0);
+            y += grid_size;
+        }
     }
 
     /// 渲染场景

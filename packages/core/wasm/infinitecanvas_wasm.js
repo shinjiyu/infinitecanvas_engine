@@ -408,8 +408,14 @@ function __wbg_get_imports() {
         const ret = result;
         return ret;
     };
+    imports.wbg.__wbg_lineTo_1e83b5f2f38f15f9 = function(arg0, arg1, arg2) {
+        arg0.lineTo(arg1, arg2);
+    };
     imports.wbg.__wbg_log_8cec76766b8c0e33 = function(arg0) {
         console.log(arg0);
+    };
+    imports.wbg.__wbg_moveTo_8064f6a508217dcd = function(arg0, arg1, arg2) {
+        arg0.moveTo(arg1, arg2);
     };
     imports.wbg.__wbg_new_8a6f238a6ece86ea = function() {
         const ret = new Error();

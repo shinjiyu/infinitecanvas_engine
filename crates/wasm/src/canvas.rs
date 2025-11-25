@@ -234,4 +234,20 @@ impl CanvasContext {
     pub fn reset_transform(&self) {
         self.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
     }
+
+    /// 绘制线段
+    ///
+    /// # 参数
+    /// - `x1, y1`: 起点
+    /// - `x2, y2`: 终点
+    /// - `color`: 颜色
+    /// - `width`: 线宽
+    pub fn draw_line(&self, x1: f32, y1: f32, x2: f32, y2: f32, color: &str, width: f32) {
+        self.context.set_stroke_style(&color.into());
+        self.context.set_line_width(width as f64);
+        self.context.begin_path();
+        self.context.move_to(x1 as f64, y1 as f64);
+        self.context.line_to(x2 as f64, y2 as f64);
+        self.context.stroke();
+    }
 }
