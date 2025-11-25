@@ -79,13 +79,13 @@ pnpm build:wasm
 
 ## 🎯 里程碑
 
-详见 [MILESTONES.md](./MILESTONES.md)
+详见 [planning/roadmap.md](./planning/roadmap.md)
 
 - ✅ 项目结构搭建
-- ⏳ M1: 核心渲染引擎 (Rust + WASM)
-- ⏳ M2: 交互系统
-- ⏳ M3: 场景管理
-- ⏳ M4: 多人协同
+- ⏳ M1: 核心渲染引擎 (10 个任务)
+- ⏳ M2: 交互系统 (10 个任务)
+- ⏳ M3: 场景管理 (9 个任务)
+- ⏳ M4: 多人协同 (10 个任务)
 
 ## 📄 开源协议
 
