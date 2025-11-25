@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InfiniteCanvas Engine - Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      overflow: hidden;
+    }
+    
+    #app {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    header {
+      padding: 1rem 2rem;
+      background: #2a2a2a;
+      border-bottom: 1px solid #3a3a3a;
+    }
+    
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+    
+    .subtitle {
+      font-size: 0.875rem;
+      color: #888;
+      margin-top: 0.25rem;
+    }
+    
+    main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    
+    #canvas {
+      width: 800px;
+      height: 600px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+    }
+    
+    .status {
+      position: fixed;
+      top: 5rem;
+      right: 2rem;
+      padding: 1rem;
+      background: #2a2a2a;
+      border-radius: 8px;
+      border: 1px solid #3a3a3a;
+      font-size: 0.875rem;
+    }
+    
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 2rem;
+      margin-bottom: 0.5rem;
+    }
+    
+    .status-label {
+      color: #888;
+    }
+    
+    .status-value {
+      color: #4ade80;
+      font-weight: 600;
+    }
+    
+    .error {
+      color: #ef4444;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>🎨 InfiniteCanvas Engine</h1>
+      <p class="subtitle">Rust + WebGPU + WASM | 高性能无限画布</p>
+    </header>
+    
+    <main>
+      <canvas id="canvas"></canvas>
+    </main>
+    
+    <div class="status">
+      <div class="status-item">
+        <span class="status-label">状态:</span>
+        <span class="status-value" id="status">初始化中...</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">WASM:</span>
+        <span class="status-value" id="wasm-status">加载中...</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">FPS:</span>
+        <span class="status-value" id="fps">--</span>
+      </div>
+    </div>
+  </div>
+  
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
+
