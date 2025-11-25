@@ -9,7 +9,7 @@ authors = ["Yu Zhenyu"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-wgpu = "0.18"
+# wgpu = "0.18"  # 暂时不需要，M1 使用 Canvas 2D
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

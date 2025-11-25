@@ -14,9 +14,20 @@ infinitecanvas-math = { path = "../math" }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 js-sys = { workspace = true }
-web-sys = { workspace = true, features = ["console", "Window", "HtmlCanvasElement"] }
-wgpu = { workspace = true }
+web-sys = { workspace = true, features = [
+    "console",
+    "Window",
+    "Document",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "DomRect",
+    "CssStyleDeclaration",
+] }
 glam = { workspace = true }
 log = { workspace = true }
 console_log = { workspace = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[features]
+default = ["console_error_panic_hook"]
 
