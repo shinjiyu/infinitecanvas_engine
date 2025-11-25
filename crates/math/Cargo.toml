@@ -8,4 +8,5 @@ license.workspace = true
 [dependencies]
 glam = { workspace = true }
 serde = { workspace = true }
+bytemuck = { version = "1.14", features = ["derive"] }
 

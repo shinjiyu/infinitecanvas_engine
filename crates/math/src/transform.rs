@@ -2,7 +2,7 @@
 ///!
 ///! 提供平移、缩放、旋转的组合变换
 
-use glam::{Mat3, Vec2};
+use glam::{Mat3, Mat4, Quat, Vec2};
 use serde::{Deserialize, Serialize};
 
 /// 2D 变换
@@ -67,7 +67,7 @@ impl Transform {
         self.scale *= factor;
     }
 
-    /// 转换为矩阵
+    /// 转换为 3x3 矩阵
     pub fn to_matrix(&self) -> Mat3 {
         let cos = self.rotation.cos();
         let sin = self.rotation.sin();
@@ -83,6 +83,17 @@ impl Transform {
             self.translation.y,
             1.0,
         ])
+    }
+
+    /// 转换为 4x4 矩阵（WebGPU 使用）
+    ///
+    /// 将 2D 变换嵌入到 3D 空间（Z=0 平面）
+    pub fn to_mat4(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(
+            self.scale.extend(1.0),
+            Quat::from_rotation_z(self.rotation),
+            self.translation.extend(0.0),
+        )
     }
 
     /// 变换点
