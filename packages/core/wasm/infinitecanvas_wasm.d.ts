@@ -21,6 +21,60 @@ export class InfiniteCanvas {
   free(): void;
   [Symbol.dispose](): void;
   /**
+   * 添加圆形
+   *
+   * # 参数
+   * - `x, y`: 中心点坐标
+   * - `radius`: 半径
+   * - `fill_color`: 填充颜色（可选）
+   * - `stroke_color`: 描边颜色（可选）
+   * - `stroke_width`: 描边宽度
+   *
+   * # 返回
+   * 元素 ID
+   */
+  add_circle(x: number, y: number, radius: number, fill_color: string | null | undefined, stroke_color: string | null | undefined, stroke_width: number): bigint;
+  /**
+   * 清空场景
+   */
+  clear_scene(): void;
+  /**
+   * 添加矩形
+   *
+   * # 参数
+   * - `x, y`: 中心点坐标
+   * - `width, height`: 尺寸
+   * - `fill_color`: 填充颜色（可选，如 "#ff0000"）
+   * - `stroke_color`: 描边颜色（可选）
+   * - `stroke_width`: 描边宽度
+   *
+   * # 返回
+   * 元素 ID
+   */
+  add_rectangle(x: number, y: number, width: number, height: number, fill_color: string | null | undefined, stroke_color: string | null | undefined, stroke_width: number): bigint;
+  /**
+   * 删除元素
+   *
+   * # 参数
+   * - `id`: 元素 ID
+   *
+   * # 返回
+   * 是否成功删除
+   */
+  remove_element(id: bigint): boolean;
+  /**
+   * 获取元素数量
+   */
+  get_element_count(): number;
+  /**
+   * 获取视口中心 X
+   */
+  get_viewport_center_x(): number;
+  /**
+   * 获取视口中心 Y
+   */
+  get_viewport_center_y(): number;
+  /**
    * 创建新的画布实例
    *
    * # 返回
@@ -28,6 +82,13 @@ export class InfiniteCanvas {
    * - `Err(JsValue)`: 初始化失败
    */
   constructor();
+  /**
+   * 平移视口
+   *
+   * # 参数
+   * - `dx, dy`: 移动量（世界坐标）
+   */
+  pan(dx: number, dy: number): void;
   /**
    * 初始化画布
    *
@@ -55,6 +116,18 @@ export class InfiniteCanvas {
    * - `Err(JsValue)`: 渲染失败
    */
   render(): void;
+  /**
+   * 缩放视口
+   *
+   * # 参数
+   * - `anchor_x, anchor_y`: 缩放中心点（屏幕坐标）
+   * - `delta_zoom`: 缩放倍数（例如 1.1 放大 10%）
+   */
+  zoom_at(anchor_x: number, anchor_y: number, delta_zoom: number): void;
+  /**
+   * 获取视口缩放
+   */
+  get_zoom(): number;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -62,11 +135,21 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly __wbg_infinitecanvas_free: (a: number, b: number) => void;
+  readonly infinitecanvas_add_circle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
+  readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
+  readonly infinitecanvas_clear_scene: (a: number) => void;
+  readonly infinitecanvas_get_element_count: (a: number) => number;
+  readonly infinitecanvas_get_viewport_center_x: (a: number) => number;
+  readonly infinitecanvas_get_viewport_center_y: (a: number) => number;
+  readonly infinitecanvas_get_zoom: (a: number) => number;
   readonly infinitecanvas_height: (a: number) => number;
   readonly infinitecanvas_init: (a: number, b: any) => [number, number];
   readonly infinitecanvas_new: () => [number, number, number];
+  readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
+  readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
   readonly infinitecanvas_render: (a: number) => [number, number];
   readonly infinitecanvas_width: (a: number) => number;
+  readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;

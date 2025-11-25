@@ -253,5 +253,152 @@ impl InfiniteCanvas {
     pub fn height(&self) -> u32 {
         self.canvas_ctx.as_ref().map(|c| c.height()).unwrap_or(0)
     }
+
+    // ========== 场景管理 API ==========
+
+    /// 添加矩形
+    ///
+    /// # 参数
+    /// - `x, y`: 中心点坐标
+    /// - `width, height`: 尺寸
+    /// - `fill_color`: 填充颜色（可选，如 "#ff0000"）
+    /// - `stroke_color`: 描边颜色（可选）
+    /// - `stroke_width`: 描边宽度
+    ///
+    /// # 返回
+    /// 元素 ID
+    #[wasm_bindgen]
+    pub fn add_rectangle(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        fill_color: Option<String>,
+        stroke_color: Option<String>,
+        stroke_width: f32,
+    ) -> u64 {
+        let id = self.scene.next_id();
+        let mut style = ElementStyle::new();
+        style.fill = fill_color;
+        style.stroke = stroke_color;
+        style.stroke_width = stroke_width;
+
+        let rect = Rectangle::new(id, Vec2::new(x, y), Vec2::new(width, height)).with_style(style);
+        self.scene.add_rect(rect);
+
+        log::info!("Added rectangle {} at ({}, {})", id, x, y);
+        id
+    }
+
+    /// 添加圆形
+    ///
+    /// # 参数
+    /// - `x, y`: 中心点坐标
+    /// - `radius`: 半径
+    /// - `fill_color`: 填充颜色（可选）
+    /// - `stroke_color`: 描边颜色（可选）
+    /// - `stroke_width`: 描边宽度
+    ///
+    /// # 返回
+    /// 元素 ID
+    #[wasm_bindgen]
+    pub fn add_circle(
+        &mut self,
+        x: f32,
+        y: f32,
+        radius: f32,
+        fill_color: Option<String>,
+        stroke_color: Option<String>,
+        stroke_width: f32,
+    ) -> u64 {
+        let id = self.scene.next_id();
+        let mut style = ElementStyle::new();
+        style.fill = fill_color;
+        style.stroke = stroke_color;
+        style.stroke_width = stroke_width;
+
+        let circle = Circle::new(id, Vec2::new(x, y), radius).with_style(style);
+        self.scene.add_circle(circle);
+
+        log::info!("Added circle {} at ({}, {})", id, x, y);
+        id
+    }
+
+    /// 删除元素
+    ///
+    /// # 参数
+    /// - `id`: 元素 ID
+    ///
+    /// # 返回
+    /// 是否成功删除
+    #[wasm_bindgen]
+    pub fn remove_element(&mut self, id: u64) -> bool {
+        let removed = self.scene.remove(id).is_some();
+        if removed {
+            log::info!("Removed element {}", id);
+        }
+        removed
+    }
+
+    /// 清空场景
+    #[wasm_bindgen]
+    pub fn clear_scene(&mut self) {
+        self.scene.clear();
+        log::info!("Scene cleared");
+    }
+
+    /// 获取元素数量
+    #[wasm_bindgen]
+    pub fn get_element_count(&self) -> usize {
+        self.scene.count()
+    }
+
+    // ========== 视口操作 API ==========
+
+    /// 平移视口
+    ///
+    /// # 参数
+    /// - `dx, dy`: 移动量（世界坐标）
+    #[wasm_bindgen]
+    pub fn pan(&mut self, dx: f32, dy: f32) {
+        self.viewport.translate(Vec2::new(dx, dy));
+        log::debug!("Viewport panned by ({}, {})", dx, dy);
+    }
+
+    /// 缩放视口
+    ///
+    /// # 参数
+    /// - `anchor_x, anchor_y`: 缩放中心点（屏幕坐标）
+    /// - `delta_zoom`: 缩放倍数（例如 1.1 放大 10%）
+    #[wasm_bindgen]
+    pub fn zoom_at(&mut self, anchor_x: f32, anchor_y: f32, delta_zoom: f32) {
+        self.viewport
+            .zoom_at(Vec2::new(anchor_x, anchor_y), delta_zoom);
+        log::debug!(
+            "Viewport zoomed at ({}, {}) by {}",
+            anchor_x,
+            anchor_y,
+            delta_zoom
+        );
+    }
+
+    /// 获取视口缩放
+    #[wasm_bindgen]
+    pub fn get_zoom(&self) -> f32 {
+        self.viewport.zoom()
+    }
+
+    /// 获取视口中心 X
+    #[wasm_bindgen]
+    pub fn get_viewport_center_x(&self) -> f32 {
+        self.viewport.center().x
+    }
+
+    /// 获取视口中心 Y
+    #[wasm_bindgen]
+    pub fn get_viewport_center_y(&self) -> f32 {
+        self.viewport.center().y
+    }
 }
 

@@ -217,6 +217,108 @@ export class InfiniteCanvas {
         wasm.__wbg_infinitecanvas_free(ptr, 0);
     }
     /**
+     * 添加圆形
+     *
+     * # 参数
+     * - `x, y`: 中心点坐标
+     * - `radius`: 半径
+     * - `fill_color`: 填充颜色（可选）
+     * - `stroke_color`: 描边颜色（可选）
+     * - `stroke_width`: 描边宽度
+     *
+     * # 返回
+     * 元素 ID
+     * @param {number} x
+     * @param {number} y
+     * @param {number} radius
+     * @param {string | null | undefined} fill_color
+     * @param {string | null | undefined} stroke_color
+     * @param {number} stroke_width
+     * @returns {bigint}
+     */
+    add_circle(x, y, radius, fill_color, stroke_color, stroke_width) {
+        var ptr0 = isLikeNone(fill_color) ? 0 : passStringToWasm0(fill_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(stroke_color) ? 0 : passStringToWasm0(stroke_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_add_circle(this.__wbg_ptr, x, y, radius, ptr0, len0, ptr1, len1, stroke_width);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * 清空场景
+     */
+    clear_scene() {
+        wasm.infinitecanvas_clear_scene(this.__wbg_ptr);
+    }
+    /**
+     * 添加矩形
+     *
+     * # 参数
+     * - `x, y`: 中心点坐标
+     * - `width, height`: 尺寸
+     * - `fill_color`: 填充颜色（可选，如 "#ff0000"）
+     * - `stroke_color`: 描边颜色（可选）
+     * - `stroke_width`: 描边宽度
+     *
+     * # 返回
+     * 元素 ID
+     * @param {number} x
+     * @param {number} y
+     * @param {number} width
+     * @param {number} height
+     * @param {string | null | undefined} fill_color
+     * @param {string | null | undefined} stroke_color
+     * @param {number} stroke_width
+     * @returns {bigint}
+     */
+    add_rectangle(x, y, width, height, fill_color, stroke_color, stroke_width) {
+        var ptr0 = isLikeNone(fill_color) ? 0 : passStringToWasm0(fill_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(stroke_color) ? 0 : passStringToWasm0(stroke_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_add_rectangle(this.__wbg_ptr, x, y, width, height, ptr0, len0, ptr1, len1, stroke_width);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * 删除元素
+     *
+     * # 参数
+     * - `id`: 元素 ID
+     *
+     * # 返回
+     * 是否成功删除
+     * @param {bigint} id
+     * @returns {boolean}
+     */
+    remove_element(id) {
+        const ret = wasm.infinitecanvas_remove_element(this.__wbg_ptr, id);
+        return ret !== 0;
+    }
+    /**
+     * 获取元素数量
+     * @returns {number}
+     */
+    get_element_count() {
+        const ret = wasm.infinitecanvas_get_element_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * 获取视口中心 X
+     * @returns {number}
+     */
+    get_viewport_center_x() {
+        const ret = wasm.infinitecanvas_get_viewport_center_x(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * 获取视口中心 Y
+     * @returns {number}
+     */
+    get_viewport_center_y() {
+        const ret = wasm.infinitecanvas_get_viewport_center_y(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 创建新的画布实例
      *
      * # 返回
@@ -231,6 +333,17 @@ export class InfiniteCanvas {
         this.__wbg_ptr = ret[0] >>> 0;
         InfiniteCanvasFinalization.register(this, this.__wbg_ptr, this);
         return this;
+    }
+    /**
+     * 平移视口
+     *
+     * # 参数
+     * - `dx, dy`: 移动量（世界坐标）
+     * @param {number} dx
+     * @param {number} dy
+     */
+    pan(dx, dy) {
+        wasm.infinitecanvas_pan(this.__wbg_ptr, dx, dy);
     }
     /**
      * 初始化画布
@@ -277,6 +390,27 @@ export class InfiniteCanvas {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
+    }
+    /**
+     * 缩放视口
+     *
+     * # 参数
+     * - `anchor_x, anchor_y`: 缩放中心点（屏幕坐标）
+     * - `delta_zoom`: 缩放倍数（例如 1.1 放大 10%）
+     * @param {number} anchor_x
+     * @param {number} anchor_y
+     * @param {number} delta_zoom
+     */
+    zoom_at(anchor_x, anchor_y, delta_zoom) {
+        wasm.infinitecanvas_zoom_at(this.__wbg_ptr, anchor_x, anchor_y, delta_zoom);
+    }
+    /**
+     * 获取视口缩放
+     * @returns {number}
+     */
+    get_zoom() {
+        const ret = wasm.infinitecanvas_get_zoom(this.__wbg_ptr);
+        return ret;
     }
 }
 if (Symbol.dispose) InfiniteCanvas.prototype[Symbol.dispose] = InfiniteCanvas.prototype.free;
