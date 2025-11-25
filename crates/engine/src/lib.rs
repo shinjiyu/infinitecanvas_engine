@@ -3,6 +3,7 @@
 //! 提供高性能无限画布的核心渲染能力。
 //!
 //! # 模块职责
+//! - 元素定义和管理
 //! - 渲染管理和批处理
 //! - 视口管理和坐标变换
 //! - 场景图和空间索引
@@ -16,9 +17,11 @@
 //! infinitecanvas-math (数学库)
 //! ```
 
+pub mod element;
 pub mod viewport;
 
-// 重导出 math 库
+// 重导出核心类型
+pub use element::{Circle, Element, ElementId, ElementProps, ElementStyle, Rectangle};
 pub use infinitecanvas_math as math;
 pub use viewport::Viewport;
 
