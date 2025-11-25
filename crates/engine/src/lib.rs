@@ -1,11 +1,11 @@
 //! InfiniteCanvas Engine - Core rendering engine
 //!
-//! 提供高性能无限画布的核心渲染能力，基于 WebGPU 实现。
+//! 提供高性能无限画布的核心渲染能力。
 //!
 //! # 模块职责
-//! - WebGPU 设备和渲染管线管理
+//! - 渲染管理和批处理
+//! - 视口管理和坐标变换
 //! - 场景图和空间索引
-//! - 批量渲染优化
 //!
 //! # 模块关系
 //! ```text
@@ -16,10 +16,15 @@
 //! infinitecanvas-math (数学库)
 //! ```
 
-/// 渲染器，负责 WebGPU 初始化和渲染循环控制
+pub mod viewport;
+
+// 重导出 math 库
+pub use infinitecanvas_math as math;
+pub use viewport::Viewport;
+
+/// 渲染器，负责渲染循环控制
 ///
 /// # 职责
-/// - 初始化 WebGPU 设备、队列、Surface
 /// - 管理渲染管线和资源
 /// - 执行每帧渲染
 ///
