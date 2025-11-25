@@ -9,9 +9,14 @@
 //!
 //! # 核心类型
 //! - `Vec2`: 2D 向量（位置、速度）
-//! - `Mat3`: 3x3 变换矩阵（平移、旋转、缩放）
-//! - `Affine2`: 仿射变换
+//! - `Transform`: 2D 变换（平移、旋转、缩放）
+//! - `Rect`: 矩形（边界框）
 
-// 重导出 glam 的所有类型
-pub use glam::*;
+mod rect;
+mod transform;
+
+// 重导出核心类型
+pub use glam::{vec2, Mat3, Vec2, Vec3, Vec4};
+pub use rect::Rect;
+pub use transform::Transform;
 
