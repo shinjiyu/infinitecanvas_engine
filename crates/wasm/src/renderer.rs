@@ -5,19 +5,32 @@
 use infinitecanvas_engine::{math::Vertex, AnyElement, Scene, Viewport};
 use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
+use std::sync::Arc;
+use crate::texture_manager::TextureManager;
 
 /// WebGPU 渲染器
 pub struct WebGPURenderer {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
+    
+    // 基础渲染管线（纯色）
     fill_pipeline: wgpu::RenderPipeline,
     stroke_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     vertex_buffer_size: usize,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
+    
+    // 纹理渲染管线
+    texture_pipeline: wgpu::RenderPipeline,
+    texture_sampler: wgpu::Sampler,
+    texture_manager: TextureManager,
+    
+    // 占位纹理（用于无纹理绑定时）
+    placeholder_texture: wgpu::Texture,
+    placeholder_texture_view: wgpu::TextureView,
 }
 
 impl WebGPURenderer {
@@ -247,11 +260,172 @@ impl WebGPURenderer {
             mapped_at_creation: false,
         });
 
-        log::info!("WebGPU renderer initialized successfully");
+        // 13. 创建纹理采样器
+        let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Texture Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,    // 放大时线性插值
+            min_filter: wgpu::FilterMode::Linear,    // 缩小时线性插值
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // 14. 创建占位纹理（1x1 白色纹理，用于无纹理绑定时）
+        let placeholder_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Placeholder Texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // 上传白色像素到占位纹理
+        queue.write_texture(
+            placeholder_texture.as_image_copy(),
+            &[255u8, 255, 255, 255], // RGBA 白色
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let placeholder_texture_view = placeholder_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // 15. 创建纹理 BindGroup 布局
+        let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Texture Bind Group Layout"),
+            entries: &[
+                // Uniform buffer (transform)
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                // Sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        // 16. 加载纹理 Shader
+        let texture_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Texture Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/textured.wgsl").into()),
+        });
+
+        // 17. 创建纹理渲染管线
+        let texture_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Texture Pipeline Layout"),
+            bind_group_layouts: &[&texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let texture_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Texture Pipeline"),
+            layout: Some(&texture_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &texture_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        // position
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                        // color
+                        wgpu::VertexAttribute {
+                            offset: 8,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x4,
+                        },
+                        // uv (新增)
+                        wgpu::VertexAttribute {
+                            offset: 24,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &texture_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        // 18. 创建纹理管理器
+        let device_arc = Arc::new(device);
+        let queue_arc = Arc::new(queue);
+        let texture_manager = TextureManager::new(device_arc.clone(), queue_arc.clone());
+
+        log::info!("WebGPU renderer initialized successfully (with texture support)");
 
         Ok(Self {
-            device,
-            queue,
+            device: device_arc,
+            queue: queue_arc,
             surface,
             surface_config,
             fill_pipeline,
@@ -260,6 +434,11 @@ impl WebGPURenderer {
             vertex_buffer_size,
             uniform_buffer,
             uniform_bind_group,
+            texture_pipeline,
+            texture_sampler,
+            texture_manager,
+            placeholder_texture,
+            placeholder_texture_view,
         })
     }
 
