@@ -5,7 +5,7 @@
 /// - 旋转和缩放变换
 /// - UV 裁剪（显示纹理的一部分）
 /// - 透明度（通过 alpha）
-use infinitecanvas_math::{Rect, Transform, Vec2};
+use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 
 use crate::element::{Element, ElementId, ElementProps};
 
@@ -161,6 +161,47 @@ impl Image {
         // TODO: 处理旋转的情况（需要计算旋转后的 AABB）
         Rect::new(pos.x, pos.y, size.x, size.y)
     }
+
+    /// 生成纹理顶点（6个顶点 = 2个三角形）
+    /// 
+    /// # 返回
+    /// 
+    /// 顶点数组，包含位置、颜色（用于 tint）和 UV 坐标
+    /// 
+    /// # 布局
+    /// 
+    /// ```text
+    /// v0 ---- v1
+    /// |     / |
+    /// |   /   |
+    /// | /     |
+    /// v2 ---- v3
+    /// 
+    /// Triangle 1: v0, v2, v1
+    /// Triangle 2: v1, v2, v3
+    /// ```
+    pub fn generate_vertices(&self) -> Vec<Vertex> {
+        let pos = self.props.transform.translation;
+        let size = self.size;
+        
+        // 计算 UV 坐标（考虑可选的裁剪）
+        let (uv_min, uv_max) = self.get_uv_coords();
+        
+        // 顶点颜色（用于 tint 着色和透明度）
+        let color = Color::new(1.0, 1.0, 1.0, self.alpha);
+        
+        // 4个角的顶点
+        let v0 = Vertex::with_uv(pos.x, pos.y, color, uv_min.0, uv_min.1);                           // 左上
+        let v1 = Vertex::with_uv(pos.x + size.x, pos.y, color, uv_max.0, uv_min.1);                 // 右上
+        let v2 = Vertex::with_uv(pos.x, pos.y + size.y, color, uv_min.0, uv_max.1);                 // 左下
+        let v3 = Vertex::with_uv(pos.x + size.x, pos.y + size.y, color, uv_max.0, uv_max.1);       // 右下
+        
+        // 两个三角形（逆时针绕序）
+        vec![
+            v0, v2, v1,  // 第一个三角形
+            v1, v2, v3,  // 第二个三角形
+        ]
+    }
 }
 
 impl Element for Image {
@@ -243,6 +284,53 @@ mod tests {
         assert_eq!(bounds.y, 20.0);
         assert_eq!(bounds.width, 100.0);
         assert_eq!(bounds.height, 50.0);
+    }
+
+    #[test]
+    fn test_generate_vertices() {
+        let img = Image::new(1, Vec2::new(100.0, 100.0), Vec2::new(200.0, 100.0), "test".to_string());
+        let vertices = img.generate_vertices();
+        
+        // 应该生成 6 个顶点（2 个三角形）
+        assert_eq!(vertices.len(), 6);
+        
+        // 检查第一个顶点（左上角）
+        assert_eq!(vertices[0].position, [100.0, 100.0]);
+        assert_eq!(vertices[0].uv, [0.0, 0.0]);
+        
+        // 检查右下角顶点
+        assert_eq!(vertices[5].position, [300.0, 200.0]);
+        assert_eq!(vertices[5].uv, [1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_generate_vertices_with_uv_crop() {
+        let uv_rect = Rect::new(0.25, 0.25, 0.5, 0.5);
+        let img = Image::with_uv_crop(
+            1,
+            Vec2::ZERO,
+            Vec2::new(100.0, 100.0),
+            "test".to_string(),
+            uv_rect,
+        );
+        let vertices = img.generate_vertices();
+        
+        // UV 坐标应该被裁剪
+        assert_eq!(vertices[0].uv, [0.25, 0.25]);  // 左上
+        assert_eq!(vertices[5].uv, [0.75, 0.75]);  // 右下
+    }
+
+    #[test]
+    fn test_generate_vertices_alpha() {
+        let mut img = Image::new(1, Vec2::ZERO, Vec2::new(100.0, 100.0), "test".to_string());
+        img.set_alpha(0.5);
+        
+        let vertices = img.generate_vertices();
+        
+        // 所有顶点的 alpha 应该是 0.5
+        for v in &vertices {
+            assert_eq!(v.color[3], 0.5);
+        }
     }
 
     #[test]

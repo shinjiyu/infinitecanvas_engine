@@ -222,6 +222,10 @@ impl InfiniteCanvas {
         match element {
             AnyElement::Rectangle(rect) => self.render_rectangle(ctx, rect),
             AnyElement::Circle(circle) => self.render_circle(ctx, circle),
+            AnyElement::Image(_image) => {
+                // Image 元素不支持 Canvas 2D 渲染（仅 WebGPU）
+                log::warn!("Canvas 2D does not support Image elements, use WebGPU");
+            }
         }
     }
     

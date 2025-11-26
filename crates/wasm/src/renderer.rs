@@ -589,6 +589,10 @@ impl WebGPURenderer {
                     fill_vertices.extend(circle.generate_fill_vertices());
                     stroke_vertices.extend(circle.generate_stroke_vertices());
                 }
+                AnyElement::Image(_image) => {
+                    // Image 元素使用独立的纹理渲染管线，不在这里收集
+                    // TODO: 实现 collect_textured_vertices()
+                }
             }
         }
 
