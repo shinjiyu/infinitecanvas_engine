@@ -268,8 +268,11 @@ impl WebGPURenderer {
         // 1. 收集所有顶点
         let (fill_vertices, stroke_vertices) = self.collect_vertices(scene);
         let total_vertices = fill_vertices.len() + stroke_vertices.len();
+        
+        log::warn!("🎨 Collected {} fill vertices, {} stroke vertices", fill_vertices.len(), stroke_vertices.len());
 
         if total_vertices == 0 {
+            log::warn!("⚠️ No vertices to render");
             return Ok(());
         }
 
