@@ -134,11 +134,21 @@ impl TextureManager {
         });
 
         // 上传数据到 GPU
-        // TODO: 修复 wgpu 27 API 兼容性问题
-        // 当前需要查找 write_texture 在 wgpu 27 中的正确使用方式
-        // 临时使用占位实现
-        log::warn!("Texture data upload not yet implemented for wgpu 27");
-        // self.queue.write_texture(...) - pending wgpu 27 API resolution
+        // wgpu 27 API: write_texture(texture_info, data, data_layout, size)
+        self.queue.write_texture(
+            texture.as_image_copy(),
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
 
         // 创建纹理视图
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
