@@ -4,8 +4,7 @@
  * WASM 主接口，提供无限画布的所有功能
  *
  * # 职责
- * - 初始化渲染引擎
- * - 管理 Canvas 上下文
+ * - 初始化 WebGPU 渲染引擎
  * - 管理场景和视口
  * - 接收并处理 JavaScript 事件
  * - 管理渲染循环
@@ -107,7 +106,7 @@ export class InfiniteCanvas {
    */
   get_viewport_center_y(): number;
   /**
-   * 创建新的画布实例
+   * 创建新的画布实例（构造器，实际初始化在 init() 中完成）
    *
    * # 返回
    * - `Ok(InfiniteCanvas)`: 成功创建
@@ -122,31 +121,31 @@ export class InfiniteCanvas {
    */
   pan(dx: number, dy: number): void;
   /**
-   * 初始化画布
+   * 初始化画布（异步，因为 WebGPU 初始化需要异步）
    *
    * # 参数
    * - `canvas`: HTMLCanvasElement
    *
    * # 返回
-   * - `Ok(())`: 初始化成功
-   * - `Err(JsValue)`: Canvas 无效或初始化失败
-   * 初始化（异步）
+   * - `Ok(())`: WebGPU 初始化成功
+   * - `Err(JsValue)`: WebGPU 不可用或初始化失败
    */
   init(canvas: HTMLCanvasElement): Promise<void>;
   /**
-   * 获取 Canvas 宽度
+   * 清空场景中所有元素
+   *
+   * # JavaScript 示例
+   * ```js
+   * canvas.clear(); // 清空所有元素
+   * ```
    */
-  width(): number;
-  /**
-   * 获取 Canvas 高度
-   */
-  height(): number;
+  clear(): void;
   /**
    * 渲染一帧
    *
    * # 返回
    * - `Ok(())`: 渲染成功
-   * - `Err(JsValue)`: 渲染失败
+   * - `Err(JsValue)`: 渲染失败（渲染器未初始化）
    */
   render(): void;
   /**
@@ -192,12 +191,12 @@ export interface InitOutput {
   readonly infinitecanvas_add_circle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
   readonly infinitecanvas_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
   readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
+  readonly infinitecanvas_clear: (a: number) => void;
   readonly infinitecanvas_clear_scene: (a: number) => void;
   readonly infinitecanvas_get_element_count: (a: number) => number;
   readonly infinitecanvas_get_viewport_center_x: (a: number) => number;
   readonly infinitecanvas_get_viewport_center_y: (a: number) => number;
   readonly infinitecanvas_get_zoom: (a: number) => number;
-  readonly infinitecanvas_height: (a: number) => number;
   readonly infinitecanvas_init: (a: number, b: any) => any;
   readonly infinitecanvas_new: () => [number, number, number];
   readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
@@ -205,7 +204,6 @@ export interface InitOutput {
   readonly infinitecanvas_render: (a: number) => [number, number];
   readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
   readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
-  readonly infinitecanvas_width: (a: number) => number;
   readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__hac03de89d7fe1ed3: (a: number, b: number, c: any) => void;
   readonly wasm_bindgen__closure__destroy__heb574fdda24d5f04: (a: number, b: number) => void;

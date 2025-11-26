@@ -18,18 +18,15 @@ mod texture_manager;
 
 use infinitecanvas_engine::{
     math::{Color, Vec2},
-    AnyElement, Circle, Element, ElementStyle, Image, Rectangle, Scene, Viewport,
+    AnyElement, Circle, ElementStyle, Image, Rectangle, Scene, Viewport,
 };
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
-use canvas::CanvasContext;
 use renderer::WebGPURenderer;
 
 /// WASM 主接口，提供无限画布的所有功能
 ///
 /// # 职责
-/// - 初始化渲染引擎
-/// - 管理 Canvas 上下文
+/// - 初始化 WebGPU 渲染引擎
 /// - 管理场景和视口
 /// - 接收并处理 JavaScript 事件
 /// - 管理渲染循环
@@ -42,17 +39,15 @@ use renderer::WebGPURenderer;
 /// ```
 #[wasm_bindgen]
 pub struct InfiniteCanvas {
-    canvas_ctx: Option<CanvasContext>,
     webgpu_renderer: Option<WebGPURenderer>,
     scene: Scene,
     viewport: Viewport,
     engine: infinitecanvas_engine::Renderer,
-    use_webgpu: bool,
 }
 
 #[wasm_bindgen]
 impl InfiniteCanvas {
-    /// 创建新的画布实例
+    /// 创建新的画布实例（构造器，实际初始化在 init() 中完成）
     ///
     /// # 返回
     /// - `Ok(InfiniteCanvas)`: 成功创建
@@ -70,27 +65,24 @@ impl InfiniteCanvas {
         log::info!("InfiniteCanvas WASM module initialized");
         
         Ok(InfiniteCanvas {
-            canvas_ctx: None,
             webgpu_renderer: None,
             scene: Scene::new(),
             viewport: Viewport::default(),
             engine: infinitecanvas_engine::Renderer::new(),
-            use_webgpu: true, // ✅ 升级到 wgpu 27 解决了兼容性问题
         })
     }
     
-    /// 初始化画布
+    /// 初始化画布（异步，因为 WebGPU 初始化需要异步）
     ///
     /// # 参数
     /// - `canvas`: HTMLCanvasElement
     ///
     /// # 返回
-    /// - `Ok(())`: 初始化成功
-    /// - `Err(JsValue)`: Canvas 无效或初始化失败
-    /// 初始化（异步）
+    /// - `Ok(())`: WebGPU 初始化成功
+    /// - `Err(JsValue)`: WebGPU 不可用或初始化失败
     #[wasm_bindgen]
     pub async fn init(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
-        log::info!("Initializing InfiniteCanvas...");
+        log::info!("Initializing InfiniteCanvas with WebGPU...");
         
         let width = canvas.width();
         let height = canvas.height();
@@ -98,30 +90,17 @@ impl InfiniteCanvas {
         // 更新视口尺寸
         self.viewport.resize(Vec2::new(width as f32, height as f32));
         
-        // 尝试初始化 WebGPU
-        if self.use_webgpu {
-            match WebGPURenderer::new(canvas.clone(), width, height).await {
-                Ok(renderer) => {
-                    log::info!("WebGPU renderer initialized successfully");
-                    self.webgpu_renderer = Some(renderer);
-                }
-                Err(e) => {
-                    log::warn!("WebGPU initialization failed: {:?}, falling back to Canvas 2D", e);
-                    self.use_webgpu = false;
-                    let canvas_ctx = CanvasContext::new(canvas)?;
-                    self.canvas_ctx = Some(canvas_ctx);
-                }
-            }
-        } else {
-            // 使用 Canvas 2D
-            let canvas_ctx = CanvasContext::new(canvas)?;
-            self.canvas_ctx = Some(canvas_ctx);
-        }
+        // 初始化 WebGPU（不再有 Canvas 2D 后备方案）
+        let renderer = WebGPURenderer::new(canvas, width, height).await
+            .map_err(|e| JsValue::from_str(&format!("WebGPU initialization failed: {:?}. Please use a browser that supports WebGPU.", e)))?;
+        
+        log::info!("✅ WebGPU renderer initialized successfully");
+        self.webgpu_renderer = Some(renderer);
         
         // 初始化测试场景
         self.init_test_scene();
         
-        log::info!("InfiniteCanvas initialization complete (WebGPU: {})", self.use_webgpu);
+        log::info!("✅ InfiniteCanvas initialization complete");
         Ok(())
     }
     
@@ -156,138 +135,17 @@ impl InfiniteCanvas {
     ///
     /// # 返回
     /// - `Ok(())`: 渲染成功
-    /// - `Err(JsValue)`: 渲染失败
+    /// - `Err(JsValue)`: 渲染失败（渲染器未初始化）
     #[wasm_bindgen]
     pub fn render(&mut self) -> Result<(), JsValue> {
-        if self.use_webgpu {
-            // 使用 WebGPU 渲染
-            if let Some(renderer) = &mut self.webgpu_renderer {
-                renderer.render(&self.scene, &self.viewport)?;
-            } else {
-                return Err(JsValue::from_str("WebGPU renderer not initialized"));
-            }
+        if let Some(renderer) = &mut self.webgpu_renderer {
+            renderer.render(&self.scene, &self.viewport)?;
+            Ok(())
         } else {
-            // 使用 Canvas 2D 渲染
-            if let Some(ctx) = &self.canvas_ctx {
-                ctx.clear();
-                self.render_grid(ctx);
-                self.render_scene(ctx);
-            } else {
-                return Err(JsValue::from_str("Canvas not initialized. Call init() first."));
-            }
-        }
-        Ok(())
-    }
-
-    /// 渲染背景网格
-    fn render_grid(&self, ctx: &CanvasContext) {
-        let width = ctx.width() as f32;
-        let height = ctx.height() as f32;
-        let grid_size = 20.0; // 网格大小
-        let grid_color = "#e5e7eb"; // 浅灰色
-
-        // 绘制垂直线
-        let mut x = 0.0;
-        while x <= width {
-            ctx.draw_line(x, 0.0, x, height, grid_color, 1.0);
-            x += grid_size;
-        }
-
-        // 绘制水平线
-        let mut y = 0.0;
-        while y <= height {
-            ctx.draw_line(0.0, y, width, y, grid_color, 1.0);
-            y += grid_size;
+            Err(JsValue::from_str("WebGPU renderer not initialized. Call init() first."))
         }
     }
 
-    /// 渲染场景
-    fn render_scene(&self, ctx: &CanvasContext) {
-        // 获取所有元素（按 z-index 排序）
-        let elements = self.scene.elements_sorted();
-        
-        for element in elements {
-            // 视口裁剪（未来优化）
-            // if !self.viewport.is_visible(&element.as_element().world_bounds()) {
-            //     continue;
-            // }
-            
-            // 渲染元素
-            self.render_element(ctx, element);
-        }
-    }
-    
-    /// 渲染单个元素
-    fn render_element(&self, ctx: &CanvasContext, element: &AnyElement) {
-        match element {
-            AnyElement::Rectangle(rect) => self.render_rectangle(ctx, rect),
-            AnyElement::Circle(circle) => self.render_circle(ctx, circle),
-            AnyElement::Image(_image) => {
-                // Image 元素不支持 Canvas 2D 渲染（仅 WebGPU）
-                log::warn!("Canvas 2D does not support Image elements, use WebGPU");
-            }
-        }
-    }
-    
-    /// 渲染矩形
-    fn render_rectangle(&self, ctx: &CanvasContext, rect: &Rectangle) {
-        let props = rect.props();
-        if !props.visible {
-            return;
-        }
-        
-        let pos = props.transform.translation;
-        let size = rect.size();
-        
-        // 计算左上角坐标
-        let x = pos.x - size.x / 2.0;
-        let y = pos.y - size.y / 2.0;
-        
-        // 填充
-        if let Some(fill) = &rect.style.fill {
-            ctx.fill_rect(x, y, size.x, size.y, &fill.to_hex());
-        }
-        
-        // 描边
-        if let Some(stroke) = &rect.style.stroke {
-            ctx.stroke_rect(x, y, size.x, size.y, &stroke.to_hex(), rect.style.stroke_width);
-        }
-    }
-    
-    /// 渲染圆形
-    fn render_circle(&self, ctx: &CanvasContext, circle: &Circle) {
-        let props = circle.props();
-        if !props.visible {
-            return;
-        }
-        
-        let pos = props.transform.translation;
-        let radius = circle.radius();
-        
-        let fill_hex = circle.style.fill.map(|c| c.to_hex());
-        let stroke_hex = circle.style.stroke.map(|c| c.to_hex());
-        
-        ctx.draw_circle(
-            pos.x,
-            pos.y,
-            radius,
-            fill_hex.as_deref(),
-            stroke_hex.as_deref(),
-            circle.style.stroke_width,
-        );
-    }
-    
-    /// 获取 Canvas 宽度
-    #[wasm_bindgen]
-    pub fn width(&self) -> u32 {
-        self.canvas_ctx.as_ref().map(|c| c.width()).unwrap_or(0)
-    }
-    
-    /// 获取 Canvas 高度
-    #[wasm_bindgen]
-    pub fn height(&self) -> u32 {
-        self.canvas_ctx.as_ref().map(|c| c.height()).unwrap_or(0)
-    }
 
     // ========== 场景管理 API ==========
 
@@ -421,14 +279,10 @@ impl InfiniteCanvas {
         height: u32,
         data: &[u8],
     ) -> Result<(), JsValue> {
-        if !self.use_webgpu {
-            return Err(JsValue::from_str("Texture upload requires WebGPU renderer"));
-        }
-
         let renderer = self
             .webgpu_renderer
             .as_mut()
-            .ok_or_else(|| JsValue::from_str("WebGPU renderer not initialized"))?;
+            .ok_or_else(|| JsValue::from_str("WebGPU renderer not initialized. Call init() first."))?;
 
         renderer
             .upload_texture(texture_id.clone(), width, height, data)
@@ -504,6 +358,19 @@ impl InfiniteCanvas {
             log::warn!("Image {} not found", image_id);
             false
         }
+    }
+
+    /// 清空场景中所有元素
+    ///
+    /// # JavaScript 示例
+    /// ```js
+    /// canvas.clear(); // 清空所有元素
+    /// ```
+    #[wasm_bindgen]
+    pub fn clear(&mut self) {
+        let count = self.scene.count();
+        self.scene.clear();
+        log::info!("Cleared scene ({} elements removed)", count);
     }
 
     // ========== 视口操作 API ==========
