@@ -3,9 +3,11 @@
 ///! 提供无限画布上的各种图形元素
 
 pub mod circle;
+pub mod image;
 pub mod rect;
 
 pub use circle::Circle;
+pub use image::Image;
 pub use rect::Rectangle;
 
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};

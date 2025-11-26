@@ -14,6 +14,7 @@
 
 mod canvas;
 mod renderer;
+mod texture_manager;
 
 use infinitecanvas_engine::{
     math::{Color, Vec2},
