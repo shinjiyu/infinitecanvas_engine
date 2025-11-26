@@ -12,6 +12,7 @@ var<uniform> uniforms: Uniforms;
 struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) uv: vec2<f32>,  // 需要声明以匹配Vertex结构体，但basic shader不使用
 }
 
 // 顶点输出 / 片元输入
@@ -30,6 +31,7 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     
     // 传递颜色
     out.color = in.color;
+    // 注意：uv 在此shader中不使用
     
     return out;
 }
@@ -39,4 +41,5 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return in.color;
 }
+
 

@@ -164,6 +164,12 @@ impl WebGPURenderer {
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x4,
                         },
+                        // uv (需要声明，即使basic.wgsl不使用，以保持正确的stride)
+                        wgpu::VertexAttribute {
+                            offset: 24,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x2,
+                        },
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -217,6 +223,12 @@ impl WebGPURenderer {
                             offset: 8,
                             shader_location: 1,
                             format: wgpu::VertexFormat::Float32x4,
+                        },
+                        // uv (需要声明，即使basic.wgsl不使用，以保持正确的stride)
+                        wgpu::VertexAttribute {
+                            offset: 24,
+                            shader_location: 2,
+                            format: wgpu::VertexFormat::Float32x2,
                         },
                     ],
                 }],

@@ -655,3 +655,4 @@ generate_mipmaps(&device, &queue, &texture);
 - [wgpu Texture Example](https://github.com/gfx-rs/wgpu/tree/trunk/examples/texture-arrays)
 - [Learn wgpu - Textures](https://sotrh.github.io/learn-wgpu/beginner/tutorial5-textures/)
 
+

@@ -449,3 +449,4 @@ let m = Mat4::from_cols_array_2d(&row_major).transpose();
 4. **单元测试矩阵** - 能提前发现布局问题
 5. **使用成熟库** - glam 等库已经处理好这些细节
 
+
