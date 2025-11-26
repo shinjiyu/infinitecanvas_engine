@@ -9,7 +9,7 @@ authors = ["Yu Zhenyu"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-wgpu = { version = "22.1", features = ["webgl"] }
+wgpu = { version = "27", features = ["webgl"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

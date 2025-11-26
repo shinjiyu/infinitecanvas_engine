@@ -74,7 +74,7 @@ impl InfiniteCanvas {
             scene: Scene::new(),
             viewport: Viewport::default(),
             engine: infinitecanvas_engine::Renderer::new(),
-            use_webgpu: false, // 暂时禁用 WebGPU（待解决 Surface 创建问题）
+            use_webgpu: true, // ✅ 升级到 wgpu 27 解决了兼容性问题
         })
     }
     

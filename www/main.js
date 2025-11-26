@@ -22,7 +22,7 @@ class InfiniteCanvas {
     
     await init();
     this.wasmInstance = new WasmCanvas();
-    this.wasmInstance.init(canvas); // 传递 canvas 元素
+    await this.wasmInstance.init(canvas); // 异步初始化 - 等待 WebGPU 准备好
     console.log('InfiniteCanvas initialized');
   }
 

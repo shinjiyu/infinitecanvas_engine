@@ -26,10 +26,7 @@ impl WebGPURenderer {
         log::info!("Initializing WebGPU renderer...");
 
         // 1. 获取 WebGPU 实例
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::BROWSER_WEBGPU,
-            ..Default::default()
-        });
+        let instance = wgpu::Instance::default();
 
         // 2. 创建 Surface（使用 wgpu::SurfaceTarget::Canvas）
         let surface = instance
@@ -44,21 +41,20 @@ impl WebGPURenderer {
                 force_fallback_adapter: false,
             })
             .await
-            .ok_or_else(|| JsValue::from_str("Failed to find an appropriate adapter"))?;
+            .map_err(|e| JsValue::from_str(&format!("Failed to find adapter: {:?}", e)))?;
 
         log::info!("Adapter created: {:?}", adapter.get_info());
 
-        // 4. 请求设备和队列
+        // 4. 请求设备和队列（wgpu 27 API）
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("InfiniteCanvas Device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
-                    memory_hints: Default::default(),
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("InfiniteCanvas Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: Default::default(),
+                experimental_features: wgpu::ExperimentalFeatures::default(),
+                trace: wgpu::Trace::default(),
+            })
             .await
             .map_err(|e| JsValue::from_str(&format!("Failed to create device: {:?}", e)))?;
 
@@ -138,7 +134,7 @@ impl WebGPURenderer {
             layout: Some(&fill_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -161,7 +157,7 @@ impl WebGPURenderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -194,7 +190,7 @@ impl WebGPURenderer {
             layout: Some(&fill_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -215,7 +211,7 @@ impl WebGPURenderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_config.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -355,6 +351,7 @@ impl WebGPURenderer {
                         }),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
