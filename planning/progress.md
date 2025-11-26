@@ -21,12 +21,12 @@
 **WebGPU 迁移进度**:
 - [x] 阶段 1: 修复核心数据结构（Color, Vertex, Mat4）
 - [x] 阶段 2: 添加顶点生成（Rectangle, Circle）
-- [x] 阶段 3: WebGPU 渲染器框架
-- [x] 阶段 4: 基础 Shader (basic.wgsl)
+- [x] 阶段 3: WebGPU 渲染器框架（已测试，60 FPS）
+- [x] 阶段 4: 基础 Shader (basic.wgsl)（已测试，矩形和圆形正常渲染）
 - [ ] 阶段 5: 图片/纹理支持
 - [ ] 阶段 6: 测试优化和 Canvas 2D 替换
 
-**状态**: 进行中（WebGPU 渲染器已实现，需要纹理支持和测试）
+**状态**: WebGPU 基础渲染已完成并测试通过，待添加纹理支持
 
 ---
 

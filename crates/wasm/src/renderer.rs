@@ -307,18 +307,26 @@ impl WebGPURenderer {
             );
         }
 
-        // 5. TODO: 更新 Uniform Buffer（视口变换矩阵）
-        // 暂时使用单位矩阵
-        let identity_matrix: [[f32; 4]; 4] = [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
+        // 5. 更新 Uniform Buffer（视口变换矩阵）
+        // 正交投影矩阵：将像素坐标 [0, width] x [0, height] 转换为 NDC [-1, 1] x [-1, 1]
+        let width = self.surface_config.width as f32;
+        let height = self.surface_config.height as f32;
+        
+        // 正交投影矩阵（列优先，WGSL 格式）
+        // 标准正交投影：(x, y) -> (2*x/width - 1, 1 - 2*y/height)
+        let projection_matrix: [[f32; 4]; 4] = [
+            [2.0 / width, 0.0, 0.0, -1.0],          // 第1列：X 变换
+            [0.0, -2.0 / height, 0.0, 1.0],         // 第2列：Y 变换（翻转）
+            [0.0, 0.0, 1.0, 0.0],                   // 第3列：Z 保持不变
+            [0.0, 0.0, 0.0, 1.0],                   // 第4列：齐次坐标
         ];
+        
+        log::warn!("📐 Projection: {}x{} -> NDC", width, height);
+        
         self.queue.write_buffer(
             &self.uniform_buffer,
             0,
-            bytemuck::cast_slice(&identity_matrix),
+            bytemuck::cast_slice(&projection_matrix),
         );
 
         // 6. 获取当前帧
