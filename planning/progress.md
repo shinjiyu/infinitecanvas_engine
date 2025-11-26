@@ -23,7 +23,7 @@
 - [x] 阶段 2: 添加顶点生成（Rectangle, Circle）
 - [x] 阶段 3: WebGPU 渲染器框架（已测试，60 FPS）
 - [x] 阶段 4: 基础 Shader (basic.wgsl)（已测试，矩形和圆形正常渲染）
-- [~] 阶段 5: 图片/纹理支持（80% 完成）
+- [x] 阶段 5: 图片/纹理支持（✅ 已完成）
   - [x] 设计架构文档
   - [x] 修复 wgpu 27 API 兼容性（write_texture）✅ 解题记录已添加
   - [x] TextureManager 完整实现
@@ -34,12 +34,12 @@
   - [x] Vertex 扩展（支持 UV 坐标）
   - [x] Image 元素类型（含顶点生成）
   - [x] AnyElement 和 Scene 更新
-  - [ ] JS 互操作接口 (upload_texture, add_image)
-  - [ ] 纹理渲染逻辑集成
-  - [ ] 测试纹理渲染
+  - [x] JS 互操作接口 (upload_texture, add_image)
+  - [x] 纹理渲染逻辑集成
+  - [x] 测试纹理渲染（✅ 60 FPS，所有测试通过）
 - [ ] 阶段 6: 测试优化和 Canvas 2D 替换
 
-**状态**: WebGPU 纹理系统核心组件已完成，待集成纹理渲染逻辑和 JS 接口
+**状态**: ✅ WebGPU 纹理系统完全实现并测试通过（60 FPS，渐变/棋盘纹理，Alpha 混合，批量渲染）
 
 ---
 
