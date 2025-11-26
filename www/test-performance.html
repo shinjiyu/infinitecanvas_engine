@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>性能测试 - Infinite Canvas Engine</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1e1e1e;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            cursor: crosshair;
+        }
+        .overlay {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 14px;
+            line-height: 1.8;
+            z-index: 1000;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            min-width: 320px;
+        }
+        .title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #60a5fa;
+        }
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .stat-label {
+            color: #9ca3af;
+        }
+        .stat-value {
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+        }
+        .stat-value.good {
+            color: #10b981;
+        }
+        .stat-value.warning {
+            color: #f59e0b;
+        }
+        .stat-value.bad {
+            color: #ef4444;
+        }
+        .controls {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        button.danger {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        #status {
+            margin-top: 12px;
+            padding: 10px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 6px;
+            border-left: 3px solid #3b82f6;
+            font-size: 12px;
+            color: #93c5fd;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="1920" height="1080"></canvas>
+    
+    <div class="overlay">
+        <div class="title">⚡ 性能测试仪表盘</div>
+        
+        <div class="stat">
+            <span class="stat-label">元素数量:</span>
+            <span id="element-count" class="stat-value">0</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">FPS:</span>
+            <span id="fps" class="stat-value">--</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">渲染时间:</span>
+            <span id="render-time" class="stat-value">-- ms</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">内存使用:</span>
+            <span id="memory" class="stat-value">-- MB</span>
+        </div>
+        <div class="stat">
+            <span class="stat-label">状态:</span>
+            <span id="engine-status" class="stat-value">初始化中...</span>
+        </div>
+        
+        <div class="controls">
+            <button onclick="addElements(100)">+ 添加 100 个元素</button>
+            <button onclick="addElements(1000)">++ 添加 1000 个元素</button>
+            <button onclick="addElements(5000)">+++ 添加 5000 个元素</button>
+            <button onclick="clearScene()" class="danger">🗑 清空场景</button>
+            <button onclick="runStressTest()">🚀 压力测试 (10K 元素)</button>
+        </div>
+        
+        <div id="status">准备就绪</div>
+    </div>
+
+    <script type="module" src="./test-performance.js"></script>
+</body>
+</html>
+

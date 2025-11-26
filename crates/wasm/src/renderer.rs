@@ -446,9 +446,14 @@ impl WebGPURenderer {
     pub fn render(&mut self, scene: &Scene, _viewport: &Viewport) -> Result<(), JsValue> {
         // 1. 收集所有顶点
         let (fill_vertices, stroke_vertices) = self.collect_vertices(scene);
-        let total_vertices = fill_vertices.len() + stroke_vertices.len();
+        let textured_groups = self.collect_textured_vertices(scene);
         
-        log::warn!("🎨 Collected {} fill vertices, {} stroke vertices", fill_vertices.len(), stroke_vertices.len());
+        // 计算总顶点数
+        let textured_vertex_count: usize = textured_groups.iter().map(|(_, v)| v.len()).sum();
+        let total_vertices = fill_vertices.len() + stroke_vertices.len() + textured_vertex_count;
+        
+        log::warn!("🎨 Collected {} fill, {} stroke, {} textured vertices", 
+            fill_vertices.len(), stroke_vertices.len(), textured_vertex_count);
 
         if total_vertices == 0 {
             log::warn!("⚠️ No vertices to render");
@@ -468,31 +473,54 @@ impl WebGPURenderer {
         }
 
         // 3. 上传填充顶点
+        let mut vertex_offset = 0;
         if !fill_vertices.is_empty() {
             self.queue.write_buffer(
                 &self.vertex_buffer,
                 0,
                 bytemuck::cast_slice(&fill_vertices),
             );
+            vertex_offset += fill_vertices.len();
         }
 
-        // 4. 上传描边顶点（偏移量）
+        // 4. 上传描边顶点
         if !stroke_vertices.is_empty() {
-            let offset = (fill_vertices.len() * std::mem::size_of::<Vertex>()) as u64;
+            let offset_bytes = (vertex_offset * std::mem::size_of::<Vertex>()) as u64;
             self.queue.write_buffer(
                 &self.vertex_buffer,
-                offset,
+                offset_bytes,
                 bytemuck::cast_slice(&stroke_vertices),
             );
+            vertex_offset += stroke_vertices.len();
         }
 
-        // 5. 更新 Uniform Buffer（视口变换矩阵）
-        // 正交投影矩阵：将像素坐标 [0, width] x [0, height] 转换为 NDC [-1, 1] x [-1, 1]
+        // 5. 上传纹理顶点（在渲染通道开始前）
+        let base_textured_vertex_offset = vertex_offset;
+        let mut textured_vertex_ranges = Vec::new();
+        
+        for (texture_id, vertices) in &textured_groups {
+            if !vertices.is_empty() {
+                let offset_bytes = (vertex_offset * std::mem::size_of::<Vertex>()) as u64;
+                self.queue.write_buffer(
+                    &self.vertex_buffer,
+                    offset_bytes,
+                    bytemuck::cast_slice(vertices),
+                );
+                
+                let start = vertex_offset as u32;
+                let end = start + vertices.len() as u32;
+                textured_vertex_ranges.push((texture_id.clone(), start..end));
+                
+                vertex_offset += vertices.len();
+                log::debug!("Uploaded {} vertices for texture '{}' at offset {}", vertices.len(), texture_id, start);
+            }
+        }
+
+        // 6. 更新 Uniform Buffer（视口变换矩阵）
         let width = self.surface_config.width as f32;
         let height = self.surface_config.height as f32;
         
         // 正交投影矩阵（列优先，WGSL 格式）
-        // 标准正交投影：(x, y) -> (2*x/width - 1, 1 - 2*y/height)
         let projection_matrix: [[f32; 4]; 4] = [
             [2.0 / width, 0.0, 0.0, -1.0],          // 第1列：X 变换
             [0.0, -2.0 / height, 0.0, 1.0],         // 第2列：Y 变换（翻转）
@@ -508,7 +536,7 @@ impl WebGPURenderer {
             bytemuck::cast_slice(&projection_matrix),
         );
 
-        // 6. 获取当前帧
+        // 7. 获取当前帧
         let frame = self
             .surface
             .get_current_texture()
@@ -518,15 +546,12 @@ impl WebGPURenderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // 7. 创建命令编码器
+        // 8. 创建命令编码器
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
-
-        // 8. 收集纹理元素
-        let textured_groups = self.collect_textured_vertices(scene);
 
         // 9. 渲染通道
         {
@@ -558,25 +583,25 @@ impl WebGPURenderer {
                 render_pass.set_pipeline(&self.fill_pipeline);
                 render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 render_pass.draw(0..fill_vertices.len() as u32, 0..1);
+                log::debug!("Drew {} fill vertices", fill_vertices.len());
             }
 
             // 绘制纯色描边
             if !stroke_vertices.is_empty() {
                 render_pass.set_pipeline(&self.stroke_pipeline);
                 render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-                render_pass.draw(
-                    fill_vertices.len() as u32..(fill_vertices.len() + stroke_vertices.len()) as u32,
-                    0..1,
-                );
+                let start = fill_vertices.len() as u32;
+                let end = start + stroke_vertices.len() as u32;
+                render_pass.draw(start..end, 0..1);
+                log::debug!("Drew {} stroke vertices", stroke_vertices.len());
             }
 
-            // 绘制纹理元素（按纹理分组）
-            if !textured_groups.is_empty() {
+            // 绘制纹理元素（所有顶点已上传）
+            if !textured_vertex_ranges.is_empty() {
                 render_pass.set_pipeline(&self.texture_pipeline);
-                let mut vertex_offset = 0u32;
-
-                for (texture_id, vertices) in &textured_groups {
-                    // 获取纹理视图（如果不存在则使用占位纹理）
+                
+                for (texture_id, range) in &textured_vertex_ranges {
+                    // 获取纹理视图
                     let texture_view = self
                         .texture_manager
                         .get_texture_view(texture_id)
@@ -602,28 +627,13 @@ impl WebGPURenderer {
                         ],
                     });
 
-                    // 上传此纹理的顶点到缓冲区
-                    if !vertices.is_empty() {
-                        let vertex_data = bytemuck::cast_slice(vertices);
-                        let offset_bytes = (vertex_offset as usize * std::mem::size_of::<Vertex>()) as u64;
-                        
-                        self.queue.write_buffer(
-                            &self.vertex_buffer,
-                            offset_bytes,
-                            vertex_data,
-                        );
-
-                        // 绑定纹理并绘制
-                        render_pass.set_bind_group(0, &texture_bind_group, &[]);
-                        render_pass.draw(vertex_offset..vertex_offset + vertices.len() as u32, 0..1);
-
-                        vertex_offset += vertices.len() as u32;
-                        
-                        log::debug!("Rendered {} vertices with texture '{}'", vertices.len(), texture_id);
-                    }
+                    // 绑定纹理并绘制
+                    render_pass.set_bind_group(0, &texture_bind_group, &[]);
+                    render_pass.draw(range.clone(), 0..1);
+                    log::debug!("Drew {} textured vertices for '{}'", range.end - range.start, texture_id);
                 }
 
-                log::info!("Rendered {} texture groups", textured_groups.len());
+                log::info!("Rendered {} texture groups", textured_vertex_ranges.len());
             }
         }
 
