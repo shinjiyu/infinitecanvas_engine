@@ -23,10 +23,17 @@
 - [x] 阶段 2: 添加顶点生成（Rectangle, Circle）
 - [x] 阶段 3: WebGPU 渲染器框架（已测试，60 FPS）
 - [x] 阶段 4: 基础 Shader (basic.wgsl)（已测试，矩形和圆形正常渲染）
-- [ ] 阶段 5: 图片/纹理支持
+- [~] 阶段 5: 图片/纹理支持（进行中）
+  - [x] 设计架构文档
+  - [x] TextureManager 基础框架
+  - [x] Image 元素类型
+  - [ ] 修复 wgpu 27 API 兼容性（write_texture）
+  - [ ] 纹理采样器 + BindGroup
+  - [ ] 纹理 Shader
+  - [ ] 测试
 - [ ] 阶段 6: 测试优化和 Canvas 2D 替换
 
-**状态**: WebGPU 基础渲染已完成并测试通过，待添加纹理支持
+**状态**: WebGPU 基础渲染已完成，纹理支持基础架构已搭建（待修复 API 兼容性）
 
 ---
 
