@@ -22,7 +22,7 @@ pub mod scene;
 pub mod viewport;
 
 // 重导出核心类型
-pub use element::{Circle, Element, ElementId, ElementProps, ElementStyle, Rectangle};
+pub use element::{Circle, Element, ElementId, ElementProps, ElementStyle, Image, Rectangle};
 pub use infinitecanvas_math as math;
 pub use scene::{AnyElement, Scene};
 pub use viewport::Viewport;

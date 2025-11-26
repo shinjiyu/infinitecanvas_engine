@@ -2,7 +2,7 @@
 ///!
 ///! 管理无限画布上的所有元素
 
-use crate::element::{Circle, Element, ElementId, Rectangle};
+use crate::element::{Circle, Element, ElementId, Image, Rectangle};
 use std::collections::HashMap;
 
 /// 元素枚举（支持不同类型元素）
@@ -10,6 +10,7 @@ use std::collections::HashMap;
 pub enum AnyElement {
     Rectangle(Rectangle),
     Circle(Circle),
+    Image(Image),
 }
 
 impl AnyElement {
@@ -18,6 +19,7 @@ impl AnyElement {
         match self {
             AnyElement::Rectangle(r) => r.props().id,
             AnyElement::Circle(c) => c.props().id,
+            AnyElement::Image(i) => i.props().id,
         }
     }
 
@@ -26,6 +28,7 @@ impl AnyElement {
         match self {
             AnyElement::Rectangle(r) => r,
             AnyElement::Circle(c) => c,
+            AnyElement::Image(i) => i,
         }
     }
 }
@@ -80,6 +83,13 @@ impl Scene {
     pub fn add_circle(&mut self, circle: Circle) -> ElementId {
         let id = circle.props().id;
         self.elements.insert(id, AnyElement::Circle(circle));
+        id
+    }
+
+    /// 添加图片元素
+    pub fn add_image(&mut self, image: Image) -> ElementId {
+        let id = image.props().id;
+        self.elements.insert(id, AnyElement::Image(image));
         id
     }
 

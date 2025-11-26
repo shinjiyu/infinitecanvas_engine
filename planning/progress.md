@@ -4,21 +4,42 @@
 
 ---
 
-## M1: 核心渲染引擎 (10/11)
+## M1: 核心渲染引擎 (10/11) - WebGPU 迁移中
 
 - [x] M1.1: Rust WASM 基础框架
 - [x] M1.2: 基础数学库
 - [x] M1.3: 视口管理器
-- [x] M1.4: Canvas 2D 渲染器
+- [x] M1.4: Canvas 2D 渲染器（临时实现）
 - [x] M1.5: 元素数据结构
 - [x] M1.6: 场景容器
 - [x] M1.7: 渲染循环
 - [x] M1.8: 背景网格
 - [x] M1.9: WASM-JS 接口
 - [x] M1.10: Web 集成测试
-- [ ] M1.11: 图片/纹理支持
+- [ ] M1.11: WebGPU 渲染器完整迁移
 
-**状态**: 进行中（需要添加纹理绘制）
+**WebGPU 迁移进度**:
+- [x] 阶段 1: 修复核心数据结构（Color, Vertex, Mat4）
+- [x] 阶段 2: 添加顶点生成（Rectangle, Circle）
+- [x] 阶段 3: WebGPU 渲染器框架（已测试，60 FPS）
+- [x] 阶段 4: 基础 Shader (basic.wgsl)（已测试，矩形和圆形正常渲染）
+- [x] 阶段 5: 图片/纹理支持（✅ 已完成）
+  - [x] 设计架构文档
+  - [x] 修复 wgpu 27 API 兼容性（write_texture）✅ 解题记录已添加
+  - [x] TextureManager 完整实现
+  - [x] 纹理采样器创建
+  - [x] 纹理 BindGroup 布局
+  - [x] 纹理 Pipeline 创建
+  - [x] 纹理 Shader (textured.wgsl)
+  - [x] Vertex 扩展（支持 UV 坐标）
+  - [x] Image 元素类型（含顶点生成）
+  - [x] AnyElement 和 Scene 更新
+  - [x] JS 互操作接口 (upload_texture, add_image)
+  - [x] 纹理渲染逻辑集成
+  - [x] 测试纹理渲染（✅ 60 FPS，所有测试通过）
+- [ ] 阶段 6: 测试优化和 Canvas 2D 替换
+
+**状态**: ✅ WebGPU 纹理系统完全实现并测试通过（60 FPS，渐变/棋盘纹理，Alpha 混合，批量渲染）
 
 ---
 

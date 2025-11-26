@@ -3,12 +3,14 @@
 ///! 提供无限画布上的各种图形元素
 
 pub mod circle;
+pub mod image;
 pub mod rect;
 
 pub use circle::Circle;
+pub use image::Image;
 pub use rect::Rectangle;
 
-use infinitecanvas_math::{Rect, Transform, Vec2};
+use infinitecanvas_math::{Color, Rect, Transform, Vec2};
 use serde::{Deserialize, Serialize};
 
 /// 元素 ID 类型
@@ -52,9 +54,9 @@ impl ElementProps {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementStyle {
     /// 填充颜色（None 表示不填充）
-    pub fill: Option<String>,
+    pub fill: Option<Color>,
     /// 描边颜色（None 表示不描边）
-    pub stroke: Option<String>,
+    pub stroke: Option<Color>,
     /// 描边宽度
     pub stroke_width: f32,
     /// 不透明度 (0.0-1.0)
@@ -65,7 +67,7 @@ impl ElementStyle {
     /// 创建默认样式
     pub fn new() -> Self {
         Self {
-            fill: Some("#000000".to_string()),
+            fill: Some(Color::BLACK),
             stroke: None,
             stroke_width: 1.0,
             opacity: 1.0,
@@ -73,23 +75,43 @@ impl ElementStyle {
     }
 
     /// 只有填充
-    pub fn fill_only(color: &str) -> Self {
+    pub fn fill_only(color: Color) -> Self {
         Self {
-            fill: Some(color.to_string()),
+            fill: Some(color),
             stroke: None,
             stroke_width: 1.0,
             opacity: 1.0,
         }
     }
 
+    /// 从十六进制创建填充
+    pub fn fill_only_hex(hex: &str) -> Result<Self, String> {
+        Ok(Self {
+            fill: Some(Color::from_hex(hex)?),
+            stroke: None,
+            stroke_width: 1.0,
+            opacity: 1.0,
+        })
+    }
+
     /// 只有描边
-    pub fn stroke_only(color: &str, width: f32) -> Self {
+    pub fn stroke_only(color: Color, width: f32) -> Self {
         Self {
             fill: None,
-            stroke: Some(color.to_string()),
+            stroke: Some(color),
             stroke_width: width,
             opacity: 1.0,
         }
+    }
+
+    /// 从十六进制创建描边
+    pub fn stroke_only_hex(hex: &str, width: f32) -> Result<Self, String> {
+        Ok(Self {
+            fill: None,
+            stroke: Some(Color::from_hex(hex)?),
+            stroke_width: width,
+            opacity: 1.0,
+        })
     }
 }
 

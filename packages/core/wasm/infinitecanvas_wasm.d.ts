@@ -63,6 +63,38 @@ export class InfiniteCanvas {
    */
   remove_element(id: bigint): boolean;
   /**
+   * 上传纹理到 GPU
+   *
+   * # 参数
+   * - `texture_id`: 纹理的唯一标识符
+   * - `width`: 图片宽度（像素）
+   * - `height`: 图片高度（像素）
+   * - `data`: RGBA8 图像数据（Uint8Array，长度应为 width * height * 4）
+   *
+   * # 返回
+   * - `Ok(())`: 上传成功
+   * - `Err(JsValue)`: 上传失败（错误信息）
+   *
+   * # JavaScript 示例
+   * ```js
+   * // 从 ImageData 上传
+   * const imageData = ctx.getImageData(0, 0, img.width, img.height);
+   * canvas.upload_texture("logo", img.width, img.height, imageData.data);
+   * ```
+   */
+  upload_texture(texture_id: string, width: number, height: number, data: Uint8Array): void;
+  /**
+   * 设置图片透明度
+   *
+   * # 参数
+   * - `image_id`: 图片元素 ID
+   * - `alpha`: 透明度 [0.0 - 1.0]
+   *
+   * # 返回
+   * 是否成功设置
+   */
+  set_image_alpha(image_id: bigint, alpha: number): boolean;
+  /**
    * 获取元素数量
    */
   get_element_count(): number;
@@ -98,8 +130,9 @@ export class InfiniteCanvas {
    * # 返回
    * - `Ok(())`: 初始化成功
    * - `Err(JsValue)`: Canvas 无效或初始化失败
+   * 初始化（异步）
    */
-  init(canvas: HTMLCanvasElement): void;
+  init(canvas: HTMLCanvasElement): Promise<void>;
   /**
    * 获取 Canvas 宽度
    */
@@ -128,6 +161,27 @@ export class InfiniteCanvas {
    * 获取视口缩放
    */
   get_zoom(): number;
+  /**
+   * 添加图片元素
+   *
+   * # 参数
+   * - `x, y`: 左上角位置
+   * - `width, height`: 显示尺寸
+   * - `texture_id`: 纹理 ID（必须先通过 upload_texture 上传）
+   *
+   * # 返回
+   * 元素 ID
+   *
+   * # JavaScript 示例
+   * ```js
+   * // 上传纹理
+   * await canvas.upload_texture("logo", 256, 256, imageData);
+   * 
+   * // 添加图片元素
+   * const imageId = canvas.add_image(100, 100, 200, 150, "logo");
+   * ```
+   */
+  add_image(x: number, y: number, width: number, height: number, texture_id: string): bigint;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -136,6 +190,7 @@ export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly __wbg_infinitecanvas_free: (a: number, b: number) => void;
   readonly infinitecanvas_add_circle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
+  readonly infinitecanvas_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
   readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
   readonly infinitecanvas_clear_scene: (a: number) => void;
   readonly infinitecanvas_get_element_count: (a: number) => number;
@@ -143,13 +198,18 @@ export interface InitOutput {
   readonly infinitecanvas_get_viewport_center_y: (a: number) => number;
   readonly infinitecanvas_get_zoom: (a: number) => number;
   readonly infinitecanvas_height: (a: number) => number;
-  readonly infinitecanvas_init: (a: number, b: any) => [number, number];
+  readonly infinitecanvas_init: (a: number, b: any) => any;
   readonly infinitecanvas_new: () => [number, number, number];
   readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
   readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
   readonly infinitecanvas_render: (a: number) => [number, number];
+  readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
+  readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly infinitecanvas_width: (a: number) => number;
   readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__hac03de89d7fe1ed3: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen__closure__destroy__heb574fdda24d5f04: (a: number, b: number) => void;
+  readonly wasm_bindgen__convert__closures_____invoke__h71d6670d93209360: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_exn_store: (a: number) => void;

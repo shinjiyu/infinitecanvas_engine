@@ -13,12 +13,17 @@
 //! - 避免高频跨界调用
 
 mod canvas;
+mod renderer;
+mod texture_manager;
 
 use infinitecanvas_engine::{
-    math::Vec2, AnyElement, Circle, Element, ElementStyle, Rectangle, Scene, Viewport,
+    math::{Color, Vec2},
+    AnyElement, Circle, Element, ElementStyle, Image, Rectangle, Scene, Viewport,
 };
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 use canvas::CanvasContext;
+use renderer::WebGPURenderer;
 
 /// WASM 主接口，提供无限画布的所有功能
 ///
@@ -38,9 +43,11 @@ use canvas::CanvasContext;
 #[wasm_bindgen]
 pub struct InfiniteCanvas {
     canvas_ctx: Option<CanvasContext>,
+    webgpu_renderer: Option<WebGPURenderer>,
     scene: Scene,
     viewport: Viewport,
     engine: infinitecanvas_engine::Renderer,
+    use_webgpu: bool,
 }
 
 #[wasm_bindgen]
@@ -64,9 +71,11 @@ impl InfiniteCanvas {
         
         Ok(InfiniteCanvas {
             canvas_ctx: None,
+            webgpu_renderer: None,
             scene: Scene::new(),
             viewport: Viewport::default(),
             engine: infinitecanvas_engine::Renderer::new(),
+            use_webgpu: true, // ✅ 升级到 wgpu 27 解决了兼容性问题
         })
     }
     
@@ -78,27 +87,41 @@ impl InfiniteCanvas {
     /// # 返回
     /// - `Ok(())`: 初始化成功
     /// - `Err(JsValue)`: Canvas 无效或初始化失败
+    /// 初始化（异步）
     #[wasm_bindgen]
-    pub fn init(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
-        log::info!("Initializing canvas context...");
+    pub async fn init(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
+        log::info!("Initializing InfiniteCanvas...");
         
-        let canvas_ctx = CanvasContext::new(canvas)?;
-        log::info!(
-            "Canvas context created: {}x{} (DPR: {})", 
-            canvas_ctx.width(), 
-            canvas_ctx.height(),
-            canvas_ctx.dpr()
-        );
+        let width = canvas.width();
+        let height = canvas.height();
         
         // 更新视口尺寸
-        self.viewport.resize(Vec2::new(canvas_ctx.width() as f32, canvas_ctx.height() as f32));
+        self.viewport.resize(Vec2::new(width as f32, height as f32));
         
-        self.canvas_ctx = Some(canvas_ctx);
+        // 尝试初始化 WebGPU
+        if self.use_webgpu {
+            match WebGPURenderer::new(canvas.clone(), width, height).await {
+                Ok(renderer) => {
+                    log::info!("WebGPU renderer initialized successfully");
+                    self.webgpu_renderer = Some(renderer);
+                }
+                Err(e) => {
+                    log::warn!("WebGPU initialization failed: {:?}, falling back to Canvas 2D", e);
+                    self.use_webgpu = false;
+                    let canvas_ctx = CanvasContext::new(canvas)?;
+                    self.canvas_ctx = Some(canvas_ctx);
+                }
+            }
+        } else {
+            // 使用 Canvas 2D
+            let canvas_ctx = CanvasContext::new(canvas)?;
+            self.canvas_ctx = Some(canvas_ctx);
+        }
         
         // 初始化测试场景
         self.init_test_scene();
         
-        log::info!("InfiniteCanvas initialization complete");
+        log::info!("InfiniteCanvas initialization complete (WebGPU: {})", self.use_webgpu);
         Ok(())
     }
     
@@ -106,24 +129,24 @@ impl InfiniteCanvas {
     fn init_test_scene(&mut self) {
         let id1 = self.scene.next_id();
         let rect = Rectangle::new(id1, Vec2::new(100.0, 100.0), Vec2::new(200.0, 150.0))
-            .with_style(ElementStyle::fill_only("#3b82f6"));
+            .with_style(ElementStyle::fill_only(Color::from_hex("#3b82f6").unwrap()));
         self.scene.add_rect(rect);
         
         let id2 = self.scene.next_id();
         let rect2 = Rectangle::new(id2, Vec2::new(375.0, 125.0), Vec2::new(200.0, 150.0))
-            .with_style(ElementStyle::stroke_only("#ef4444", 3.0));
+            .with_style(ElementStyle::stroke_only(Color::from_hex("#ef4444").unwrap(), 3.0));
         self.scene.add_rect(rect2);
         
         let id3 = self.scene.next_id();
-        let mut circle_style = ElementStyle::fill_only("#10b981");
-        circle_style.stroke = Some("#059669".to_string());
+        let mut circle_style = ElementStyle::fill_only(Color::from_hex("#10b981").unwrap());
+        circle_style.stroke = Some(Color::from_hex("#059669").unwrap());
         circle_style.stroke_width = 2.0;
         let circle = Circle::new(id3, Vec2::new(450.0, 350.0), 50.0).with_style(circle_style);
         self.scene.add_circle(circle);
         
         let id4 = self.scene.next_id();
         let circle2 = Circle::new(id4, Vec2::new(200.0, 350.0), 60.0)
-            .with_style(ElementStyle::stroke_only("#f59e0b", 3.0));
+            .with_style(ElementStyle::stroke_only(Color::from_hex("#f59e0b").unwrap(), 3.0));
         self.scene.add_circle(circle2);
         
         log::info!("Test scene initialized with {} elements", self.scene.count());
@@ -135,18 +158,23 @@ impl InfiniteCanvas {
     /// - `Ok(())`: 渲染成功
     /// - `Err(JsValue)`: 渲染失败
     #[wasm_bindgen]
-    pub fn render(&self) -> Result<(), JsValue> {
-        if let Some(ctx) = &self.canvas_ctx {
-            // 清空画布
-            ctx.clear();
-            
-            // 绘制背景网格
-            self.render_grid(ctx);
-            
-            // 渲染场景
-            self.render_scene(ctx);
+    pub fn render(&mut self) -> Result<(), JsValue> {
+        if self.use_webgpu {
+            // 使用 WebGPU 渲染
+            if let Some(renderer) = &mut self.webgpu_renderer {
+                renderer.render(&self.scene, &self.viewport)?;
+            } else {
+                return Err(JsValue::from_str("WebGPU renderer not initialized"));
+            }
         } else {
-            return Err(JsValue::from_str("Canvas not initialized. Call init() first."));
+            // 使用 Canvas 2D 渲染
+            if let Some(ctx) = &self.canvas_ctx {
+                ctx.clear();
+                self.render_grid(ctx);
+                self.render_scene(ctx);
+            } else {
+                return Err(JsValue::from_str("Canvas not initialized. Call init() first."));
+            }
         }
         Ok(())
     }
@@ -194,6 +222,10 @@ impl InfiniteCanvas {
         match element {
             AnyElement::Rectangle(rect) => self.render_rectangle(ctx, rect),
             AnyElement::Circle(circle) => self.render_circle(ctx, circle),
+            AnyElement::Image(_image) => {
+                // Image 元素不支持 Canvas 2D 渲染（仅 WebGPU）
+                log::warn!("Canvas 2D does not support Image elements, use WebGPU");
+            }
         }
     }
     
@@ -213,12 +245,12 @@ impl InfiniteCanvas {
         
         // 填充
         if let Some(fill) = &rect.style.fill {
-            ctx.fill_rect(x, y, size.x, size.y, fill);
+            ctx.fill_rect(x, y, size.x, size.y, &fill.to_hex());
         }
         
         // 描边
         if let Some(stroke) = &rect.style.stroke {
-            ctx.stroke_rect(x, y, size.x, size.y, stroke, rect.style.stroke_width);
+            ctx.stroke_rect(x, y, size.x, size.y, &stroke.to_hex(), rect.style.stroke_width);
         }
     }
     
@@ -232,12 +264,15 @@ impl InfiniteCanvas {
         let pos = props.transform.translation;
         let radius = circle.radius();
         
+        let fill_hex = circle.style.fill.map(|c| c.to_hex());
+        let stroke_hex = circle.style.stroke.map(|c| c.to_hex());
+        
         ctx.draw_circle(
             pos.x,
             pos.y,
             radius,
-            circle.style.fill.as_deref(),
-            circle.style.stroke.as_deref(),
+            fill_hex.as_deref(),
+            stroke_hex.as_deref(),
             circle.style.stroke_width,
         );
     }
@@ -280,8 +315,10 @@ impl InfiniteCanvas {
     ) -> u64 {
         let id = self.scene.next_id();
         let mut style = ElementStyle::new();
-        style.fill = fill_color;
-        style.stroke = stroke_color;
+        
+        // 转换颜色字符串到 Color
+        style.fill = fill_color.and_then(|s| Color::from_hex(&s).ok());
+        style.stroke = stroke_color.and_then(|s| Color::from_hex(&s).ok());
         style.stroke_width = stroke_width;
 
         let rect = Rectangle::new(id, Vec2::new(x, y), Vec2::new(width, height)).with_style(style);
@@ -314,8 +351,10 @@ impl InfiniteCanvas {
     ) -> u64 {
         let id = self.scene.next_id();
         let mut style = ElementStyle::new();
-        style.fill = fill_color;
-        style.stroke = stroke_color;
+        
+        // 转换颜色字符串到 Color
+        style.fill = fill_color.and_then(|s| Color::from_hex(&s).ok());
+        style.stroke = stroke_color.and_then(|s| Color::from_hex(&s).ok());
         style.stroke_width = stroke_width;
 
         let circle = Circle::new(id, Vec2::new(x, y), radius).with_style(style);
@@ -352,6 +391,119 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn get_element_count(&self) -> usize {
         self.scene.count()
+    }
+
+    // ========== 纹理/图片 API ==========
+
+    /// 上传纹理到 GPU
+    ///
+    /// # 参数
+    /// - `texture_id`: 纹理的唯一标识符
+    /// - `width`: 图片宽度（像素）
+    /// - `height`: 图片高度（像素）
+    /// - `data`: RGBA8 图像数据（Uint8Array，长度应为 width * height * 4）
+    ///
+    /// # 返回
+    /// - `Ok(())`: 上传成功
+    /// - `Err(JsValue)`: 上传失败（错误信息）
+    ///
+    /// # JavaScript 示例
+    /// ```js
+    /// // 从 ImageData 上传
+    /// const imageData = ctx.getImageData(0, 0, img.width, img.height);
+    /// canvas.upload_texture("logo", img.width, img.height, imageData.data);
+    /// ```
+    #[wasm_bindgen]
+    pub fn upload_texture(
+        &mut self,
+        texture_id: String,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> Result<(), JsValue> {
+        if !self.use_webgpu {
+            return Err(JsValue::from_str("Texture upload requires WebGPU renderer"));
+        }
+
+        let renderer = self
+            .webgpu_renderer
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("WebGPU renderer not initialized"))?;
+
+        renderer
+            .upload_texture(texture_id.clone(), width, height, data)
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        log::info!(
+            "Uploaded texture '{}': {}x{} ({} KB)",
+            texture_id,
+            width,
+            height,
+            data.len() / 1024
+        );
+
+        Ok(())
+    }
+
+    /// 添加图片元素
+    ///
+    /// # 参数
+    /// - `x, y`: 左上角位置
+    /// - `width, height`: 显示尺寸
+    /// - `texture_id`: 纹理 ID（必须先通过 upload_texture 上传）
+    ///
+    /// # 返回
+    /// 元素 ID
+    ///
+    /// # JavaScript 示例
+    /// ```js
+    /// // 上传纹理
+    /// await canvas.upload_texture("logo", 256, 256, imageData);
+    /// 
+    /// // 添加图片元素
+    /// const imageId = canvas.add_image(100, 100, 200, 150, "logo");
+    /// ```
+    #[wasm_bindgen]
+    pub fn add_image(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        texture_id: String,
+    ) -> u64 {
+        let id = self.scene.next_id();
+        let image = Image::new(id, Vec2::new(x, y), Vec2::new(width, height), texture_id.clone());
+        self.scene.add_image(image);
+
+        log::info!(
+            "Added image {} at ({}, {}) with texture '{}'",
+            id,
+            x,
+            y,
+            texture_id
+        );
+        id
+    }
+
+    /// 设置图片透明度
+    ///
+    /// # 参数
+    /// - `image_id`: 图片元素 ID
+    /// - `alpha`: 透明度 [0.0 - 1.0]
+    ///
+    /// # 返回
+    /// 是否成功设置
+    #[wasm_bindgen]
+    pub fn set_image_alpha(&mut self, image_id: u64, alpha: f32) -> bool {
+        if let Some(AnyElement::Image(image)) = self.scene.get_mut(image_id) {
+            image.set_alpha(alpha);
+            log::debug!("Set image {} alpha to {}", image_id, alpha);
+            true
+        } else {
+            log::warn!("Image {} not found", image_id);
+            false
+        }
     }
 
     // ========== 视口操作 API ==========
