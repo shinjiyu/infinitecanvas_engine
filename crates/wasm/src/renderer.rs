@@ -525,7 +525,10 @@ impl WebGPURenderer {
                 label: Some("Render Encoder"),
             });
 
-        // 8. 渲染通道
+        // 8. 收集纹理元素
+        let textured_groups = self.collect_textured_vertices(scene);
+
+        // 9. 渲染通道
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -548,26 +551,83 @@ impl WebGPURenderer {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
-            // 绘制填充
+            // 绘制纯色填充
             if !fill_vertices.is_empty() {
                 render_pass.set_pipeline(&self.fill_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 render_pass.draw(0..fill_vertices.len() as u32, 0..1);
             }
 
-            // 绘制描边
+            // 绘制纯色描边
             if !stroke_vertices.is_empty() {
                 render_pass.set_pipeline(&self.stroke_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 render_pass.draw(
                     fill_vertices.len() as u32..(fill_vertices.len() + stroke_vertices.len()) as u32,
                     0..1,
                 );
             }
+
+            // 绘制纹理元素（按纹理分组）
+            if !textured_groups.is_empty() {
+                render_pass.set_pipeline(&self.texture_pipeline);
+                let mut vertex_offset = 0u32;
+
+                for (texture_id, vertices) in &textured_groups {
+                    // 获取纹理视图（如果不存在则使用占位纹理）
+                    let texture_view = self
+                        .texture_manager
+                        .get_texture_view(texture_id)
+                        .unwrap_or(&self.placeholder_texture_view);
+
+                    // 为此纹理创建 BindGroup
+                    let texture_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some(&format!("Texture Bind Group: {}", texture_id)),
+                        layout: &self.texture_pipeline.get_bind_group_layout(0),
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: self.uniform_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(texture_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(&self.texture_sampler),
+                            },
+                        ],
+                    });
+
+                    // 上传此纹理的顶点到缓冲区
+                    if !vertices.is_empty() {
+                        let vertex_data = bytemuck::cast_slice(vertices);
+                        let offset_bytes = (vertex_offset as usize * std::mem::size_of::<Vertex>()) as u64;
+                        
+                        self.queue.write_buffer(
+                            &self.vertex_buffer,
+                            offset_bytes,
+                            vertex_data,
+                        );
+
+                        // 绑定纹理并绘制
+                        render_pass.set_bind_group(0, &texture_bind_group, &[]);
+                        render_pass.draw(vertex_offset..vertex_offset + vertices.len() as u32, 0..1);
+
+                        vertex_offset += vertices.len() as u32;
+                        
+                        log::debug!("Rendered {} vertices with texture '{}'", vertices.len(), texture_id);
+                    }
+                }
+
+                log::info!("Rendered {} texture groups", textured_groups.len());
+            }
         }
 
-        // 9. 提交命令
+        // 10. 提交命令
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
 
@@ -590,13 +650,40 @@ impl WebGPURenderer {
                     stroke_vertices.extend(circle.generate_stroke_vertices());
                 }
                 AnyElement::Image(_image) => {
-                    // Image 元素使用独立的纹理渲染管线，不在这里收集
-                    // TODO: 实现 collect_textured_vertices()
+                    // Image 元素使用独立的纹理渲染管线
                 }
             }
         }
 
         (fill_vertices, stroke_vertices)
+    }
+
+    /// 收集纹理元素的顶点（按纹理分组）
+    ///
+    /// # 返回
+    /// Vec<(texture_id, vertices)> - 每个纹理的顶点列表
+    fn collect_textured_vertices(&self, scene: &Scene) -> Vec<(String, Vec<Vertex>)> {
+        use std::collections::HashMap;
+
+        let mut texture_groups: HashMap<String, Vec<Vertex>> = HashMap::new();
+
+        for element in scene.elements_sorted() {
+            if let AnyElement::Image(image) = element {
+                if !image.props.visible {
+                    continue;
+                }
+
+                let texture_id = image.texture_id.clone();
+                let vertices = image.generate_vertices();
+
+                texture_groups
+                    .entry(texture_id)
+                    .or_insert_with(Vec::new)
+                    .extend(vertices);
+            }
+        }
+
+        texture_groups.into_iter().collect()
     }
 
     /// 调整 Surface 大小
@@ -607,6 +694,39 @@ impl WebGPURenderer {
             self.surface.configure(&self.device, &self.surface_config);
             log::info!("Surface resized to {}x{}", width, height);
         }
+    }
+
+    /// 上传纹理到 GPU
+    ///
+    /// # 参数
+    /// - `texture_id`: 纹理的唯一标识符
+    /// - `width`: 图片宽度（像素）
+    /// - `height`: 图片高度（像素）
+    /// - `data`: RGBA8 图像数据
+    ///
+    /// # 错误
+    /// - 如果纹理 ID 已存在
+    /// - 如果数据长度不匹配
+    /// - 如果纹理尺寸超过限制
+    pub fn upload_texture(
+        &mut self,
+        texture_id: String,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> Result<(), String> {
+        self.texture_manager
+            .create_texture(texture_id, data, width, height)
+    }
+
+    /// 获取纹理是否存在
+    pub fn has_texture(&self, texture_id: &str) -> bool {
+        self.texture_manager.has_texture(texture_id)
+    }
+
+    /// 删除纹理
+    pub fn remove_texture(&mut self, texture_id: &str) {
+        self.texture_manager.remove_texture(texture_id);
     }
 }
 

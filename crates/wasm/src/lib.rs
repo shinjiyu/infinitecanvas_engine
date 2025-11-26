@@ -18,7 +18,7 @@ mod texture_manager;
 
 use infinitecanvas_engine::{
     math::{Color, Vec2},
-    AnyElement, Circle, Element, ElementStyle, Rectangle, Scene, Viewport,
+    AnyElement, Circle, Element, ElementStyle, Image, Rectangle, Scene, Viewport,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -391,6 +391,119 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn get_element_count(&self) -> usize {
         self.scene.count()
+    }
+
+    // ========== 纹理/图片 API ==========
+
+    /// 上传纹理到 GPU
+    ///
+    /// # 参数
+    /// - `texture_id`: 纹理的唯一标识符
+    /// - `width`: 图片宽度（像素）
+    /// - `height`: 图片高度（像素）
+    /// - `data`: RGBA8 图像数据（Uint8Array，长度应为 width * height * 4）
+    ///
+    /// # 返回
+    /// - `Ok(())`: 上传成功
+    /// - `Err(JsValue)`: 上传失败（错误信息）
+    ///
+    /// # JavaScript 示例
+    /// ```js
+    /// // 从 ImageData 上传
+    /// const imageData = ctx.getImageData(0, 0, img.width, img.height);
+    /// canvas.upload_texture("logo", img.width, img.height, imageData.data);
+    /// ```
+    #[wasm_bindgen]
+    pub fn upload_texture(
+        &mut self,
+        texture_id: String,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> Result<(), JsValue> {
+        if !self.use_webgpu {
+            return Err(JsValue::from_str("Texture upload requires WebGPU renderer"));
+        }
+
+        let renderer = self
+            .webgpu_renderer
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("WebGPU renderer not initialized"))?;
+
+        renderer
+            .upload_texture(texture_id.clone(), width, height, data)
+            .map_err(|e| JsValue::from_str(&e))?;
+
+        log::info!(
+            "Uploaded texture '{}': {}x{} ({} KB)",
+            texture_id,
+            width,
+            height,
+            data.len() / 1024
+        );
+
+        Ok(())
+    }
+
+    /// 添加图片元素
+    ///
+    /// # 参数
+    /// - `x, y`: 左上角位置
+    /// - `width, height`: 显示尺寸
+    /// - `texture_id`: 纹理 ID（必须先通过 upload_texture 上传）
+    ///
+    /// # 返回
+    /// 元素 ID
+    ///
+    /// # JavaScript 示例
+    /// ```js
+    /// // 上传纹理
+    /// await canvas.upload_texture("logo", 256, 256, imageData);
+    /// 
+    /// // 添加图片元素
+    /// const imageId = canvas.add_image(100, 100, 200, 150, "logo");
+    /// ```
+    #[wasm_bindgen]
+    pub fn add_image(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        texture_id: String,
+    ) -> u64 {
+        let id = self.scene.next_id();
+        let image = Image::new(id, Vec2::new(x, y), Vec2::new(width, height), texture_id.clone());
+        self.scene.add_image(image);
+
+        log::info!(
+            "Added image {} at ({}, {}) with texture '{}'",
+            id,
+            x,
+            y,
+            texture_id
+        );
+        id
+    }
+
+    /// 设置图片透明度
+    ///
+    /// # 参数
+    /// - `image_id`: 图片元素 ID
+    /// - `alpha`: 透明度 [0.0 - 1.0]
+    ///
+    /// # 返回
+    /// 是否成功设置
+    #[wasm_bindgen]
+    pub fn set_image_alpha(&mut self, image_id: u64, alpha: f32) -> bool {
+        if let Some(AnyElement::Image(image)) = self.scene.get_mut(image_id) {
+            image.set_alpha(alpha);
+            log::debug!("Set image {} alpha to {}", image_id, alpha);
+            true
+        } else {
+            log::warn!("Image {} not found", image_id);
+            false
+        }
     }
 
     // ========== 视口操作 API ==========
