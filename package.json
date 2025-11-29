@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "pnpm --filter www dev",
     "build": "pnpm build:wasm && pnpm build:ts",
-    "build:wasm": "cd crates/wasm && wasm-pack build --target web",
+    "build:wasm": "./build-wasm.sh",
     "build:ts": "pnpm --recursive --filter './packages/**' build",
     "test": "pnpm test:rust && pnpm test:ts",
     "test:rust": "cargo test --all",
@@ -14,5 +14,10 @@
   },
   "packageManager": "pnpm@8.15.0"
 }
+
+
+
+
+
 
 

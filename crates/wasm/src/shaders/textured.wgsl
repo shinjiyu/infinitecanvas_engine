@@ -42,11 +42,19 @@ fn vs_main(model: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // 采样纹理
     let tex_color = textureSample(t_diffuse, s_diffuse, in.uv);
-    
-    // 与顶点颜色混合（支持 tint 着色和透明度）
     return tex_color * in.color;
 }
+
+
+
+
+
+
+
+
+
+
+
 
 

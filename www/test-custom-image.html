@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自定义图片渲染 - InfiniteCanvas Engine</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      color: white;
+      margin-bottom: 20px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      font-size: 32px;
+    }
+
+    .info {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .info p {
+      margin: 8px 0;
+      color: #555;
+      font-size: 14px;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .status.loading {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .canvas-container {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    }
+
+    .canvas-comparison {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    .canvas-wrapper {
+      flex: 1;
+      text-align: center;
+    }
+
+    .canvas-wrapper h3 {
+      margin-bottom: 10px;
+      color: #333;
+      font-size: 16px;
+    }
+
+    canvas {
+      border: 3px solid #e0e0e0;
+      border-radius: 8px;
+      display: block;
+      background: #fafafa;
+      width: 100%;
+      max-width: 600px;
+    }
+
+    .stats {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .stats-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .stats-row:last-child {
+      border-bottom: none;
+    }
+
+    .stats-label {
+      color: #666;
+      font-weight: 500;
+    }
+
+    .stats-value {
+      font-weight: bold;
+      color: #667eea;
+      font-size: 16px;
+    }
+
+    .features {
+      margin-top: 20px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .features h2 {
+      font-size: 20px;
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    .features ul {
+      list-style: none;
+      padding-left: 0;
+    }
+
+    .features li {
+      padding: 8px 0;
+      color: #555;
+      font-size: 14px;
+    }
+
+    .features li::before {
+      content: '✓ ';
+      color: #4caf50;
+      font-weight: bold;
+      margin-right: 8px;
+    }
+
+    .controls {
+      margin-top: 20px;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .controls h2 {
+      font-size: 18px;
+      margin-bottom: 15px;
+      color: #333;
+    }
+
+    .control-group {
+      margin: 15px 0;
+    }
+
+    .control-group label {
+      display: block;
+      margin-bottom: 8px;
+      color: #555;
+      font-weight: 500;
+    }
+
+    .control-group input[type="range"] {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: #ddd;
+      outline: none;
+    }
+
+    .control-group .value-display {
+      display: inline-block;
+      margin-left: 10px;
+      color: #667eea;
+      font-weight: bold;
+    }
+
+    .render-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+
+    .render-controls button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #667eea;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(102, 126, 234, 0.3);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .render-controls button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 14px rgba(102, 126, 234, 0.35);
+    }
+
+    .render-controls button:active {
+      transform: translateY(0);
+      box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎨 自定义图片渲染测试</h1>
+    
+    <div class="info">
+      <p>
+        <strong>引擎状态：</strong>
+        <span id="status" class="status loading">初始化中...</span>
+      </p>
+      <p>
+        <strong>WASM 模块：</strong>
+        <span id="wasm-status" class="status loading">加载中...</span>
+      </p>
+      <p>
+        <strong>图片加载：</strong>
+        <span id="image-status" class="status loading">等待中...</span>
+      </p>
+    </div>
+
+    <div class="canvas-container">
+      <div class="canvas-comparison">
+        <div class="canvas-wrapper">
+          <h3>📷 原始图片 (Canvas 2D)</h3>
+          <canvas id="source-canvas" width="600" height="400"></canvas>
+        </div>
+        <div class="canvas-wrapper">
+          <h3>🎨 WebGPU 渲染</h3>
+          <canvas id="canvas" width="600" height="400"></canvas>
+        </div>
+      </div>
+      
+      <div class="stats">
+        <div class="stats-row">
+          <span class="stats-label">FPS (帧率):</span>
+          <span class="stats-value" id="fps">--</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">元素数量:</span>
+          <span class="stats-value" id="element-count">0</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">纹理数量:</span>
+          <span class="stats-value" id="texture-count">0</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">图片尺寸:</span>
+          <span class="stats-value" id="image-size">--</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <h2>🎛️ 控制面板</h2>
+      <div class="control-group">
+        <label>
+          图片大小: <span class="value-display" id="size-display">200</span>px
+        </label>
+        <input type="range" id="size-slider" min="50" max="400" value="200" step="25">
+      </div>
+      <div class="control-group">
+        <label>
+          透明度: <span class="value-display" id="opacity-display">1.0</span>
+        </label>
+        <input type="range" id="opacity-slider" min="0" max="100" value="100" step="5">
+      </div>
+      <div class="render-controls">
+        <button id="render-once">渲染一帧</button>
+        <button id="toggle-render">开始持续渲染</button>
+        <span id="render-loop-status" class="status info">单帧模式</span>
+      </div>
+    </div>
+
+    <div class="features">
+      <h2>✨ 技术特性</h2>
+      <ul>
+        <li>Rust WASM + WebGPU 高性能渲染</li>
+        <li>原生图片纹理支持（RGBA8UnormSrgb）</li>
+        <li>实时透明度控制</li>
+        <li>动态尺寸调整</li>
+        <li>60 FPS 流畅渲染</li>
+        <li>纹理缓存管理</li>
+      </ul>
+    </div>
+  </div>
+
+  <script type="module" src="./test-custom-image.js"></script>
+</body>
+</html>
+
+
+
+
+

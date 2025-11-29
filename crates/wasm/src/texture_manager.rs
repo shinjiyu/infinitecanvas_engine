@@ -133,15 +133,31 @@ impl TextureManager {
             view_formats: &[],
         });
 
-        // 上传数据到 GPU
-        // wgpu 27 API: write_texture(texture_info, data, data_layout, size)
+        // 上传数据到 GPU  
+        let bytes_per_row = 4 * width;
+        log::info!("📤 Writing texture data to GPU...");
+        log::info!("  - Texture size: {}x{}", width, height);
+        log::info!("  - Bytes per row (unpadded): {}", bytes_per_row);
+        log::info!("  - Total data size: {} bytes", data.len());
+        log::info!("  - Texture format: Rgba8UnormSrgb");
+        log::info!("  - Data sample (first 4 pixels):");
+        for i in 0..4.min(width * height) {
+            let offset = (i * 4) as usize;
+            if offset + 3 < data.len() {
+                log::info!("    Pixel[{}]: R={}, G={}, B={}, A={}", 
+                    i, data[offset], data[offset+1], data[offset+2], data[offset+3]);
+            }
+        }
+        
+        // 对于 write_texture，bytes_per_row 不需要 256 字节对齐（不同于 copyBufferToTexture）
+        // 直接使用实际的行字节数即可
         self.queue.write_texture(
             texture.as_image_copy(),
             data,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * width),
-                rows_per_image: Some(height),
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: None,  // 对于单层2D纹理，使用None
             },
             wgpu::Extent3d {
                 width,

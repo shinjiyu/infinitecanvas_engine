@@ -23,6 +23,12 @@ use infinitecanvas_engine::{
 use wasm_bindgen::prelude::*;
 use renderer::WebGPURenderer;
 
+const BUILD_SIGNATURE: &str = match option_env!("BUILD_SIGNATURE") {
+    Some(sig) => sig,
+    None => "dev-local",
+};
+const BUILD_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// WASM 主接口，提供无限画布的所有功能
 ///
 /// # 职责
@@ -63,6 +69,11 @@ impl InfiniteCanvas {
             .map_err(|e| JsValue::from_str(&format!("Failed to init logger: {:?}", e)))?;
         
         log::info!("InfiniteCanvas WASM module initialized");
+        log::info!(
+            "🆔 InfiniteCanvas build info: version={}, signature={}",
+            BUILD_VERSION,
+            BUILD_SIGNATURE
+        );
         
         Ok(InfiniteCanvas {
             webgpu_renderer: None,
@@ -97,8 +108,8 @@ impl InfiniteCanvas {
         log::info!("✅ WebGPU renderer initialized successfully");
         self.webgpu_renderer = Some(renderer);
         
-        // 初始化测试场景
-        self.init_test_scene();
+        // 不再初始化测试场景 - 用户会手动添加元素
+        // self.init_test_scene();
         
         log::info!("✅ InfiniteCanvas initialization complete");
         Ok(())
@@ -279,6 +290,20 @@ impl InfiniteCanvas {
         height: u32,
         data: &[u8],
     ) -> Result<(), JsValue> {
+        log::info!("📥 Receiving texture data from JS:");
+        log::info!("  - Texture ID: {}", texture_id);
+        log::info!("  - Width: {}", width);
+        log::info!("  - Height: {}", height);
+        log::info!("  - Data length: {} bytes", data.len());
+        log::info!("  - Expected length: {} bytes", width * height * 4);
+        
+        // 检查前几个字节
+        if data.len() >= 20 {
+            log::info!("  - First 20 bytes: {:?}", &data[0..20]);
+            log::info!("  - Sample pixel at (0,0): R={}, G={}, B={}, A={}", 
+                data[0], data[1], data[2], data[3]);
+        }
+        
         let renderer = self
             .webgpu_renderer
             .as_mut()
@@ -289,7 +314,7 @@ impl InfiniteCanvas {
             .map_err(|e| JsValue::from_str(&e))?;
 
         log::info!(
-            "Uploaded texture '{}': {}x{} ({} KB)",
+            "✅ Uploaded texture '{}': {}x{} ({} KB)",
             texture_id,
             width,
             height,

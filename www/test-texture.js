@@ -87,34 +87,12 @@ async function main() {
     await canvas.init(htmlCanvas);
     
     updateStatus('wasm-status', '✓ 已加载');
-    updateStatus('status', '上传纹理...');
+    updateStatus('status', '添加简单矩形...');
     
-    // 创建并上传测试图片
-    console.log('Creating test images...');
-    const testImage = createTestImage(256, 256);
-    const checkerboard = createCheckerboard(128, 16);
-    
-    console.log('Uploading textures...');
-    canvas.upload_texture('gradient', 256, 256, testImage.data);
-    canvas.upload_texture('checker', 128, 128, checkerboard.data);
-    
-    updateStatus('status', '添加图片元素...');
-    
-    // 添加图片元素
-    const img1 = canvas.add_image(50, 50, 200, 200, 'gradient');
-    console.log('Added gradient image:', img1);
-    
-    const img2 = canvas.add_image(270, 50, 150, 150, 'checker');
-    console.log('Added checker image:', img2);
-    
-    // 添加半透明图片
-    const img3 = canvas.add_image(100, 270, 180, 180, 'gradient');
-    canvas.set_image_alpha(img3, 0.5);
-    console.log('Added semi-transparent image:', img3);
-    
-    // 同时添加一些矩形和圆形（混合渲染测试）
-    canvas.add_rectangle(450, 100, 80, 80, '#ff6b6b', '#000000', 2);
-    canvas.add_circle(550, 200, 40, '#4ecdc4', '#000000', 2);
+    // 只添加一个简单的矩形（应该是两个三角形 = 6个顶点）
+    console.log('=== ADDING SINGLE RECTANGLE ===');
+    canvas.add_rectangle(100, 100, 200, 150, '#FF6B6B', null, 0);
+    console.log('=== Rectangle should create 6 vertices (2 triangles) ===');
     
     updateStatus('status', '✓ 运行中');
     
@@ -140,5 +118,6 @@ async function main() {
 }
 
 main();
+
 
 

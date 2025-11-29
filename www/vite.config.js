@@ -2,11 +2,11 @@ import { defineConfig } from 'vite';
 import path from 'path';
 
 export default defineConfig({
-  root: path.resolve(__dirname, '..'), // Serve from project root
-  publicDir: path.resolve(__dirname, '../www/public'),
+  root: path.resolve(__dirname), // Serve from www directory
+  publicDir: path.resolve(__dirname, 'public'),
   server: {
     port: 3000,
-    open: false,
+    open: '/test-custom-image.html', // 自动打开自定义图片页面
   },
   build: {
     target: 'esnext',

@@ -8,6 +8,16 @@ use wgpu::util::DeviceExt;
 use std::sync::Arc;
 use crate::texture_manager::TextureManager;
 
+const VERBOSE_RENDER_LOGS: bool = false;
+
+macro_rules! render_log {
+    ($($arg:tt)*) => {
+        if VERBOSE_RENDER_LOGS {
+            log::info!($($arg)*);
+        }
+    };
+}
+
 /// WebGPU 渲染器
 pub struct WebGPURenderer {
     device: Arc<wgpu::Device>,
@@ -464,8 +474,12 @@ impl WebGPURenderer {
         let textured_vertex_count: usize = textured_groups.iter().map(|(_, v)| v.len()).sum();
         let total_vertices = fill_vertices.len() + stroke_vertices.len() + textured_vertex_count;
         
-        log::warn!("🎨 Collected {} fill, {} stroke, {} textured vertices", 
-            fill_vertices.len(), stroke_vertices.len(), textured_vertex_count);
+        render_log!(
+            "🎨 Collected {} fill, {} stroke, {} textured vertices",
+            fill_vertices.len(),
+            stroke_vertices.len(),
+            textured_vertex_count
+        );
 
         if total_vertices == 0 {
             log::warn!("⚠️ No vertices to render");
@@ -487,12 +501,35 @@ impl WebGPURenderer {
         // 3. 上传填充顶点
         let mut vertex_offset = 0;
         if !fill_vertices.is_empty() {
+            render_log!("[RENDER] ========== UPLOADING FILL VERTICES ==========");
+            render_log!("[RENDER] Count: {}", fill_vertices.len());
+            render_log!("[RENDER] Offset in buffer: 0 bytes");
+            render_log!(
+                "[RENDER] Size in bytes: {}",
+                fill_vertices.len() * std::mem::size_of::<Vertex>()
+            );
+            if VERBOSE_RENDER_LOGS {
+                for (i, v) in fill_vertices.iter().take(10).enumerate() {
+                    log::info!(
+                        "[RENDER]   Fill Vertex[{}]: pos=({:.2}, {:.2}), color=({:.3}, {:.3}, {:.3}, {:.3})",
+                        i,
+                        v.position[0],
+                        v.position[1],
+                        v.color[0],
+                        v.color[1],
+                        v.color[2],
+                        v.color[3]
+                    );
+                }
+            }
+            
             self.queue.write_buffer(
                 &self.vertex_buffer,
                 0,
                 bytemuck::cast_slice(&fill_vertices),
             );
             vertex_offset += fill_vertices.len();
+            render_log!("[RENDER] Fill vertices uploaded. Next offset: {}", vertex_offset);
         }
 
         // 4. 上传描边顶点
@@ -506,12 +543,41 @@ impl WebGPURenderer {
             vertex_offset += stroke_vertices.len();
         }
 
+        let width = self.surface_config.width as f32;
+        let height = self.surface_config.height as f32;
+
         // 5. 上传纹理顶点（在渲染通道开始前）
+        render_log!("[RENDER] ========== UPLOADING TEXTURED VERTICES ==========");
         let base_textured_vertex_offset = vertex_offset;
         let mut textured_vertex_ranges = Vec::new();
         
         for (texture_id, vertices) in &textured_groups {
             if !vertices.is_empty() {
+                render_log!(
+                    "[RENDER] Texture '{}': {} vertices",
+                    texture_id,
+                    vertices.len()
+                );
+                if VERBOSE_RENDER_LOGS {
+                    for (i, v) in vertices.iter().take(6).enumerate() {
+                        let ndc_x = (2.0 * v.position[0] / width) - 1.0;
+                        let ndc_y = 1.0 - (2.0 * v.position[1] / height);
+                        log::info!(
+                            "[RENDER]   Textured Vertex[{}]: pos=({:.2}, {:.2}), uv=({:.3}, {:.3}), color=({:.3}, {:.3}, {:.3}, {:.3})",
+                            i,
+                            v.position[0],
+                            v.position[1],
+                            v.uv[0],
+                            v.uv[1],
+                            v.color[0],
+                            v.color[1],
+                            v.color[2],
+                            v.color[3]
+                        );
+                        log::info!("[RENDER]     NDC approx: ({:.3}, {:.3})", ndc_x, ndc_y);
+                    }
+                }
+                
                 let offset_bytes = (vertex_offset * std::mem::size_of::<Vertex>()) as u64;
                 self.queue.write_buffer(
                     &self.vertex_buffer,
@@ -524,29 +590,48 @@ impl WebGPURenderer {
                 textured_vertex_ranges.push((texture_id.clone(), start..end));
                 
                 vertex_offset += vertices.len();
-                log::debug!("Uploaded {} vertices for texture '{}' at offset {}", vertices.len(), texture_id, start);
+                render_log!(
+                    "[RENDER] Uploaded {} vertices for texture '{}': vertex range {}..{}",
+                    vertices.len(),
+                    texture_id,
+                    start,
+                    end
+                );
             }
         }
 
         // 6. 更新 Uniform Buffer（视口变换矩阵）
-        let width = self.surface_config.width as f32;
-        let height = self.surface_config.height as f32;
         
         // 正交投影矩阵（列优先，WGSL 格式）
         let projection_matrix: [[f32; 4]; 4] = [
-            [2.0 / width, 0.0, 0.0, -1.0],          // 第1列：X 变换
-            [0.0, -2.0 / height, 0.0, 1.0],         // 第2列：Y 变换（翻转）
+            [2.0 / width, 0.0, 0.0, 0.0],           // 第1列：X 缩放
+            [0.0, -2.0 / height, 0.0, 0.0],         // 第2列：Y 缩放并翻转
             [0.0, 0.0, 1.0, 0.0],                   // 第3列：Z 保持不变
-            [0.0, 0.0, 0.0, 1.0],                   // 第4列：齐次坐标
+            [-1.0, 1.0, 0.0, 1.0],                  // 第4列：平移
         ];
         
-        log::warn!("📐 Projection: {}x{} -> NDC", width, height);
+        render_log!("[RENDER] ========== UPLOADING UNIFORM BUFFER ==========");
+        render_log!("[RENDER] Canvas size: {}x{}", width, height);
+        if VERBOSE_RENDER_LOGS {
+            log::info!("[RENDER] Projection matrix (column-major for WGSL):");
+            for col in 0..4 {
+                log::info!(
+                    "[RENDER]   Col {}: [{:.6}, {:.6}, {:.6}, {:.6}]",
+                    col,
+                    projection_matrix[col][0],
+                    projection_matrix[col][1],
+                    projection_matrix[col][2],
+                    projection_matrix[col][3]
+                );
+            }
+        }
         
         self.queue.write_buffer(
             &self.uniform_buffer,
             0,
             bytemuck::cast_slice(&projection_matrix),
         );
+        render_log!("[RENDER] Uniform buffer uploaded");
 
         // 7. 获取当前帧
         let frame = self
@@ -574,9 +659,9 @@ impl WebGPURenderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 1.0,
-                            g: 1.0,
-                            b: 1.0,
+                            r: 0.1,
+                            g: 0.1,
+                            b: 0.1,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -588,36 +673,36 @@ impl WebGPURenderer {
                 occlusion_query_set: None,
             });
 
+            render_log!("[RENDER] ========== RENDER PASS STARTED ==========");
+            render_log!("[RENDER] Setting vertex buffer (full slice)");
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
-            // 绘制纯色填充
-            if !fill_vertices.is_empty() {
-                render_pass.set_pipeline(&self.fill_pipeline);
-                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-                render_pass.draw(0..fill_vertices.len() as u32, 0..1);
-                log::debug!("Drew {} fill vertices", fill_vertices.len());
-            }
-
-            // 绘制纯色描边
-            if !stroke_vertices.is_empty() {
-                render_pass.set_pipeline(&self.stroke_pipeline);
-                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
-                let start = fill_vertices.len() as u32;
-                let end = start + stroke_vertices.len() as u32;
-                render_pass.draw(start..end, 0..1);
-                log::debug!("Drew {} stroke vertices", stroke_vertices.len());
-            }
+            // 调试：仅绘制纹理顶点（不绘制 fill/stroke）
 
             // 绘制纹理元素（所有顶点已上传）
             if !textured_vertex_ranges.is_empty() {
+                // 调试：先用 fill_pipeline 渲染相同范围，验证几何数据是否正确
+                render_log!("[RENDER][DEBUG] Drawing textured geometry using fill pipeline");
+                render_pass.set_pipeline(&self.fill_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                for (_, range) in &textured_vertex_ranges {
+                    render_pass.draw(range.clone(), 0..1);
+                }
+                render_log!("[RENDER][DEBUG] Fill pipeline draw for textured ranges complete");
+
+                render_log!("[RENDER] ========== DRAWING TEXTURES ==========");
+                render_log!("[RENDER] Pipeline: texture_pipeline");
                 render_pass.set_pipeline(&self.texture_pipeline);
                 
                 for (texture_id, range) in &textured_vertex_ranges {
                     // 获取纹理视图
-                    let texture_view = self
-                        .texture_manager
-                        .get_texture_view(texture_id)
-                        .unwrap_or(&self.placeholder_texture_view);
+                    let (texture_view, is_placeholder) = match self.texture_manager.get_texture_view(texture_id) {
+                        Some(view) => (view, false),
+                        None => {
+                            log::warn!("[RENDER] Texture '{}' not found. Using placeholder view", texture_id);
+                            (&self.placeholder_texture_view, true)
+                        }
+                    };
 
                     // 为此纹理创建 BindGroup
                     let texture_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -640,43 +725,99 @@ impl WebGPURenderer {
                     });
 
                     // 绑定纹理并绘制
+                    render_log!(
+                        "[RENDER] Binding texture '{}': vertices {}..{}, placeholder={}",
+                        texture_id,
+                        range.start,
+                        range.end,
+                        is_placeholder
+                    );
+                    render_log!("[RENDER] BindGroup slot 0 -> [uniform_buffer, texture_view, sampler]");
                     render_pass.set_bind_group(0, &texture_bind_group, &[]);
                     render_pass.draw(range.clone(), 0..1);
-                    log::debug!("Drew {} textured vertices for '{}'", range.end - range.start, texture_id);
+                    render_log!(
+                        "[RENDER] Textured draw submitted: {} vertices for '{}'",
+                        range.end - range.start,
+                        texture_id
+                    );
                 }
 
-                log::info!("Rendered {} texture groups", textured_vertex_ranges.len());
+                render_log!("Rendered {} texture groups", textured_vertex_ranges.len());
             }
         }
 
         // 10. 提交命令
-        self.queue.submit(std::iter::once(encoder.finish()));
+        render_log!("[RENDER] ========== SUBMITTING COMMANDS ==========");
+        render_log!("[RENDER] Finishing encoder...");
+        let command_buffer = encoder.finish();
+        render_log!("[RENDER] Submitting to queue...");
+        self.queue.submit(std::iter::once(command_buffer));
+        render_log!("[RENDER] Presenting frame...");
         frame.present();
+        render_log!("[RENDER] ========== RENDER COMPLETE ==========");
 
         Ok(())
     }
 
     /// 收集场景中所有元素的顶点
     fn collect_vertices(&self, scene: &Scene) -> (Vec<Vertex>, Vec<Vertex>) {
+        render_log!("[COLLECT] ========== COLLECTING VERTICES ==========");
+        render_log!(
+            "[COLLECT] Total elements in scene: {}",
+            scene.elements_sorted().len()
+        );
+        
         let mut fill_vertices = Vec::new();
         let mut stroke_vertices = Vec::new();
 
-        for element in scene.elements_sorted() {
+        for (idx, element) in scene.elements_sorted().iter().enumerate() {
             match element {
                 AnyElement::Rectangle(rect) => {
+                    render_log!("[COLLECT] Element[{}]: Rectangle ID={}", idx, rect.props.id);
+                    let fill_count_before = fill_vertices.len();
+                    let stroke_count_before = stroke_vertices.len();
+                    
                     fill_vertices.extend(rect.generate_fill_vertices());
                     stroke_vertices.extend(rect.generate_stroke_vertices());
+                    
+                    let fill_added = fill_vertices.len() - fill_count_before;
+                    let stroke_added = stroke_vertices.len() - stroke_count_before;
+                    render_log!(
+                        "[COLLECT]   Added {} fill vertices, {} stroke vertices",
+                        fill_added,
+                        stroke_added
+                    );
                 }
                 AnyElement::Circle(circle) => {
+                    render_log!("[COLLECT] Element[{}]: Circle ID={}", idx, circle.props.id);
+                    let fill_count_before = fill_vertices.len();
+                    let stroke_count_before = stroke_vertices.len();
+                    
                     fill_vertices.extend(circle.generate_fill_vertices());
                     stroke_vertices.extend(circle.generate_stroke_vertices());
+                    
+                    let fill_added = fill_vertices.len() - fill_count_before;
+                    let stroke_added = stroke_vertices.len() - stroke_count_before;
+                    render_log!(
+                        "[COLLECT]   Added {} fill vertices, {} stroke vertices",
+                        fill_added,
+                        stroke_added
+                    );
                 }
                 AnyElement::Image(_image) => {
-                    // Image 元素使用独立的纹理渲染管线
+                    render_log!(
+                        "[COLLECT] Element[{}]: Image (handled by textured pipeline)",
+                        idx
+                    );
                 }
             }
         }
 
+        render_log!(
+            "[COLLECT] Total collected: {} fill, {} stroke",
+            fill_vertices.len(),
+            stroke_vertices.len()
+        );
         (fill_vertices, stroke_vertices)
     }
 
