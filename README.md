@@ -44,8 +44,8 @@ infinitecanvas_engine/
 
 ```bash
 # 克隆仓库
-git clone https://git.wemomo.com/yu.zhenyu/infinitecanvas_engine.git
-cd infinitecanvas_engine
+git clone https://github.com/nicholasyuzhiyu/infinitecanvas-engine.git
+cd infinitecanvas-engine
 
 # 安装 Rust 工具链
 rustup target add wasm32-unknown-unknown
@@ -93,5 +93,14 @@ MIT OR Apache-2.0
 
 ## 👥 作者
 
-Yu Zhenyu (@yu.zhenyu)
+Yu Zhenyu ([@nicholasyuzhiyu](https://github.com/nicholasyuzhiyu))
+
+## 🤖 关于 AI 辅助开发
+
+这个项目是我探索 **AI 辅助软件开发 (AI-Assisted Software Development)** 的实践：
+
+- **我的工作**：整体架构设计、技术方案规划、接口定义、开发计划拆分
+- **AI 的工作**：Rust/WebGPU/WASM 等技术栈的具体实现细节
+
+这个实践验证了：在 AI 时代，工程师的核心价值在于 **架构思维** 和 **问题分解能力**，而不是记住每种语言的语法。通过 AI 辅助，可以快速跨越技术栈边界，专注于解决真正的问题。
 
