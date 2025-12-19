@@ -44,8 +44,8 @@ infinitecanvas_engine/
 
 ```bash
 # 克隆仓库
-git clone https://github.com/nicholasyuzhiyu/infinitecanvas-engine.git
-cd infinitecanvas-engine
+git clone https://github.com/shinjiyu/infinitecanvas_engine.git
+cd infinitecanvas_engine
 
 # 安装 Rust 工具链
 rustup target add wasm32-unknown-unknown
@@ -93,7 +93,7 @@ MIT OR Apache-2.0
 
 ## 👥 作者
 
-Yu Zhenyu ([@nicholasyuzhiyu](https://github.com/nicholasyuzhiyu))
+Yu Zhenyu ([@shinjiyu](https://github.com/shinjiyu))
 
 ## 🤖 关于 AI 辅助开发
 
