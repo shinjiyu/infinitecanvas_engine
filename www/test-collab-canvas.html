@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InfiniteCanvas - 协同画布</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1.5rem;
+      background: rgba(0,0,0,0.4);
+      border-bottom: 1px solid #333;
+    }
+    .logo {
+      font-size: 1.2rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, #4090f2, #36d399);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .connection-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.8rem;
+      border-radius: 16px;
+      font-size: 0.75rem;
+    }
+    .connection-badge.disconnected { background: rgba(242, 64, 64, 0.2); color: #f24040; }
+    .connection-badge.connecting { background: rgba(242, 201, 76, 0.2); color: #f2c94c; }
+    .connection-badge.connected { background: rgba(54, 211, 153, 0.2); color: #36d399; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+    }
+    .disconnected .status-dot { background: #f24040; }
+    .connecting .status-dot { background: #f2c94c; animation: pulse 1s infinite; }
+    .connected .status-dot { background: #36d399; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    
+    .main-layout {
+      display: flex;
+      height: calc(100vh - 50px);
+    }
+    
+    .sidebar {
+      width: 240px;
+      background: rgba(20,20,30,0.95);
+      border-right: 1px solid #333;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .panel-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #666;
+      margin-bottom: 0.5rem;
+    }
+    .join-form { display: flex; flex-direction: column; gap: 0.5rem; }
+    .join-form input {
+      padding: 0.5rem;
+      background: #0a0a0f;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+    .join-form input:focus { outline: none; border-color: #4090f2; }
+    .btn {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: #4090f2; color: white; }
+    .btn-primary:hover { background: #5ca0ff; }
+    .btn-danger { background: #f24040; color: white; }
+    .btn-danger:hover { background: #ff5555; }
+    
+    .users-panel { flex: 1; overflow-y: auto; }
+    .user-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      margin-bottom: 0.25rem;
+      background: rgba(255,255,255,0.03);
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .user-avatar {
+      width: 24px; height: 24px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: bold; color: white;
+    }
+    .user-me { font-size: 0.65rem; color: #36d399; margin-left: auto; }
+    .user-selection {
+      font-size: 0.65rem;
+      color: #888;
+      margin-top: 2px;
+    }
+    
+    .canvas-area {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    #canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+    .remote-cursors {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .remote-cursor {
+      position: absolute;
+      pointer-events: none;
+      transition: transform 0.08s ease-out;
+    }
+    .cursor-icon { width: 18px; height: 18px; }
+    .cursor-label {
+      position: absolute;
+      left: 16px; top: 14px;
+      padding: 2px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+    
+    .toolbar {
+      position: absolute;
+      top: 1rem; left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 0.25rem;
+      background: rgba(20,20,30,0.9);
+      padding: 0.5rem;
+      border-radius: 8px;
+      border: 1px solid #333;
+    }
+    .tool-btn {
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: #888;
+      cursor: pointer;
+      font-size: 1.1rem;
+      transition: all 0.15s;
+    }
+    .tool-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .tool-btn.active { background: #4090f2; color: white; }
+    
+    .status-bar {
+      position: absolute;
+      bottom: 1rem; left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 1.5rem;
+      background: rgba(20,20,30,0.9);
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      border: 1px solid #333;
+      font-size: 0.75rem;
+    }
+    .stat-item { display: flex; gap: 0.5rem; }
+    .stat-label { color: #666; }
+    .stat-value { color: #36d399; font-weight: 600; }
+    
+    /* 远程用户选择高亮 */
+    .remote-selection-overlay {
+      position: absolute;
+      pointer-events: none;
+      border: 2px dashed;
+      border-radius: 2px;
+      transition: all 0.1s ease-out;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">🎨 协同画布</div>
+    <div class="connection-badge disconnected" id="connection-badge">
+      <span class="status-dot"></span>
+      <span id="connection-text">未连接</span>
+    </div>
+  </div>
+
+  <div class="main-layout">
+    <div class="sidebar">
+      <!-- 加入面板 -->
+      <div id="join-panel">
+        <div class="panel-title">加入协同</div>
+        <div class="join-form">
+          <input type="text" id="room-id" value="canvas-room" placeholder="房间 ID">
+          <input type="text" id="user-name" placeholder="你的名字">
+          <button class="btn btn-primary" id="btn-join">加入房间</button>
+        </div>
+      </div>
+
+      <!-- 房间面板 -->
+      <div id="room-panel" style="display:none">
+        <div class="panel-title">房间: <span id="current-room">-</span></div>
+        <button class="btn btn-danger" id="btn-leave" style="width:100%">离开</button>
+      </div>
+
+      <!-- 用户列表 -->
+      <div class="users-panel">
+        <div class="panel-title">在线用户</div>
+        <div id="users-list"></div>
+      </div>
+    </div>
+
+    <div class="canvas-area">
+      <canvas id="canvas"></canvas>
+      <div class="remote-cursors" id="remote-cursors"></div>
+      <div id="remote-selections"></div>
+
+      <div class="toolbar">
+        <button class="tool-btn active" data-tool="select" title="选择 (V)">🔲</button>
+        <button class="tool-btn" data-tool="rectangle" title="矩形 (R)">⬛</button>
+        <button class="tool-btn" data-tool="circle" title="圆形 (O)">⚪</button>
+        <button class="tool-btn" data-tool="pan" title="平移 (H)">✋</button>
+      </div>
+
+      <div class="status-bar">
+        <div class="stat-item">
+          <span class="stat-label">FPS:</span>
+          <span class="stat-value" id="fps">--</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">元素:</span>
+          <span class="stat-value" id="element-count">0</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">选中:</span>
+          <span class="stat-value" id="selection-count">0</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import init, { InfiniteCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
+
+    // ============ 协同客户端 ============
+    class CollabClient {
+      constructor(url) {
+        this.url = url;
+        this.ws = null;
+        this.state = 'disconnected';
+        this.myUserId = null;
+        this.users = new Map();
+        this.handlers = {};
+        this.cursorThrottle = 50;
+        this.lastCursor = 0;
+      }
+      on(e, fn) { this.handlers[e] = fn; return this; }
+      emit(e, ...a) { this.handlers[e]?.(...a); }
+      connect(roomId, userName) {
+        this.roomId = roomId;
+        this.userName = userName;
+        this.ws = new WebSocket(this.url);
+        this.setState('connecting');
+        this.ws.onopen = () => {
+          this.setState('connected');
+          this.send({ type: 'join', roomId, userName });
+        };
+        this.ws.onmessage = e => this.handle(JSON.parse(e.data));
+        this.ws.onclose = () => this.setState('disconnected');
+        this.ws.onerror = () => this.emit('error');
+      }
+      disconnect() { this.ws?.close(); this.setState('disconnected'); }
+      handle(msg) {
+        switch (msg.type) {
+          case 'room_state':
+            this.myUserId = msg.yourUserId;
+            this.users.clear();
+            msg.users.forEach(u => { if (u.id !== this.myUserId) this.users.set(u.id, u); });
+            this.emit('room_joined', msg.roomId, msg.users, this.myUserId);
+            break;
+          case 'user_joined':
+            this.users.set(msg.user.id, msg.user);
+            this.emit('user_joined', msg.user);
+            break;
+          case 'user_left':
+            this.users.delete(msg.userId);
+            this.emit('user_left', msg.userId);
+            break;
+          case 'cursor_update':
+            const u = this.users.get(msg.userId);
+            if (u) u.cursor = msg.position;
+            this.emit('cursor_update', msg.userId, msg.position);
+            break;
+          case 'selection_update':
+            const user = this.users.get(msg.userId);
+            if (user) user.selection = msg.selection;
+            this.emit('selection_update', msg.userId, msg.selection);
+            break;
+          case 'operation':
+            this.emit('operation', msg.operation);
+            break;
+        }
+      }
+      send(msg) { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(msg)); }
+      sendCursor(pos) {
+        const now = Date.now();
+        if (now - this.lastCursor >= this.cursorThrottle) {
+          this.lastCursor = now;
+          this.send({ type: 'cursor_move', position: pos });
+        }
+      }
+      sendSelection(sel) { this.send({ type: 'selection_change', selection: sel }); }
+      sendOperation(op) { 
+        const id = `op_${Date.now()}`;
+        this.send({ type: 'operation', operationId: id, operation: op });
+      }
+      setState(s) { this.state = s; this.emit('state', s); }
+      getUsers() { return Array.from(this.users.values()); }
+    }
+
+    // ============ 全局状态 ============
+    let wasm, canvas, collab;
+    const remoteSelections = new Map(); // userId -> elementIds[]
+
+    // ============ 初始化 ============
+    async function main() {
+      await init();
+      wasm = new InfiniteCanvas();
+      canvas = document.getElementById('canvas');
+      
+      // 设置 Canvas 尺寸
+      const area = document.querySelector('.canvas-area');
+      canvas.width = area.clientWidth;
+      canvas.height = area.clientHeight;
+      
+      await wasm.init(canvas);
+      
+      // 添加初始图形
+      addInitialShapes();
+      
+      // 初始化协同客户端
+      collab = new CollabClient('ws://localhost:8080');
+      setupCollabEvents();
+      
+      // 绑定事件
+      bindCanvasEvents();
+      bindToolbar();
+      bindUIEvents();
+      
+      // 随机用户名
+      const names = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank'];
+      document.getElementById('user-name').value = 
+        names[Math.floor(Math.random() * names.length)] + '_' + 
+        Math.floor(Math.random() * 1000);
+      
+      // 渲染循环
+      let fc = 0, lt = performance.now();
+      function loop() {
+        wasm.render();
+        
+        // 渲染远程选择
+        renderRemoteSelections();
+        
+        // FPS
+        fc++;
+        const now = performance.now();
+        if (now - lt >= 1000) {
+          document.getElementById('fps').textContent = Math.round(fc * 1000 / (now - lt));
+          fc = 0; lt = now;
+        }
+        document.getElementById('element-count').textContent = wasm.get_element_count();
+        document.getElementById('selection-count').textContent = wasm.get_selection_count();
+        
+        requestAnimationFrame(loop);
+      }
+      loop();
+      
+      console.log('✅ 协同画布已初始化');
+    }
+
+    function addInitialShapes() {
+      const colors = ['#4090f2', '#36d399', '#f24040', '#f2c94c', '#9b59b6'];
+      for (let i = 0; i < 8; i++) {
+        const x = 100 + Math.random() * 600;
+        const y = 100 + Math.random() * 400;
+        const size = 50 + Math.random() * 80;
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        if (Math.random() > 0.5) {
+          wasm.add_rectangle(x, y, size, size * 0.7, color, null, 0);
+        } else {
+          wasm.add_circle(x, y, size / 2, color, null, 0);
+        }
+      }
+    }
+
+    function setupCollabEvents() {
+      collab.on('state', state => {
+        const badge = document.getElementById('connection-badge');
+        badge.className = 'connection-badge ' + state;
+        const text = { disconnected: '未连接', connecting: '连接中...', connected: '已连接' };
+        document.getElementById('connection-text').textContent = text[state];
+      });
+
+      collab.on('room_joined', (roomId, users, myId) => {
+        document.getElementById('join-panel').style.display = 'none';
+        document.getElementById('room-panel').style.display = 'block';
+        document.getElementById('current-room').textContent = roomId;
+        updateUsersList();
+      });
+
+      collab.on('user_joined', user => {
+        updateUsersList();
+      });
+
+      collab.on('user_left', userId => {
+        removeCursor(userId);
+        remoteSelections.delete(userId);
+        updateUsersList();
+      });
+
+      collab.on('cursor_update', (userId, pos) => {
+        const user = collab.users.get(userId);
+        if (user) updateCursor(userId, user.name, user.color, pos);
+      });
+
+      collab.on('selection_update', (userId, selection) => {
+        remoteSelections.set(userId, selection);
+        updateUsersList();
+      });
+
+      collab.on('operation', op => {
+        applyRemoteOperation(op);
+      });
+    }
+
+    function applyRemoteOperation(op) {
+      switch (op.op) {
+        case 'add':
+          if (op.elementType === 'rectangle') {
+            wasm.add_rectangle(
+              op.properties.x, op.properties.y,
+              op.properties.width, op.properties.height,
+              op.properties.fill, null, 0
+            );
+          } else if (op.elementType === 'circle') {
+            wasm.add_circle(
+              op.properties.x, op.properties.y,
+              op.properties.radius,
+              op.properties.fill, null, 0
+            );
+          }
+          break;
+        // 其他操作类型...
+      }
+    }
+
+    function bindCanvasEvents() {
+      let lastSelection = [];
+      
+      canvas.addEventListener('pointermove', e => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        // 发送光标位置
+        if (collab.state === 'connected') {
+          collab.sendCursor({ x, y });
+        }
+        
+        // 处理本地事件
+        wasm.handle_pointer_event('move', e.pointerId, x, y, e.movementX, e.movementY,
+          e.button, e.buttons, e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
+      });
+
+      canvas.addEventListener('pointerdown', e => {
+        const rect = canvas.getBoundingClientRect();
+        wasm.handle_pointer_event('down', e.pointerId, 
+          e.clientX - rect.left, e.clientY - rect.top,
+          e.movementX, e.movementY, e.button, e.buttons,
+          e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
+        canvas.setPointerCapture(e.pointerId);
+      });
+
+      canvas.addEventListener('pointerup', e => {
+        const rect = canvas.getBoundingClientRect();
+        wasm.handle_pointer_event('up', e.pointerId,
+          e.clientX - rect.left, e.clientY - rect.top,
+          e.movementX, e.movementY, e.button, e.buttons,
+          e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
+        canvas.releasePointerCapture(e.pointerId);
+        
+        // 检查选择是否变化
+        checkSelectionChange();
+      });
+
+      canvas.addEventListener('contextmenu', e => e.preventDefault());
+    }
+
+    function checkSelectionChange() {
+      if (collab.state !== 'connected') return;
+      
+      // 获取当前选择的元素 ID
+      const selectionIds = wasm.get_selected_ids ? wasm.get_selected_ids() : [];
+      collab.sendSelection(selectionIds);
+    }
+
+    function bindToolbar() {
+      document.querySelectorAll('.tool-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          wasm.set_tool(btn.dataset.tool);
+        });
+      });
+
+      document.addEventListener('keydown', e => {
+        if (e.target.tagName === 'INPUT') return;
+        const map = { v: 'select', r: 'rectangle', o: 'circle', h: 'pan' };
+        if (map[e.key.toLowerCase()]) {
+          document.querySelector(`[data-tool="${map[e.key.toLowerCase()]}"]`).click();
+        }
+      });
+    }
+
+    function bindUIEvents() {
+      document.getElementById('btn-join').addEventListener('click', () => {
+        const roomId = document.getElementById('room-id').value.trim() || 'canvas-room';
+        const userName = document.getElementById('user-name').value.trim() || 'Anonymous';
+        collab.connect(roomId, userName);
+      });
+
+      document.getElementById('btn-leave').addEventListener('click', () => {
+        collab.disconnect();
+        document.getElementById('join-panel').style.display = 'block';
+        document.getElementById('room-panel').style.display = 'none';
+        document.getElementById('remote-cursors').innerHTML = '';
+        remoteSelections.clear();
+        updateUsersList();
+      });
+    }
+
+    function updateUsersList() {
+      const list = document.getElementById('users-list');
+      const users = [
+        ...(collab.myUserId ? [{ id: collab.myUserId, name: collab.userName, color: '#4090f2', isMe: true }] : []),
+        ...collab.getUsers()
+      ];
+      
+      list.innerHTML = users.map(u => {
+        const sel = u.isMe ? [] : (remoteSelections.get(u.id) || []);
+        return `
+          <div class="user-item">
+            <div class="user-avatar" style="background:${u.color || '#666'}">${u.name[0]}</div>
+            <div>
+              <div>${u.name}</div>
+              ${sel.length > 0 ? `<div class="user-selection">选中 ${sel.length} 个</div>` : ''}
+            </div>
+            ${u.isMe ? '<span class="user-me">(你)</span>' : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function updateCursor(userId, name, color, pos) {
+      let cursor = document.getElementById('cursor-' + userId);
+      if (!cursor) {
+        cursor = document.createElement('div');
+        cursor.id = 'cursor-' + userId;
+        cursor.className = 'remote-cursor';
+        cursor.innerHTML = `
+          <svg class="cursor-icon" viewBox="0 0 24 24" fill="${color}">
+            <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86h8.28c.45 0 .67-.54.35-.85L5.85 2.86c-.31-.31-.85-.09-.85.35z"/>
+          </svg>
+          <span class="cursor-label" style="background:${color}">${name}</span>
+        `;
+        document.getElementById('remote-cursors').appendChild(cursor);
+      }
+      cursor.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
+    }
+
+    function removeCursor(userId) {
+      document.getElementById('cursor-' + userId)?.remove();
+    }
+
+    function renderRemoteSelections() {
+      // 这里可以在画布上绘制远程用户选中元素的边框
+      // 需要从 WASM 获取元素的边界框信息
+      // 简化版本：仅在用户列表中显示选择数量
+    }
+
+    main();
+  </script>
+</body>
+</html>
+

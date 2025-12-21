@@ -147,3 +147,4 @@ export interface CollaborationEvents {
   onError?: (error: Error) => void;
 }
 
+
