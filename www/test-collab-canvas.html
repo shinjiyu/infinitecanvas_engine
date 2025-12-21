@@ -457,6 +457,7 @@
     }
 
     function applyRemoteOperation(op) {
+      console.log('[Collab] Applying remote operation:', op);
       switch (op.op) {
         case 'add':
           if (op.elementType === 'rectangle') {
@@ -473,12 +474,44 @@
             );
           }
           break;
-        // 其他操作类型...
+        case 'move':
+          // 移动元素 - 需要 WASM 支持按 ID 移动
+          // wasm.move_element(op.elementId, op.position.x, op.position.y);
+          console.log('[Collab] Move operation received (not yet implemented)');
+          break;
+        case 'remove':
+          wasm.remove_element(op.elementId);
+          break;
       }
     }
 
+    // 广播新创建的元素
+    function broadcastNewElement(elementId) {
+      if (collab.state !== 'connected') return;
+      
+      const info = wasm.get_element_info(elementId);
+      if (!info) return;
+      
+      const op = {
+        op: 'add',
+        elementType: info.type,
+        elementId: elementId,
+        properties: {
+          x: info.x + info.width / 2,  // 中心点
+          y: info.y + info.height / 2,
+          width: info.width,
+          height: info.height,
+          radius: Math.min(info.width, info.height) / 2,
+          fill: '#4090f2'  // 默认颜色
+        }
+      };
+      
+      collab.sendOperation(op);
+      console.log('[Collab] Broadcast new element:', op);
+    }
+
     function bindCanvasEvents() {
-      let lastSelection = [];
+      let lastElementCount = 0;
       
       canvas.addEventListener('pointermove', e => {
         const rect = canvas.getBoundingClientRect();
@@ -497,6 +530,9 @@
 
       canvas.addEventListener('pointerdown', e => {
         const rect = canvas.getBoundingClientRect();
+        // 记录当前元素数量
+        lastElementCount = wasm.get_element_count();
+        
         wasm.handle_pointer_event('down', e.pointerId, 
           e.clientX - rect.left, e.clientY - rect.top,
           e.movementX, e.movementY, e.button, e.buttons,
@@ -511,6 +547,17 @@
           e.movementX, e.movementY, e.button, e.buttons,
           e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
         canvas.releasePointerCapture(e.pointerId);
+        
+        // 检查是否有新元素创建
+        const currentCount = wasm.get_element_count();
+        if (currentCount > lastElementCount) {
+          // 新元素被创建，获取选中的元素 ID（新创建的元素会被自动选中）
+          const selectedIds = wasm.get_selected_ids();
+          if (selectedIds && selectedIds.length > 0) {
+            const newId = selectedIds[selectedIds.length - 1];
+            broadcastNewElement(newId);
+          }
+        }
         
         // 检查选择是否变化
         checkSelectionChange();
