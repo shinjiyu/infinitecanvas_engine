@@ -38,6 +38,10 @@ export class InfiniteCanvas {
    */
   clear_scene(): void;
   /**
+   * 检查是否正在拖动
+   */
+  is_dragging(): boolean;
+  /**
    * 添加矩形
    *
    * # 参数
@@ -52,6 +56,26 @@ export class InfiniteCanvas {
    */
   add_rectangle(x: number, y: number, width: number, height: number, fill_color: string | null | undefined, stroke_color: string | null | undefined, stroke_width: number): bigint;
   /**
+   * 获取重做栈大小
+   */
+  get_redo_count(): number;
+  /**
+   * 获取撤销栈大小
+   */
+  get_undo_count(): number;
+  /**
+   * 移动选中的元素
+   * 
+   * # 参数
+   * - `dx`: X 方向移动量（世界坐标）
+   * - `dy`: Y 方向移动量（世界坐标）
+   */
+  move_selection(dx: number, dy: number): void;
+  /**
+   * 临时切换到手型工具（按住空格）
+   */
+  push_hand_tool(): void;
+  /**
    * 删除元素
    *
    * # 参数
@@ -61,6 +85,7 @@ export class InfiniteCanvas {
    * 是否成功删除
    */
   remove_element(id: bigint): boolean;
+  select_element(element_id: bigint, additive: boolean): boolean;
   /**
    * 上传纹理到 GPU
    *
@@ -82,6 +107,15 @@ export class InfiniteCanvas {
    * ```
    */
   upload_texture(texture_id: string, width: number, height: number, data: Uint8Array): void;
+  clear_selection(): void;
+  /**
+   * 获取帧计数
+   */
+  get_frame_count(): bigint;
+  /**
+   * 获取当前工具的光标样式
+   */
+  get_tool_cursor(): string;
   /**
    * 设置图片透明度
    *
@@ -93,10 +127,59 @@ export class InfiniteCanvas {
    * 是否成功设置
    */
   set_image_alpha(image_id: bigint, alpha: number): boolean;
+  deselect_element(element_id: bigint): boolean;
+  /**
+   * 获取当前工具名称
+   */
+  get_current_tool(): string;
+  /**
+   * 获取元素信息
+   * 
+   * # 返回
+   * 如果元素存在，返回元素信息对象；否则返回 null
+   */
+  get_element_info(id: bigint): any;
+  get_selected_ids(): Array<any>;
   /**
    * 获取元素数量
    */
   get_element_count(): number;
+  debug_clear_events(): void;
+  handle_wheel_event(delta_x: number, delta_y: number, delta_mode: number, shift_key: boolean, ctrl_key: boolean, alt_key: boolean, meta_key: boolean): void;
+  /**
+   * 恢复到之前的工具
+   */
+  pop_temporary_tool(): void;
+  /**
+   * 获取上一帧绘制调用数
+   */
+  get_last_draw_calls(): number;
+  get_selection_count(): number;
+  /**
+   * 获取选中元素的边界框
+   * 
+   * # 返回
+   * 如果有选中元素，返回 { x, y, width, height }；否则返回 null
+   */
+  get_selection_bounds(): any;
+  handle_pointer_event(kind: string, pointer_id: number, x: number, y: number, movement_x: number, movement_y: number, button: number, buttons_mask: number, shift_key: boolean, ctrl_key: boolean, alt_key: boolean, meta_key: boolean): void;
+  hit_test_world_point(x: number, y: number, max_results?: number | null): Array<any>;
+  /**
+   * 获取上一帧顶点数
+   */
+  get_last_vertex_count(): number;
+  /**
+   * 获取性能统计信息
+   * 
+   * # 返回
+   * 包含以下字段的对象：
+   * - frameCount: 总帧数
+   * - vertexCount: 上一帧顶点数
+   * - drawCalls: 上一帧绘制调用数
+   * - frameTimeMs: 上一帧渲染时间（毫秒）
+   * - elementCount: 场景元素总数
+   */
+  get_performance_stats(): any;
   /**
    * 获取视口中心 X
    */
@@ -105,6 +188,20 @@ export class InfiniteCanvas {
    * 获取视口中心 Y
    */
   get_viewport_center_y(): number;
+  handle_keyboard_event(kind: string, key: string, code: string, repeat: boolean, shift_key: boolean, ctrl_key: boolean, alt_key: boolean, meta_key: boolean): void;
+  hit_test_screen_point(x: number, y: number, max_results?: number | null): Array<any>;
+  /**
+   * 检查是否正在框选
+   */
+  is_selection_box_active(): boolean;
+  /**
+   * 获取当前框选矩形（如果正在框选）
+   * 
+   * # 返回
+   * 如果正在框选，返回 { x, y, width, height }；否则返回 null
+   */
+  get_selection_box_bounds(): any;
+  debug_pending_event_count(): number;
   /**
    * 创建新的画布实例（构造器，实际初始化在 init() 中完成）
    *
@@ -132,6 +229,20 @@ export class InfiniteCanvas {
    */
   init(canvas: HTMLCanvasElement): Promise<void>;
   /**
+   * 重做上一个撤销的操作
+   * 
+   * # 返回
+   * 是否成功重做
+   */
+  redo(): boolean;
+  /**
+   * 撤销上一个操作
+   * 
+   * # 返回
+   * 是否成功撤销
+   */
+  undo(): boolean;
+  /**
    * 清空场景中所有元素
    *
    * # JavaScript 示例
@@ -157,9 +268,27 @@ export class InfiniteCanvas {
    */
   zoom_at(anchor_x: number, anchor_y: number, delta_zoom: number): void;
   /**
+   * 是否可以重做
+   */
+  can_redo(): boolean;
+  /**
+   * 是否可以撤销
+   */
+  can_undo(): boolean;
+  /**
    * 获取视口缩放
    */
   get_zoom(): number;
+  /**
+   * 设置当前工具
+   * 
+   * # 参数
+   * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "pan")
+   * 
+   * # 返回
+   * 是否成功设置
+   */
+  set_tool(tool_name: string): boolean;
   /**
    * 添加图片元素
    *
@@ -181,6 +310,22 @@ export class InfiniteCanvas {
    * ```
    */
   add_image(x: number, y: number, width: number, height: number, texture_id: string): bigint;
+  /**
+   * 获取完整的画布状态（用于 UI 同步）
+   * 
+   * # 返回
+   * 包含以下字段的对象：
+   * - tool: 当前工具名称
+   * - cursor: 光标样式
+   * - selectionCount: 选中元素数量
+   * - elementCount: 总元素数量
+   * - canUndo: 是否可撤销
+   * - canRedo: 是否可重做
+   * - isDragging: 是否正在拖动
+   * - isSelectionBoxActive: 是否正在框选
+   * - zoom: 当前缩放比例
+   */
+  get_state(): any;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -191,18 +336,52 @@ export interface InitOutput {
   readonly infinitecanvas_add_circle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
   readonly infinitecanvas_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
   readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
+  readonly infinitecanvas_can_redo: (a: number) => number;
+  readonly infinitecanvas_can_undo: (a: number) => number;
   readonly infinitecanvas_clear: (a: number) => void;
   readonly infinitecanvas_clear_scene: (a: number) => void;
+  readonly infinitecanvas_clear_selection: (a: number) => void;
+  readonly infinitecanvas_debug_clear_events: (a: number) => void;
+  readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
+  readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
+  readonly infinitecanvas_get_current_tool: (a: number) => [number, number];
   readonly infinitecanvas_get_element_count: (a: number) => number;
+  readonly infinitecanvas_get_element_info: (a: number, b: bigint) => any;
+  readonly infinitecanvas_get_frame_count: (a: number) => bigint;
+  readonly infinitecanvas_get_last_draw_calls: (a: number) => number;
+  readonly infinitecanvas_get_last_vertex_count: (a: number) => number;
+  readonly infinitecanvas_get_performance_stats: (a: number) => any;
+  readonly infinitecanvas_get_redo_count: (a: number) => number;
+  readonly infinitecanvas_get_selected_ids: (a: number) => any;
+  readonly infinitecanvas_get_selection_bounds: (a: number) => any;
+  readonly infinitecanvas_get_selection_box_bounds: (a: number) => any;
+  readonly infinitecanvas_get_selection_count: (a: number) => number;
+  readonly infinitecanvas_get_state: (a: number) => any;
+  readonly infinitecanvas_get_tool_cursor: (a: number) => [number, number];
+  readonly infinitecanvas_get_undo_count: (a: number) => number;
   readonly infinitecanvas_get_viewport_center_x: (a: number) => number;
   readonly infinitecanvas_get_viewport_center_y: (a: number) => number;
   readonly infinitecanvas_get_zoom: (a: number) => number;
+  readonly infinitecanvas_handle_keyboard_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
+  readonly infinitecanvas_handle_pointer_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
+  readonly infinitecanvas_handle_wheel_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+  readonly infinitecanvas_hit_test_screen_point: (a: number, b: number, c: number, d: number) => any;
+  readonly infinitecanvas_hit_test_world_point: (a: number, b: number, c: number, d: number) => any;
   readonly infinitecanvas_init: (a: number, b: any) => any;
+  readonly infinitecanvas_is_dragging: (a: number) => number;
+  readonly infinitecanvas_is_selection_box_active: (a: number) => number;
+  readonly infinitecanvas_move_selection: (a: number, b: number, c: number) => void;
   readonly infinitecanvas_new: () => [number, number, number];
   readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
+  readonly infinitecanvas_pop_temporary_tool: (a: number) => void;
+  readonly infinitecanvas_push_hand_tool: (a: number) => void;
+  readonly infinitecanvas_redo: (a: number) => number;
   readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
   readonly infinitecanvas_render: (a: number) => [number, number];
+  readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
   readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
+  readonly infinitecanvas_set_tool: (a: number, b: number, c: number) => number;
+  readonly infinitecanvas_undo: (a: number) => number;
   readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
   readonly wasm_bindgen__convert__closures_____invoke__hac03de89d7fe1ed3: (a: number, b: number, c: any) => void;

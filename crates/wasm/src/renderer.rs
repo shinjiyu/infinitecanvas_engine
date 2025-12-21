@@ -2,7 +2,7 @@
 ///!
 ///! 使用 wgpu 实现高性能 GPU 渲染
 
-use infinitecanvas_engine::{math::Vertex, AnyElement, Scene, Viewport};
+use infinitecanvas_engine::{element::Element, math::{Rect, Vertex}, AnyElement, Scene, Viewport};
 use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
 use std::sync::Arc;
@@ -465,20 +465,35 @@ impl WebGPURenderer {
     }
 
     /// 渲染场景
-    pub fn render(&mut self, scene: &Scene, _viewport: &Viewport) -> Result<(), JsValue> {
-        // 1. 收集所有顶点
-        let (fill_vertices, stroke_vertices) = self.collect_vertices(scene);
-        let textured_groups = self.collect_textured_vertices(scene);
+    /// 
+    /// # 参数
+    /// - `scene`: 场景数据
+    /// - `_viewport`: 视口（当前未使用）
+    /// - `selection_box`: 框选矩形（如果正在框选）
+    pub fn render(
+        &mut self, 
+        scene: &Scene, 
+        viewport: &Viewport,
+        selection_box: Option<Rect>,
+    ) -> Result<(), JsValue> {
+        // 1. 收集所有顶点（带视口裁剪）
+        let (fill_vertices, stroke_vertices, _culled_count) = self.collect_vertices(scene, viewport);
+        let textured_groups = self.collect_textured_vertices(scene, viewport);
+        
+        // 1.5 收集选中元素的高亮顶点和框选矩形顶点
+        let (selection_fill_vertices, selection_stroke_vertices) = self.collect_selection_overlay_vertices(scene, selection_box);
         
         // 计算总顶点数
         let textured_vertex_count: usize = textured_groups.iter().map(|(_, v)| v.len()).sum();
-        let total_vertices = fill_vertices.len() + stroke_vertices.len() + textured_vertex_count;
+        let selection_vertex_count = selection_fill_vertices.len() + selection_stroke_vertices.len();
+        let total_vertices = fill_vertices.len() + stroke_vertices.len() + textured_vertex_count + selection_vertex_count;
         
         render_log!(
-            "🎨 Collected {} fill, {} stroke, {} textured vertices",
+            "🎨 Collected {} fill, {} stroke, {} textured, {} selection vertices",
             fill_vertices.len(),
             stroke_vertices.len(),
-            textured_vertex_count
+            textured_vertex_count,
+            selection_vertex_count
         );
 
         if total_vertices == 0 {
@@ -600,14 +615,70 @@ impl WebGPURenderer {
             }
         }
 
+        // 5.5 上传选中高亮顶点
+        let selection_fill_start = vertex_offset as u32;
+        if !selection_fill_vertices.is_empty() {
+            let offset_bytes = (vertex_offset * std::mem::size_of::<Vertex>()) as u64;
+            self.queue.write_buffer(
+                &self.vertex_buffer,
+                offset_bytes,
+                bytemuck::cast_slice(&selection_fill_vertices),
+            );
+            vertex_offset += selection_fill_vertices.len();
+            render_log!(
+                "[RENDER] Uploaded {} selection fill vertices",
+                selection_fill_vertices.len()
+            );
+        }
+        let selection_fill_end = vertex_offset as u32;
+
+        let selection_stroke_start = vertex_offset as u32;
+        if !selection_stroke_vertices.is_empty() {
+            let offset_bytes = (vertex_offset * std::mem::size_of::<Vertex>()) as u64;
+            self.queue.write_buffer(
+                &self.vertex_buffer,
+                offset_bytes,
+                bytemuck::cast_slice(&selection_stroke_vertices),
+            );
+            vertex_offset += selection_stroke_vertices.len();
+            render_log!(
+                "[RENDER] Uploaded {} selection stroke vertices",
+                selection_stroke_vertices.len()
+            );
+        }
+        let selection_stroke_end = vertex_offset as u32;
+
         // 6. 更新 Uniform Buffer（视口变换矩阵）
         
-        // 正交投影矩阵（列优先，WGSL 格式）
+        // 组合视口变换 + 正交投影矩阵（列优先，WGSL 格式）
+        // 
+        // 坐标转换流程：世界坐标 → 屏幕坐标 → NDC
+        // 
+        // 视口变换：
+        //   screen_x = (world_x - viewport_center_x) * zoom + screen_width / 2
+        //   screen_y = (world_y - viewport_center_y) * zoom + screen_height / 2
+        // 
+        // 正交投影：
+        //   ndc_x = screen_x * 2 / screen_width - 1
+        //   ndc_y = 1 - screen_y * 2 / screen_height
+        // 
+        // 组合后：
+        //   ndc_x = world_x * (2 * zoom / width) - viewport_center_x * (2 * zoom / width)
+        //   ndc_y = world_y * (-2 * zoom / height) + viewport_center_y * (2 * zoom / height)
+        
+        let zoom = viewport.zoom();
+        let center = viewport.center();
+        
+        let sx = 2.0 * zoom / width;   // X 缩放因子
+        let sy = -2.0 * zoom / height; // Y 缩放因子（翻转 Y 轴）
+        let tx = -center.x * sx;       // X 平移
+        let ty = -center.y * sy;       // Y 平移
+        
         let projection_matrix: [[f32; 4]; 4] = [
-            [2.0 / width, 0.0, 0.0, 0.0],           // 第1列：X 缩放
-            [0.0, -2.0 / height, 0.0, 0.0],         // 第2列：Y 缩放并翻转
-            [0.0, 0.0, 1.0, 0.0],                   // 第3列：Z 保持不变
-            [-1.0, 1.0, 0.0, 1.0],                  // 第4列：平移
+            [sx,  0.0, 0.0, 0.0],  // 第1列：X 缩放
+            [0.0, sy,  0.0, 0.0],  // 第2列：Y 缩放并翻转
+            [0.0, 0.0, 1.0, 0.0],  // 第3列：Z 保持不变
+            [tx,  ty,  0.0, 1.0],  // 第4列：平移
         ];
         
         render_log!("[RENDER] ========== UPLOADING UNIFORM BUFFER ==========");
@@ -677,7 +748,25 @@ impl WebGPURenderer {
             render_log!("[RENDER] Setting vertex buffer (full slice)");
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
-            // 调试：仅绘制纹理顶点（不绘制 fill/stroke）
+            // 绘制基础填充顶点（矩形、圆形等）
+            if !fill_vertices.is_empty() {
+                render_log!("[RENDER] ========== DRAWING FILL ==========");
+                render_pass.set_pipeline(&self.fill_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                render_pass.draw(0..fill_vertices.len() as u32, 0..1);
+                render_log!("[RENDER] Fill: {} vertices", fill_vertices.len());
+            }
+
+            // 绘制基础描边顶点
+            if !stroke_vertices.is_empty() {
+                render_log!("[RENDER] ========== DRAWING STROKE ==========");
+                render_pass.set_pipeline(&self.stroke_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                let stroke_start = fill_vertices.len() as u32;
+                let stroke_end = stroke_start + stroke_vertices.len() as u32;
+                render_pass.draw(stroke_start..stroke_end, 0..1);
+                render_log!("[RENDER] Stroke: {} vertices", stroke_vertices.len());
+            }
 
             // 绘制纹理元素（所有顶点已上传）
             if !textured_vertex_ranges.is_empty() {
@@ -744,6 +833,29 @@ impl WebGPURenderer {
 
                 render_log!("Rendered {} texture groups", textured_vertex_ranges.len());
             }
+
+            // 绘制选中高亮覆盖层（在所有元素之上）
+            if selection_fill_start < selection_fill_end {
+                render_log!("[RENDER] ========== DRAWING SELECTION FILL ==========");
+                render_pass.set_pipeline(&self.fill_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                render_pass.draw(selection_fill_start..selection_fill_end, 0..1);
+                render_log!(
+                    "[RENDER] Selection fill: {} vertices",
+                    selection_fill_end - selection_fill_start
+                );
+            }
+
+            if selection_stroke_start < selection_stroke_end {
+                render_log!("[RENDER] ========== DRAWING SELECTION STROKE ==========");
+                render_pass.set_pipeline(&self.stroke_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                render_pass.draw(selection_stroke_start..selection_stroke_end, 0..1);
+                render_log!(
+                    "[RENDER] Selection stroke: {} vertices",
+                    selection_stroke_end - selection_stroke_start
+                );
+            }
         }
 
         // 10. 提交命令
@@ -759,8 +871,15 @@ impl WebGPURenderer {
         Ok(())
     }
 
-    /// 收集场景中所有元素的顶点
-    fn collect_vertices(&self, scene: &Scene) -> (Vec<Vertex>, Vec<Vertex>) {
+    /// 收集场景中所有元素的顶点（带视口裁剪）
+    /// 
+    /// # 参数
+    /// - `scene`: 场景数据
+    /// - `viewport`: 视口（用于裁剪）
+    /// 
+    /// # 返回
+    /// (fill_vertices, stroke_vertices, culled_count)
+    fn collect_vertices(&self, scene: &Scene, viewport: &Viewport) -> (Vec<Vertex>, Vec<Vertex>, usize) {
         render_log!("[COLLECT] ========== COLLECTING VERTICES ==========");
         render_log!(
             "[COLLECT] Total elements in scene: {}",
@@ -769,8 +888,16 @@ impl WebGPURenderer {
         
         let mut fill_vertices = Vec::new();
         let mut stroke_vertices = Vec::new();
+        let mut culled_count = 0;
 
         for (idx, element) in scene.elements_sorted().iter().enumerate() {
+            // 视口裁剪：跳过不在视口内的元素
+            let bounds = element.as_element().world_bounds();
+            if !viewport.is_visible(&bounds) {
+                culled_count += 1;
+                continue;
+            }
+
             match element {
                 AnyElement::Rectangle(rect) => {
                     render_log!("[COLLECT] Element[{}]: Rectangle ID={}", idx, rect.props.id);
@@ -814,18 +941,19 @@ impl WebGPURenderer {
         }
 
         render_log!(
-            "[COLLECT] Total collected: {} fill, {} stroke",
+            "[COLLECT] Total collected: {} fill, {} stroke, {} culled",
             fill_vertices.len(),
-            stroke_vertices.len()
+            stroke_vertices.len(),
+            culled_count
         );
-        (fill_vertices, stroke_vertices)
+        (fill_vertices, stroke_vertices, culled_count)
     }
 
-    /// 收集纹理元素的顶点（按纹理分组）
+    /// 收集纹理元素的顶点（按纹理分组，带视口裁剪）
     ///
     /// # 返回
     /// Vec<(texture_id, vertices)> - 每个纹理的顶点列表
-    fn collect_textured_vertices(&self, scene: &Scene) -> Vec<(String, Vec<Vertex>)> {
+    fn collect_textured_vertices(&self, scene: &Scene, viewport: &Viewport) -> Vec<(String, Vec<Vertex>)> {
         use std::collections::HashMap;
 
         let mut texture_groups: HashMap<String, Vec<Vertex>> = HashMap::new();
@@ -833,6 +961,12 @@ impl WebGPURenderer {
         for element in scene.elements_sorted() {
             if let AnyElement::Image(image) = element {
                 if !image.props.visible {
+                    continue;
+                }
+                
+                // 视口裁剪：跳过不在视口内的图片
+                let bounds = image.world_bounds();
+                if !viewport.is_visible(&bounds) {
                     continue;
                 }
 
@@ -847,6 +981,101 @@ impl WebGPURenderer {
         }
 
         texture_groups.into_iter().collect()
+    }
+
+    /// 收集选中高亮覆盖层的顶点
+    /// 
+    /// # 参数
+    /// - `scene`: 场景，用于获取选中元素
+    /// - `selection_box`: 框选矩形（如果正在框选）
+    /// 
+    /// # 返回
+    /// (fill_vertices, stroke_vertices) - 填充顶点和描边顶点
+    fn collect_selection_overlay_vertices(
+        &self, 
+        scene: &Scene, 
+        selection_box: Option<Rect>
+    ) -> (Vec<Vertex>, Vec<Vertex>) {
+        let mut fill_vertices = Vec::new();
+        let mut stroke_vertices = Vec::new();
+
+        // 选中高亮颜色（蓝色）
+        let selection_color = [0.25, 0.55, 0.95, 1.0]; // #4090f2
+        let selection_fill_color = [0.25, 0.55, 0.95, 0.15]; // 半透明蓝色填充
+
+        // 1. 绘制选中元素的高亮边框
+        for element in scene.elements_sorted() {
+            let elem = element.as_element();
+            if !elem.props().selected || !elem.props().visible {
+                continue;
+            }
+
+            let bounds = elem.world_bounds();
+            let padding = 2.0; // 高亮边框与元素的间距
+            let x = bounds.x - padding;
+            let y = bounds.y - padding;
+            let w = bounds.width + padding * 2.0;
+            let h = bounds.height + padding * 2.0;
+
+            // 绘制选中边框（线条）
+            let line_vertices = self.generate_rect_stroke_vertices(x, y, w, h, selection_color);
+            stroke_vertices.extend(line_vertices);
+        }
+
+        // 2. 绘制框选矩形
+        if let Some(rect) = selection_box {
+            // 框选填充（半透明）
+            let fill = self.generate_rect_fill_vertices(rect.x, rect.y, rect.width, rect.height, selection_fill_color);
+            fill_vertices.extend(fill);
+
+            // 框选边框
+            let stroke = self.generate_rect_stroke_vertices(rect.x, rect.y, rect.width, rect.height, selection_color);
+            stroke_vertices.extend(stroke);
+        }
+
+        (fill_vertices, stroke_vertices)
+    }
+
+    /// 生成矩形填充顶点（两个三角形）
+    fn generate_rect_fill_vertices(&self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex> {
+        let tl = [x, y];
+        let tr = [x + w, y];
+        let bl = [x, y + h];
+        let br = [x + w, y + h];
+        let uv = [0.0, 0.0];
+
+        vec![
+            Vertex { position: tl, color, uv },
+            Vertex { position: tr, color, uv },
+            Vertex { position: br, color, uv },
+            Vertex { position: tl, color, uv },
+            Vertex { position: br, color, uv },
+            Vertex { position: bl, color, uv },
+        ]
+    }
+
+    /// 生成矩形描边顶点（四条线）
+    fn generate_rect_stroke_vertices(&self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex> {
+        let tl = [x, y];
+        let tr = [x + w, y];
+        let bl = [x, y + h];
+        let br = [x + w, y + h];
+        let uv = [0.0, 0.0];
+
+        vec![
+            // 上边
+            Vertex { position: tl, color, uv },
+            Vertex { position: tr, color, uv },
+            // 右边
+            Vertex { position: tr, color, uv },
+            Vertex { position: br, color, uv },
+            // 下边
+            Vertex { position: br, color, uv },
+            Vertex { position: bl, color, uv },
+            // 左边
+            Vertex { position: bl, color, uv },
+            Vertex { position: tl, color, uv },
+        ]
     }
 
     /// 调整 Surface 大小

@@ -224,34 +224,6 @@ function getArrayU8FromWasm0(ptr, len) {
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
 }
 
-let cachedUint16ArrayMemory0 = null;
-
-function getUint16ArrayMemory0() {
-    if (cachedUint16ArrayMemory0 === null || cachedUint16ArrayMemory0.byteLength === 0) {
-        cachedUint16ArrayMemory0 = new Uint16Array(wasm.memory.buffer);
-    }
-    return cachedUint16ArrayMemory0;
-}
-
-function getArrayU16FromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return getUint16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
-}
-
-let cachedInt16ArrayMemory0 = null;
-
-function getInt16ArrayMemory0() {
-    if (cachedInt16ArrayMemory0 === null || cachedInt16ArrayMemory0.byteLength === 0) {
-        cachedInt16ArrayMemory0 = new Int16Array(wasm.memory.buffer);
-    }
-    return cachedInt16ArrayMemory0;
-}
-
-function getArrayI16FromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return getInt16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
-}
-
 const CLOSURE_DTORS = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(state => state.dtor(state.a, state.b));
@@ -282,6 +254,34 @@ function makeMutClosure(arg0, arg1, dtor, f) {
     };
     CLOSURE_DTORS.register(real, state, state);
     return real;
+}
+
+let cachedUint16ArrayMemory0 = null;
+
+function getUint16ArrayMemory0() {
+    if (cachedUint16ArrayMemory0 === null || cachedUint16ArrayMemory0.byteLength === 0) {
+        cachedUint16ArrayMemory0 = new Uint16Array(wasm.memory.buffer);
+    }
+    return cachedUint16ArrayMemory0;
+}
+
+function getArrayU16FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
+}
+
+let cachedInt16ArrayMemory0 = null;
+
+function getInt16ArrayMemory0() {
+    if (cachedInt16ArrayMemory0 === null || cachedInt16ArrayMemory0.byteLength === 0) {
+        cachedInt16ArrayMemory0 = new Int16Array(wasm.memory.buffer);
+    }
+    return cachedInt16ArrayMemory0;
+}
+
+function getArrayI16FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getInt16ArrayMemory0().subarray(ptr / 2, ptr / 2 + len);
 }
 
 let cachedInt8ArrayMemory0 = null;
@@ -435,6 +435,14 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_clear_scene(this.__wbg_ptr);
     }
     /**
+     * 检查是否正在拖动
+     * @returns {boolean}
+     */
+    is_dragging() {
+        const ret = wasm.infinitecanvas_is_dragging(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 添加矩形
      *
      * # 参数
@@ -464,6 +472,40 @@ export class InfiniteCanvas {
         return BigInt.asUintN(64, ret);
     }
     /**
+     * 获取重做栈大小
+     * @returns {number}
+     */
+    get_redo_count() {
+        const ret = wasm.infinitecanvas_get_redo_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * 获取撤销栈大小
+     * @returns {number}
+     */
+    get_undo_count() {
+        const ret = wasm.infinitecanvas_get_undo_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * 移动选中的元素
+     *
+     * # 参数
+     * - `dx`: X 方向移动量（世界坐标）
+     * - `dy`: Y 方向移动量（世界坐标）
+     * @param {number} dx
+     * @param {number} dy
+     */
+    move_selection(dx, dy) {
+        wasm.infinitecanvas_move_selection(this.__wbg_ptr, dx, dy);
+    }
+    /**
+     * 临时切换到手型工具（按住空格）
+     */
+    push_hand_tool() {
+        wasm.infinitecanvas_push_hand_tool(this.__wbg_ptr);
+    }
+    /**
      * 删除元素
      *
      * # 参数
@@ -476,6 +518,15 @@ export class InfiniteCanvas {
      */
     remove_element(id) {
         const ret = wasm.infinitecanvas_remove_element(this.__wbg_ptr, id);
+        return ret !== 0;
+    }
+    /**
+     * @param {bigint} element_id
+     * @param {boolean} additive
+     * @returns {boolean}
+     */
+    select_element(element_id, additive) {
+        const ret = wasm.infinitecanvas_select_element(this.__wbg_ptr, element_id, additive);
         return ret !== 0;
     }
     /**
@@ -512,6 +563,33 @@ export class InfiniteCanvas {
             throw takeFromExternrefTable0(ret[0]);
         }
     }
+    clear_selection() {
+        wasm.infinitecanvas_clear_selection(this.__wbg_ptr);
+    }
+    /**
+     * 获取帧计数
+     * @returns {bigint}
+     */
+    get_frame_count() {
+        const ret = wasm.infinitecanvas_get_frame_count(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * 获取当前工具的光标样式
+     * @returns {string}
+     */
+    get_tool_cursor() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.infinitecanvas_get_tool_cursor(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
     /**
      * 设置图片透明度
      *
@@ -530,12 +608,155 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * @param {bigint} element_id
+     * @returns {boolean}
+     */
+    deselect_element(element_id) {
+        const ret = wasm.infinitecanvas_deselect_element(this.__wbg_ptr, element_id);
+        return ret !== 0;
+    }
+    /**
+     * 获取当前工具名称
+     * @returns {string}
+     */
+    get_current_tool() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.infinitecanvas_get_current_tool(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * 获取元素信息
+     *
+     * # 返回
+     * 如果元素存在，返回元素信息对象；否则返回 null
+     * @param {bigint} id
+     * @returns {any}
+     */
+    get_element_info(id) {
+        const ret = wasm.infinitecanvas_get_element_info(this.__wbg_ptr, id);
+        return ret;
+    }
+    /**
+     * @returns {Array<any>}
+     */
+    get_selected_ids() {
+        const ret = wasm.infinitecanvas_get_selected_ids(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 获取元素数量
      * @returns {number}
      */
     get_element_count() {
         const ret = wasm.infinitecanvas_get_element_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    debug_clear_events() {
+        wasm.infinitecanvas_debug_clear_events(this.__wbg_ptr);
+    }
+    /**
+     * @param {number} delta_x
+     * @param {number} delta_y
+     * @param {number} delta_mode
+     * @param {boolean} shift_key
+     * @param {boolean} ctrl_key
+     * @param {boolean} alt_key
+     * @param {boolean} meta_key
+     */
+    handle_wheel_event(delta_x, delta_y, delta_mode, shift_key, ctrl_key, alt_key, meta_key) {
+        wasm.infinitecanvas_handle_wheel_event(this.__wbg_ptr, delta_x, delta_y, delta_mode, shift_key, ctrl_key, alt_key, meta_key);
+    }
+    /**
+     * 恢复到之前的工具
+     */
+    pop_temporary_tool() {
+        wasm.infinitecanvas_pop_temporary_tool(this.__wbg_ptr);
+    }
+    /**
+     * 获取上一帧绘制调用数
+     * @returns {number}
+     */
+    get_last_draw_calls() {
+        const ret = wasm.infinitecanvas_get_last_draw_calls(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get_selection_count() {
+        const ret = wasm.infinitecanvas_get_selection_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * 获取选中元素的边界框
+     *
+     * # 返回
+     * 如果有选中元素，返回 { x, y, width, height }；否则返回 null
+     * @returns {any}
+     */
+    get_selection_bounds() {
+        const ret = wasm.infinitecanvas_get_selection_bounds(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {string} kind
+     * @param {number} pointer_id
+     * @param {number} x
+     * @param {number} y
+     * @param {number} movement_x
+     * @param {number} movement_y
+     * @param {number} button
+     * @param {number} buttons_mask
+     * @param {boolean} shift_key
+     * @param {boolean} ctrl_key
+     * @param {boolean} alt_key
+     * @param {boolean} meta_key
+     */
+    handle_pointer_event(kind, pointer_id, x, y, movement_x, movement_y, button, buttons_mask, shift_key, ctrl_key, alt_key, meta_key) {
+        const ptr0 = passStringToWasm0(kind, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.infinitecanvas_handle_pointer_event(this.__wbg_ptr, ptr0, len0, pointer_id, x, y, movement_x, movement_y, button, buttons_mask, shift_key, ctrl_key, alt_key, meta_key);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number | null} [max_results]
+     * @returns {Array<any>}
+     */
+    hit_test_world_point(x, y, max_results) {
+        const ret = wasm.infinitecanvas_hit_test_world_point(this.__wbg_ptr, x, y, isLikeNone(max_results) ? 0x100000001 : (max_results) >>> 0);
+        return ret;
+    }
+    /**
+     * 获取上一帧顶点数
+     * @returns {number}
+     */
+    get_last_vertex_count() {
+        const ret = wasm.infinitecanvas_get_last_vertex_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * 获取性能统计信息
+     *
+     * # 返回
+     * 包含以下字段的对象：
+     * - frameCount: 总帧数
+     * - vertexCount: 上一帧顶点数
+     * - drawCalls: 上一帧绘制调用数
+     * - frameTimeMs: 上一帧渲染时间（毫秒）
+     * - elementCount: 场景元素总数
+     * @returns {any}
+     */
+    get_performance_stats() {
+        const ret = wasm.infinitecanvas_get_performance_stats(this.__wbg_ptr);
+        return ret;
     }
     /**
      * 获取视口中心 X
@@ -552,6 +773,61 @@ export class InfiniteCanvas {
     get_viewport_center_y() {
         const ret = wasm.infinitecanvas_get_viewport_center_y(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * @param {string} kind
+     * @param {string} key
+     * @param {string} code
+     * @param {boolean} repeat
+     * @param {boolean} shift_key
+     * @param {boolean} ctrl_key
+     * @param {boolean} alt_key
+     * @param {boolean} meta_key
+     */
+    handle_keyboard_event(kind, key, code, repeat, shift_key, ctrl_key, alt_key, meta_key) {
+        const ptr0 = passStringToWasm0(kind, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(code, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        wasm.infinitecanvas_handle_keyboard_event(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, repeat, shift_key, ctrl_key, alt_key, meta_key);
+    }
+    /**
+     * @param {number} x
+     * @param {number} y
+     * @param {number | null} [max_results]
+     * @returns {Array<any>}
+     */
+    hit_test_screen_point(x, y, max_results) {
+        const ret = wasm.infinitecanvas_hit_test_screen_point(this.__wbg_ptr, x, y, isLikeNone(max_results) ? 0x100000001 : (max_results) >>> 0);
+        return ret;
+    }
+    /**
+     * 检查是否正在框选
+     * @returns {boolean}
+     */
+    is_selection_box_active() {
+        const ret = wasm.infinitecanvas_is_selection_box_active(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 获取当前框选矩形（如果正在框选）
+     *
+     * # 返回
+     * 如果正在框选，返回 { x, y, width, height }；否则返回 null
+     * @returns {any}
+     */
+    get_selection_box_bounds() {
+        const ret = wasm.infinitecanvas_get_selection_box_bounds(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    debug_pending_event_count() {
+        const ret = wasm.infinitecanvas_debug_pending_event_count(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * 创建新的画布实例（构造器，实际初始化在 init() 中完成）
@@ -597,6 +873,28 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 重做上一个撤销的操作
+     *
+     * # 返回
+     * 是否成功重做
+     * @returns {boolean}
+     */
+    redo() {
+        const ret = wasm.infinitecanvas_redo(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 撤销上一个操作
+     *
+     * # 返回
+     * 是否成功撤销
+     * @returns {boolean}
+     */
+    undo() {
+        const ret = wasm.infinitecanvas_undo(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 清空场景中所有元素
      *
      * # JavaScript 示例
@@ -634,12 +932,45 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_zoom_at(this.__wbg_ptr, anchor_x, anchor_y, delta_zoom);
     }
     /**
+     * 是否可以重做
+     * @returns {boolean}
+     */
+    can_redo() {
+        const ret = wasm.infinitecanvas_can_redo(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 是否可以撤销
+     * @returns {boolean}
+     */
+    can_undo() {
+        const ret = wasm.infinitecanvas_can_undo(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 获取视口缩放
      * @returns {number}
      */
     get_zoom() {
         const ret = wasm.infinitecanvas_get_zoom(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * 设置当前工具
+     *
+     * # 参数
+     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "pan")
+     *
+     * # 返回
+     * 是否成功设置
+     * @param {string} tool_name
+     * @returns {boolean}
+     */
+    set_tool(tool_name) {
+        const ptr0 = passStringToWasm0(tool_name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_set_tool(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
     }
     /**
      * 添加图片元素
@@ -672,6 +1003,26 @@ export class InfiniteCanvas {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.infinitecanvas_add_image(this.__wbg_ptr, x, y, width, height, ptr0, len0);
         return BigInt.asUintN(64, ret);
+    }
+    /**
+     * 获取完整的画布状态（用于 UI 同步）
+     *
+     * # 返回
+     * 包含以下字段的对象：
+     * - tool: 当前工具名称
+     * - cursor: 光标样式
+     * - selectionCount: 选中元素数量
+     * - elementCount: 总元素数量
+     * - canUndo: 是否可撤销
+     * - canRedo: 是否可重做
+     * - isDragging: 是否正在拖动
+     * - isSelectionBoxActive: 是否正在框选
+     * - zoom: 当前缩放比例
+     * @returns {any}
+     */
+    get_state() {
+        const ret = wasm.infinitecanvas_get_state(this.__wbg_ptr);
+        return ret;
     }
 }
 if (Symbol.dispose) InfiniteCanvas.prototype[Symbol.dispose] = InfiniteCanvas.prototype.free;
@@ -2411,9 +2762,19 @@ function __wbg_get_imports() {
     imports.wbg.__wbg_writeTexture_e6008247063eadbf = function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
         arg0.writeTexture(arg1, arg2, arg3, arg4);
     }, arguments) };
+    imports.wbg.__wbindgen_cast_082b59175ee14e1d = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 815, function: Function { arguments: [Externref], shim_idx: 816, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__heb574fdda24d5f04, wasm_bindgen__convert__closures_____invoke__hac03de89d7fe1ed3);
+        return ret;
+    };
     imports.wbg.__wbindgen_cast_2241b6af4c4b2941 = function(arg0, arg1) {
         // Cast intrinsic for `Ref(String) -> Externref`.
         const ret = getStringFromWasm0(arg0, arg1);
+        return ret;
+    };
+    imports.wbg.__wbindgen_cast_4625c577ab2ec9ee = function(arg0) {
+        // Cast intrinsic for `U64 -> Externref`.
+        const ret = BigInt.asUintN(64, arg0);
         return ret;
     };
     imports.wbg.__wbindgen_cast_7c316abdc43840a3 = function(arg0, arg1) {
@@ -2449,11 +2810,6 @@ function __wbg_get_imports() {
     imports.wbg.__wbindgen_cast_e47ceb6027f5c92c = function(arg0, arg1) {
         // Cast intrinsic for `Ref(Slice(I16)) -> NamedExternref("Int16Array")`.
         const ret = getArrayI16FromWasm0(arg0, arg1);
-        return ret;
-    };
-    imports.wbg.__wbindgen_cast_e9adc67ce67ae127 = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 787, function: Function { arguments: [Externref], shim_idx: 788, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__heb574fdda24d5f04, wasm_bindgen__convert__closures_____invoke__hac03de89d7fe1ed3);
         return ret;
     };
     imports.wbg.__wbindgen_cast_feefb5fadd6457fd = function(arg0, arg1) {

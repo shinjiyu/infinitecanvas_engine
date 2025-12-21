@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InfiniteCanvas - 压力测试</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #0a0a0f;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+    .container { max-width: 1400px; margin: 0 auto; padding: 1rem; }
+    header { margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 1.5rem; color: #f24040; }
+    .canvas-wrapper {
+      background: #1a1a1a;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #333;
+    }
+    #canvas { display: block; width: 1200px; height: 700px; }
+    .controls {
+      display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      font-size: 0.85rem;
+      font-family: inherit;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-add { background: #36d399; color: #000; }
+    .btn-add:hover { background: #4ae0a8; }
+    .btn-clear { background: #f24040; color: #fff; }
+    .btn-clear:hover { background: #ff5555; }
+    .stats-panel {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      background: rgba(10, 10, 15, 0.95);
+      padding: 1rem;
+      border-radius: 8px;
+      border: 1px solid #333;
+      min-width: 200px;
+      font-size: 0.85rem;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+    .stat-label { color: #888; }
+    .stat-value { color: #36d399; font-weight: bold; }
+    .stat-value.warning { color: #f2c94c; }
+    .stat-value.danger { color: #f24040; }
+    .fps-bar {
+      height: 4px;
+      background: #333;
+      border-radius: 2px;
+      margin-top: 0.5rem;
+      overflow: hidden;
+    }
+    .fps-bar-fill {
+      height: 100%;
+      background: #36d399;
+      transition: width 0.1s;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔥 压力测试 - Stress Test</h1>
+    </header>
+    
+    <div class="canvas-wrapper">
+      <canvas id="canvas" width="1200" height="700"></canvas>
+    </div>
+    
+    <div class="controls">
+      <button class="btn-add" onclick="addElements(100)">+100 元素</button>
+      <button class="btn-add" onclick="addElements(500)">+500 元素</button>
+      <button class="btn-add" onclick="addElements(1000)">+1000 元素</button>
+      <button class="btn-add" onclick="addElements(5000)">+5000 元素</button>
+      <button class="btn-clear" onclick="clearAll()">清空</button>
+    </div>
+  </div>
+  
+  <div class="stats-panel">
+    <div class="stat-row">
+      <span class="stat-label">FPS:</span>
+      <span class="stat-value" id="fps">--</span>
+    </div>
+    <div class="fps-bar">
+      <div class="fps-bar-fill" id="fps-bar" style="width: 100%"></div>
+    </div>
+    <div class="stat-row" style="margin-top: 1rem;">
+      <span class="stat-label">元素数:</span>
+      <span class="stat-value" id="element-count">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">帧计数:</span>
+      <span class="stat-value" id="frame-count">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">顶点数:</span>
+      <span class="stat-value" id="vertex-count">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">绘制调用:</span>
+      <span class="stat-value" id="draw-calls">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">选中数:</span>
+      <span class="stat-value" id="selection-count">0</span>
+    </div>
+  </div>
+  
+  <script type="module">
+    import init, { InfiniteCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
+    
+    let canvas;
+    let wasmCanvas;
+    
+    // FPS 计算
+    let frameCount = 0;
+    let lastTime = performance.now();
+    let fps = 60;
+    
+    async function main() {
+      try {
+        await init();
+        wasmCanvas = new InfiniteCanvas();
+        
+        canvas = document.getElementById('canvas');
+        await wasmCanvas.init(canvas);
+        
+        // 绑定鼠标事件
+        bindPointerEvents(canvas, wasmCanvas);
+        
+        // 渲染循环
+        function renderLoop() {
+          wasmCanvas.render();
+          
+          // FPS 计算
+          frameCount++;
+          const now = performance.now();
+          if (now - lastTime >= 500) {
+            fps = Math.round((frameCount * 1000) / (now - lastTime));
+            frameCount = 0;
+            lastTime = now;
+            
+            // 更新 FPS 显示
+            const fpsEl = document.getElementById('fps');
+            fpsEl.textContent = fps;
+            fpsEl.className = 'stat-value' + (fps < 30 ? ' danger' : fps < 50 ? ' warning' : '');
+            
+            // FPS 条
+            const fpsBar = document.getElementById('fps-bar');
+            fpsBar.style.width = Math.min(100, fps / 60 * 100) + '%';
+            fpsBar.style.background = fps < 30 ? '#f24040' : fps < 50 ? '#f2c94c' : '#36d399';
+          }
+          
+          // 更新统计
+          const stats = wasmCanvas.get_performance_stats();
+          document.getElementById('element-count').textContent = stats.elementCount.toLocaleString();
+          document.getElementById('frame-count').textContent = stats.frameCount.toLocaleString();
+          document.getElementById('vertex-count').textContent = stats.vertexCount.toLocaleString();
+          document.getElementById('draw-calls').textContent = stats.drawCalls;
+          document.getElementById('selection-count').textContent = wasmCanvas.get_selection_count();
+          
+          requestAnimationFrame(renderLoop);
+        }
+        renderLoop();
+        
+        console.log('✅ Stress test initialized');
+        
+      } catch (error) {
+        console.error('❌ Failed to initialize:', error);
+      }
+    }
+    
+    function bindPointerEvents(canvas, wasm) {
+      canvas.addEventListener('pointerdown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        wasm.handle_pointer_event('down', e.pointerId,
+          e.clientX - rect.left, e.clientY - rect.top,
+          e.movementX, e.movementY, e.button, e.buttons,
+          e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
+        canvas.setPointerCapture(e.pointerId);
+      });
+      
+      canvas.addEventListener('pointermove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        wasm.handle_pointer_event('move', e.pointerId,
+          e.clientX - rect.left, e.clientY - rect.top,
+          e.movementX, e.movementY, e.button, e.buttons,
+          e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
+      });
+      
+      canvas.addEventListener('pointerup', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        wasm.handle_pointer_event('up', e.pointerId,
+          e.clientX - rect.left, e.clientY - rect.top,
+          e.movementX, e.movementY, e.button, e.buttons,
+          e.shiftKey, e.ctrlKey, e.altKey, e.metaKey);
+        canvas.releasePointerCapture(e.pointerId);
+      });
+      
+      canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+    
+    const colors = ['#4090f2', '#36d399', '#f24040', '#f2c94c', '#9b59b6', '#e91e63', '#00bcd4', '#ff9800'];
+    
+    window.addElements = function(count) {
+      const startTime = performance.now();
+      
+      for (let i = 0; i < count; i++) {
+        const x = Math.random() * 1100 + 50;
+        const y = Math.random() * 600 + 50;
+        const size = 10 + Math.random() * 40;
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        
+        if (Math.random() > 0.5) {
+          wasmCanvas.add_rectangle(x, y, size, size * 0.7, color, null, 0);
+        } else {
+          wasmCanvas.add_circle(x, y, size / 2, color, null, 0);
+        }
+      }
+      
+      const elapsed = performance.now() - startTime;
+      console.log(`Added ${count} elements in ${elapsed.toFixed(1)}ms`);
+    };
+    
+    window.clearAll = function() {
+      wasmCanvas.clear_scene();
+    };
+    
+    main();
+  </script>
+</body>
+</html>
+
+
+
+
+

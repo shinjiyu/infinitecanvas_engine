@@ -17,14 +17,31 @@
 //! infinitecanvas-math (数学库)
 //! ```
 
+pub mod command;
 pub mod element;
+pub mod event;
+pub mod hit_test;
+pub mod quadtree;
 pub mod scene;
+pub mod selection;
+pub mod selection_box;
+pub mod tool;
 pub mod viewport;
 
 // 重导出核心类型
+pub use command::{AddElementCommand, Command, CommandHistory, MoveCommand, RemoveElementCommand};
 pub use element::{Circle, Element, ElementId, ElementProps, ElementStyle, Image, Rectangle};
+pub use event::{
+    Event, EventQueue, KeyboardEvent, Modifiers, PointerEvent, PointerButton, WheelDeltaMode,
+    WheelEvent,
+};
+pub use hit_test::{hit_test_point, HitTestOptions, HitTestResult};
 pub use infinitecanvas_math as math;
+pub use quadtree::QuadTree;
 pub use scene::{AnyElement, Scene};
+pub use selection::SelectionManager;
+pub use selection_box::SelectionBox;
+pub use tool::{Tool, ToolManager};
 pub use viewport::Viewport;
 
 /// 渲染器，负责渲染循环控制

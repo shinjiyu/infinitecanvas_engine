@@ -52,6 +52,18 @@ const tests = [
     run: (ctx) => ctx.zoomViewport(1.15),
   },
   {
+    id: 'select',
+    name: '元素选择',
+    desc: 'select_element + 状态同步',
+    run: (ctx) => ctx.selectFirstElement(),
+  },
+  {
+    id: 'hit',
+    name: '命中测试',
+    desc: 'hit_test_screen_point()',
+    run: (ctx) => ctx.runHitTestDemo(),
+  },
+  {
     id: 'render',
     name: '渲染验证',
     desc: '调用 render() 3 次',
@@ -80,12 +92,15 @@ class TestHarness {
     this.textureId = null;
     this.imageId = null;
     this.elements = [];
+    this.inputCleanup = [];
+    this.renderScheduled = false;
   }
 
   async initEngine() {
     await init();
     this.wasm = new InfiniteCanvas();
     await this.wasm.init(this.canvasEl);
+    this._bindInputEvents();
     setStatus('engine-status', '✓ 就绪');
     setStatus('wasm-status', '✓ 已加载');
     writeLog('引擎初始化完成');
@@ -94,6 +109,12 @@ class TestHarness {
 
   renderOnce() {
     if (!this.wasm) return;
+    const pendingEvents = this.wasm.debug_pending_event_count
+      ? this.wasm.debug_pending_event_count()
+      : 0;
+    if (pendingEvents > 0) {
+      writeLog(`处理输入事件 ${pendingEvents} 条`);
+    }
     this.wasm.render();
     setStatus('stat-elements', this.wasm.get_element_count());
     setStatus('stat-textures', this.textureId ? '1' : '0');
@@ -104,6 +125,8 @@ class TestHarness {
         .get_viewport_center_y()
         .toFixed(1)})`,
     );
+    setStatus('stat-events', pendingEvents.toString());
+    this._updateSelectionStatus();
   }
 
   addSampleRectangle() {
@@ -160,6 +183,55 @@ class TestHarness {
     this.renderOnce();
   }
 
+  selectFirstElement() {
+    if (!this.wasm || !this.elements.length) {
+      throw new Error('没有可选元素');
+    }
+    const targetId = this.elements[0];
+    const success = this.wasm.select_element(targetId, false);
+    if (!success) {
+      throw new Error(`无法选中元素 #${targetId}`);
+    }
+    const count = this._updateSelectionStatus();
+    writeLog(`选中元素 #${targetId} (总数 ${count})`);
+    this.renderOnce();
+    return success;
+  }
+
+  clearSelection() {
+    if (!this.wasm) return;
+    if (this.wasm.clear_selection) {
+      this.wasm.clear_selection();
+    } else if (this.wasm.clearSelection) {
+      this.wasm.clearSelection();
+    }
+    this._updateSelectionStatus();
+    writeLog('已清空选区');
+    this.renderOnce();
+  }
+
+  runHitTestDemo() {
+    if (!this.wasm) {
+      throw new Error('WASM 未初始化');
+    }
+    const hitsArray = this.wasm.hit_test_screen_point(
+      this.canvasEl.width / 2,
+      this.canvasEl.height / 2,
+      5,
+    );
+    const hits = Array.from(hitsArray ?? []).map((hit) => ({
+      id: hit.id,
+      type: hit.elementType,
+      zIndex: hit.zIndex,
+    }));
+    if (!hits.length) {
+      throw new Error('中心未命中任何元素');
+    }
+    writeLog(`命中测试: ${hits.map((hit) => `#${hit.id}(${hit.type})`).join(', ')}`);
+    setStatus('render-status', `命中 ${hits.length} 个元素`);
+    return hits;
+  }
+
   renderMultiple(times) {
     for (let i = 0; i < times; i += 1) {
       this.wasm.render();
@@ -167,6 +239,137 @@ class TestHarness {
     writeLog(`渲染 ${times} 帧完成`);
     setStatus('render-status', `已渲染 ${times} 帧`);
     this.renderOnce();
+  }
+
+  _bindInputEvents() {
+    if (!this.canvasEl || !this.wasm) return;
+    this._unbindInputEvents();
+    const register = (target, type, handler, options) => {
+      target.addEventListener(type, handler, options);
+      this.inputCleanup.push(() => target.removeEventListener(type, handler, options));
+    };
+
+    const pointerHandler = (type) => (event) => {
+      if (!this.wasm) return;
+      event.preventDefault();
+      const { x, y, mx, my } = this._relativePointerPosition(event);
+      const button = typeof event.button === 'number' ? event.button : -1;
+      const buttonsMask = typeof event.buttons === 'number' ? event.buttons : 0;
+      this.wasm.handle_pointer_event(
+        type,
+        typeof event.pointerId === 'number' ? event.pointerId : 0,
+        x,
+        y,
+        mx,
+        my,
+        button,
+        buttonsMask,
+        event.shiftKey,
+        event.ctrlKey,
+        event.altKey,
+        event.metaKey,
+      );
+      if (type === 'down') {
+        const target = event.target;
+        if (target && typeof target.setPointerCapture === 'function') {
+          try {
+            target.setPointerCapture(event.pointerId);
+          } catch (_) {
+            // ignore capture errors
+          }
+        }
+      }
+      this._scheduleRender();
+    };
+
+    register(this.canvasEl, 'pointerdown', pointerHandler('down'));
+    register(this.canvasEl, 'pointermove', pointerHandler('move'));
+    register(this.canvasEl, 'pointerup', pointerHandler('up'));
+    register(this.canvasEl, 'pointercancel', pointerHandler('up'));
+
+    const wheelHandler = (event) => {
+      if (!this.wasm) return;
+      event.preventDefault();
+      this.wasm.handle_wheel_event(
+        event.deltaX || 0,
+        event.deltaY || 0,
+        typeof event.deltaMode === 'number' ? event.deltaMode : 0,
+        event.shiftKey,
+        event.ctrlKey,
+        event.altKey,
+        event.metaKey,
+      );
+      this._scheduleRender();
+    };
+    register(this.canvasEl, 'wheel', wheelHandler, { passive: false });
+
+    const keyboardHandler = (type) => (event) => {
+      if (!this.wasm) return;
+      if (this._shouldIgnoreKeyboardEvent(event)) return;
+      this.wasm.handle_keyboard_event(
+        type,
+        event.key || '',
+        event.code || '',
+        !!event.repeat,
+        event.shiftKey,
+        event.ctrlKey,
+        event.altKey,
+        event.metaKey,
+      );
+      this._scheduleRender();
+    };
+
+    register(window, 'keydown', keyboardHandler('down'), true);
+    register(window, 'keyup', keyboardHandler('up'), true);
+
+    writeLog('输入事件监听已绑定');
+  }
+
+  _unbindInputEvents() {
+    if (!this.inputCleanup.length) return;
+    this.inputCleanup.forEach((dispose) => dispose());
+    this.inputCleanup = [];
+  }
+
+  _scheduleRender() {
+    if (this.renderScheduled) return;
+    this.renderScheduled = true;
+    requestAnimationFrame(() => {
+      this.renderScheduled = false;
+      this.renderOnce();
+    });
+  }
+
+  _updateSelectionStatus() {
+    if (!this.wasm || typeof this.wasm.get_selection_count !== 'function') {
+      setStatus('stat-selection', '0');
+      return 0;
+    }
+    const count = this.wasm.get_selection_count();
+    setStatus('stat-selection', count.toString());
+    return count;
+  }
+
+  _relativePointerPosition(event) {
+    const rect = this.canvasEl.getBoundingClientRect();
+    const scaleX = rect.width ? this.canvasEl.width / rect.width : 1;
+    const scaleY = rect.height ? this.canvasEl.height / rect.height : 1;
+    const clientX = event.clientX ?? 0;
+    const clientY = event.clientY ?? 0;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+      mx: (event.movementX || 0) * scaleX,
+      my: (event.movementY || 0) * scaleY,
+    };
+  }
+
+  _shouldIgnoreKeyboardEvent(event) {
+    const target = event.target;
+    if (!target || !target.tagName) return false;
+    const tag = target.tagName.toLowerCase();
+    if (tag === 'input' || tag === 'textarea') return true;
+    return Boolean(target.isContentEditable);
   }
 
   async _loadImageData(url) {

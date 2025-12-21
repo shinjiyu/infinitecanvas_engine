@@ -31,6 +31,15 @@ impl AnyElement {
             AnyElement::Image(i) => i,
         }
     }
+
+    /// 作为可变 Element trait 对象
+    pub fn as_element_mut(&mut self) -> &mut dyn Element {
+        match self {
+            AnyElement::Rectangle(r) => r,
+            AnyElement::Circle(c) => c,
+            AnyElement::Image(i) => i,
+        }
+    }
 }
 
 /// 场景容器
@@ -93,6 +102,13 @@ impl Scene {
         id
     }
 
+    /// 添加任意类型元素
+    pub fn add(&mut self, element: AnyElement) -> ElementId {
+        let id = element.id();
+        self.elements.insert(id, element);
+        id
+    }
+
     /// 移除元素
     pub fn remove(&mut self, id: ElementId) -> Option<AnyElement> {
         self.elements.remove(&id)
@@ -106,6 +122,11 @@ impl Scene {
     /// 获取可变元素
     pub fn get_mut(&mut self, id: ElementId) -> Option<&mut AnyElement> {
         self.elements.get_mut(&id)
+    }
+
+    /// 判断元素是否存在
+    pub fn contains(&self, id: ElementId) -> bool {
+        self.elements.contains_key(&id)
     }
 
     /// 清空场景

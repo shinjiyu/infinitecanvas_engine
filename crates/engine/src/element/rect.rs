@@ -67,20 +67,13 @@ impl Rectangle {
     /// 三角形1: [0, 1, 2]
     /// 三角形2: [2, 1, 3]
     pub fn generate_fill_vertices(&self) -> Vec<Vertex> {
-        log::info!("[RECT] generate_fill_vertices called for ID={}", self.props.id);
-        
         if self.style.fill.is_none() {
-            log::info!("[RECT] No fill color, returning empty");
             return Vec::new();
         }
 
         let color = self.style.fill.unwrap();
         let half_w = self.size.x / 2.0;
         let half_h = self.size.y / 2.0;
-
-        log::info!("[RECT] size=({}, {}), half=({}, {}), color=({}, {}, {}, {})", 
-            self.size.x, self.size.y, half_w, half_h,
-            color.r, color.g, color.b, color.a);
 
         // 局部坐标系（中心为原点）
         let positions = [
@@ -90,25 +83,15 @@ impl Rectangle {
             [half_w, half_h],   // 右下
         ];
 
-        log::info!("[RECT] Local positions: {:?}", positions);
-
         // 应用变换
         let transform = &self.props.transform;
-        log::info!("[RECT] Transform: translation=({}, {}), rotation={}, scale=({}, {})",
-            transform.translation.x, transform.translation.y,
-            transform.rotation,
-            transform.scale.x, transform.scale.y);
-        
         let world_positions: Vec<Vec2> = positions
             .iter()
             .map(|&[x, y]| transform.transform_point(Vec2::new(x, y)))
             .collect();
 
-        log::info!("[RECT] World positions: [{:?}, {:?}, {:?}, {:?}]",
-            world_positions[0], world_positions[1], world_positions[2], world_positions[3]);
-
         // 生成顶点（顺时针）
-        let vertices = vec![
+        vec![
             // 三角形1: 左上、左下、右上
             Vertex::new(world_positions[0].x, world_positions[0].y, color),
             Vertex::new(world_positions[1].x, world_positions[1].y, color),
@@ -117,17 +100,7 @@ impl Rectangle {
             Vertex::new(world_positions[2].x, world_positions[2].y, color),
             Vertex::new(world_positions[1].x, world_positions[1].y, color),
             Vertex::new(world_positions[3].x, world_positions[3].y, color),
-        ];
-
-        log::info!("[RECT] Generated {} vertices:", vertices.len());
-        for (i, v) in vertices.iter().enumerate() {
-            log::info!("[RECT]   Vertex[{}]: pos=({:.2}, {:.2}), color=({:.3}, {:.3}, {:.3}, {:.3}), uv=({:.3}, {:.3})",
-                i, v.position[0], v.position[1],
-                v.color[0], v.color[1], v.color[2], v.color[3],
-                v.uv[0], v.uv[1]);
-        }
-
-        vertices
+        ]
     }
 
     /// 生成描边顶点（4条线段 = 8个顶点）

@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InfiniteCanvas - 框选测试</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem;
+    }
+    
+    header {
+      margin-bottom: 2rem;
+    }
+    
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, #4090f2, #36d399);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .subtitle {
+      color: #888;
+      margin-top: 0.5rem;
+    }
+    
+    .canvas-wrapper {
+      position: relative;
+      background: #1a1a1a;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255,255,255,0.05);
+      overflow: hidden;
+    }
+    
+    #canvas {
+      display: block;
+      width: 900px;
+      height: 600px;
+      cursor: crosshair;
+    }
+    
+    .controls {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1.5rem;
+      flex-wrap: wrap;
+    }
+    
+    button {
+      padding: 0.75rem 1.5rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #4090f2, #3070d0);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(64, 144, 242, 0.4);
+    }
+    
+    .btn-secondary {
+      background: rgba(255,255,255,0.1);
+      color: #e0e0e0;
+    }
+    
+    .btn-secondary:hover {
+      background: rgba(255,255,255,0.15);
+    }
+    
+    .btn-danger {
+      background: linear-gradient(135deg, #f24040, #d03030);
+      color: white;
+    }
+    
+    .tool-btn {
+      min-width: 90px;
+    }
+    
+    .tool-btn.active {
+      background: linear-gradient(135deg, #36d399, #20a070);
+      box-shadow: 0 0 12px rgba(54, 211, 153, 0.4);
+    }
+    
+    .status-panel {
+      position: fixed;
+      top: 2rem;
+      right: 2rem;
+      background: rgba(26, 26, 46, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 1.5rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      min-width: 220px;
+    }
+    
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+      font-size: 0.9rem;
+    }
+    
+    .status-label {
+      color: #888;
+    }
+    
+    .status-value {
+      color: #36d399;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    
+    .instructions {
+      margin-top: 2rem;
+      padding: 1.5rem;
+      background: rgba(64, 144, 242, 0.1);
+      border-radius: 12px;
+      border: 1px solid rgba(64, 144, 242, 0.2);
+    }
+    
+    .instructions h3 {
+      color: #4090f2;
+      margin-bottom: 1rem;
+      font-size: 1rem;
+    }
+    
+    .instructions ul {
+      list-style: none;
+      font-size: 0.9rem;
+      line-height: 1.8;
+    }
+    
+    .instructions li::before {
+      content: "•";
+      color: #4090f2;
+      margin-right: 0.5rem;
+    }
+    
+    .highlight {
+      color: #f2c94c;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎯 框选测试</h1>
+      <p class="subtitle">M2.4: Selection Box Visual Feedback</p>
+    </header>
+    
+    <div class="canvas-wrapper">
+      <canvas id="canvas" width="900" height="600"></canvas>
+    </div>
+    
+    <div class="controls">
+      <button class="btn-primary tool-btn active" onclick="setTool('select')" id="tool-select">选择 (V)</button>
+      <button class="btn-primary tool-btn" onclick="setTool('rectangle')" id="tool-rect">矩形 (R)</button>
+      <button class="btn-primary tool-btn" onclick="setTool('circle')" id="tool-circle">圆形 (O)</button>
+      <button class="btn-primary tool-btn" onclick="setTool('pan')" id="tool-pan">平移 (H)</button>
+    </div>
+    <div class="controls">
+      <button class="btn-secondary" onclick="addRandomShapes()">添加随机图形</button>
+      <button class="btn-secondary" onclick="clearSelection()">清除选中</button>
+      <button class="btn-secondary" onclick="doUndo()" id="undo-btn">撤销 (Ctrl+Z)</button>
+      <button class="btn-secondary" onclick="doRedo()" id="redo-btn">重做 (Ctrl+Y)</button>
+      <button class="btn-danger" onclick="clearScene()">清空场景</button>
+    </div>
+    
+    <div class="instructions">
+      <h3>📖 操作说明</h3>
+      <ul>
+        <li><span class="highlight">V</span> 选择工具 - 点击选中，拖动移动，框选多个</li>
+        <li><span class="highlight">R</span> 矩形工具 - 拖动绘制矩形</li>
+        <li><span class="highlight">O</span> 圆形工具 - 拖动绘制圆形</li>
+        <li><span class="highlight">H</span> 平移工具 - 拖动平移画布</li>
+        <li><span class="highlight">空格</span> 按住临时切换到手型工具</li>
+        <li><span class="highlight">Ctrl+Z/Y</span> 撤销/重做</li>
+        <li>按住 <span class="highlight">Shift/Ctrl</span> 可以多选</li>
+      </ul>
+    </div>
+  </div>
+  
+  <div class="status-panel">
+    <div class="status-item">
+      <span class="status-label">状态:</span>
+      <span class="status-value" id="status">加载中...</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">FPS:</span>
+      <span class="status-value" id="fps">--</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">元素数:</span>
+      <span class="status-value" id="element-count">0</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">选中数:</span>
+      <span class="status-value" id="selection-count">0</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">框选中:</span>
+      <span class="status-value" id="selection-box-active">否</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">拖动中:</span>
+      <span class="status-value" id="dragging">否</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">撤销栈:</span>
+      <span class="status-value" id="undo-count">0</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">重做栈:</span>
+      <span class="status-value" id="redo-count">0</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">当前工具:</span>
+      <span class="status-value" id="current-tool">select</span>
+    </div>
+  </div>
+  
+  <script type="module">
+    import init, { InfiniteCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
+    
+    let canvas;
+    let wasmCanvas;
+    
+    // 状态更新
+    const updateStatus = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+    
+    // FPS 计数器
+    let frameCount = 0;
+    let lastTime = performance.now();
+    
+    async function main() {
+      try {
+        updateStatus('status', '初始化中...');
+        
+        // 初始化 WASM
+        await init();
+        wasmCanvas = new InfiniteCanvas();
+        
+        canvas = document.getElementById('canvas');
+        await wasmCanvas.init(canvas);
+        
+        updateStatus('status', '✓ 运行中');
+        
+        // 绑定鼠标事件
+        bindPointerEvents(canvas, wasmCanvas);
+        
+        // 添加初始图形
+        addRandomShapes();
+        
+        // 渲染循环
+        function renderLoop() {
+          wasmCanvas.render();
+          
+          // 更新状态
+          frameCount++;
+          const now = performance.now();
+          if (now - lastTime >= 1000) {
+            const fps = Math.round((frameCount * 1000) / (now - lastTime));
+            updateStatus('fps', fps.toString());
+            frameCount = 0;
+            lastTime = now;
+          }
+          
+          updateStatus('element-count', wasmCanvas.get_element_count().toString());
+          updateStatus('selection-count', wasmCanvas.get_selection_count().toString());
+          updateStatus('selection-box-active', wasmCanvas.is_selection_box_active() ? '是' : '否');
+          updateStatus('dragging', wasmCanvas.is_dragging() ? '是' : '否');
+          updateStatus('undo-count', wasmCanvas.get_undo_count().toString());
+          updateStatus('redo-count', wasmCanvas.get_redo_count().toString());
+          updateStatus('current-tool', wasmCanvas.get_current_tool());
+          
+          // 更新按钮状态
+          document.getElementById('undo-btn').disabled = !wasmCanvas.can_undo();
+          document.getElementById('redo-btn').disabled = !wasmCanvas.can_redo();
+          
+          // 更新光标
+          canvas.style.cursor = wasmCanvas.get_tool_cursor();
+          
+          requestAnimationFrame(renderLoop);
+        }
+        renderLoop();
+        
+        console.log('✅ Selection test initialized');
+        
+      } catch (error) {
+        console.error('❌ Failed to initialize:', error);
+        updateStatus('status', '错误: ' + error.message);
+      }
+    }
+    
+    function bindPointerEvents(canvas, wasm) {
+      canvas.addEventListener('pointerdown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        wasm.handle_pointer_event(
+          'down',
+          e.pointerId,
+          x, y,
+          e.movementX, e.movementY,
+          e.button,
+          e.buttons,
+          e.shiftKey, e.ctrlKey, e.altKey, e.metaKey
+        );
+        
+        canvas.setPointerCapture(e.pointerId);
+      });
+      
+      canvas.addEventListener('pointermove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        wasm.handle_pointer_event(
+          'move',
+          e.pointerId,
+          x, y,
+          e.movementX, e.movementY,
+          e.button,
+          e.buttons,
+          e.shiftKey, e.ctrlKey, e.altKey, e.metaKey
+        );
+      });
+      
+      canvas.addEventListener('pointerup', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        wasm.handle_pointer_event(
+          'up',
+          e.pointerId,
+          x, y,
+          e.movementX, e.movementY,
+          e.button,
+          e.buttons,
+          e.shiftKey, e.ctrlKey, e.altKey, e.metaKey
+        );
+        
+        canvas.releasePointerCapture(e.pointerId);
+      });
+      
+      // 防止右键菜单
+      canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+    
+    // 全局函数供 HTML 按钮调用
+    window.addRandomShapes = function() {
+      const colors = ['#4090f2', '#36d399', '#f24040', '#f2c94c', '#9b59b6', '#e91e63'];
+      
+      for (let i = 0; i < 5; i++) {
+        const x = 50 + Math.random() * 750;
+        const y = 50 + Math.random() * 450;
+        const size = 40 + Math.random() * 80;
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        
+        if (Math.random() > 0.5) {
+          wasmCanvas.add_rectangle(x, y, size, size * 0.7, color, null, 0);
+        } else {
+          wasmCanvas.add_circle(x, y, size / 2, color, null, 0);
+        }
+      }
+      
+      updateStatus('element-count', wasmCanvas.get_element_count().toString());
+    };
+    
+    window.clearSelection = function() {
+      wasmCanvas.clear_selection();
+    };
+    
+    window.clearScene = function() {
+      wasmCanvas.clear_scene();
+      updateStatus('element-count', '0');
+      updateStatus('selection-count', '0');
+    };
+
+    window.doUndo = function() {
+      if (wasmCanvas.can_undo()) {
+        wasmCanvas.undo();
+      }
+    };
+
+    window.doRedo = function() {
+      if (wasmCanvas.can_redo()) {
+        wasmCanvas.redo();
+      }
+    };
+
+    window.setTool = function(toolName) {
+      wasmCanvas.set_tool(toolName);
+      updateToolButtons();
+    };
+
+    function updateToolButtons() {
+      const currentTool = wasmCanvas.get_current_tool();
+      document.querySelectorAll('.tool-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      const toolMap = {
+        'select': 'tool-select',
+        'rectangle': 'tool-rect',
+        'circle': 'tool-circle',
+        'pan': 'tool-pan'
+      };
+      const activeBtn = document.getElementById(toolMap[currentTool]);
+      if (activeBtn) {
+        activeBtn.classList.add('active');
+      }
+    }
+
+    // 键盘快捷键
+    document.addEventListener('keydown', (e) => {
+      // 忽略输入框中的按键
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      // Ctrl+Z: 撤销
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        doUndo();
+        return;
+      }
+      // Ctrl+Y 或 Ctrl+Shift+Z: 重做
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        doRedo();
+        return;
+      }
+
+      // 工具快捷键
+      switch (e.key.toLowerCase()) {
+        case 'v':
+          setTool('select');
+          break;
+        case 'r':
+          setTool('rectangle');
+          break;
+        case 'o':
+          setTool('circle');
+          break;
+        case 'h':
+          setTool('pan');
+          break;
+        case ' ': // 空格临时切换到手型工具
+          e.preventDefault();
+          wasmCanvas.push_hand_tool();
+          break;
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if (e.key === ' ') {
+        wasmCanvas.pop_temporary_tool();
+      }
+    });
+    
+    main();
+  </script>
+</body>
+</html>
+
+
+
+
