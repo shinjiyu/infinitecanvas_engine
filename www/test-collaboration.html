@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InfiniteCanvas - 多人协同测试</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #333;
+    }
+    h1 {
+      font-size: 1.5rem;
+      background: linear-gradient(90deg, #4090f2, #36d399);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .connection-status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      border-radius: 20px;
+      font-size: 0.85rem;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .status-disconnected { background: rgba(242, 64, 64, 0.2); }
+    .status-disconnected .status-dot { background: #f24040; }
+    .status-connecting { background: rgba(242, 201, 76, 0.2); }
+    .status-connecting .status-dot { background: #f2c94c; animation: pulse 1s infinite; }
+    .status-connected { background: rgba(54, 211, 153, 0.2); }
+    .status-connected .status-dot { background: #36d399; }
+    .status-reconnecting { background: rgba(242, 201, 76, 0.2); }
+    .status-reconnecting .status-dot { background: #f2c94c; animation: pulse 0.5s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .main-layout {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 1rem;
+    }
+    .canvas-container {
+      background: #1a1a1a;
+      border-radius: 8px;
+      border: 1px solid #333;
+      position: relative;
+      overflow: hidden;
+    }
+    #canvas {
+      display: block;
+      width: 100%;
+      height: 600px;
+    }
+    .remote-cursors {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .remote-cursor {
+      position: absolute;
+      pointer-events: none;
+      transition: transform 0.1s ease-out;
+    }
+    .cursor-icon {
+      width: 20px;
+      height: 20px;
+    }
+    .cursor-label {
+      position: absolute;
+      left: 18px;
+      top: 16px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .panel {
+      background: rgba(26, 26, 26, 0.9);
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .panel h3 {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .join-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.75rem;
+      color: #666;
+      margin-bottom: 0.25rem;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 0.5rem;
+      background: #0a0a0f;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-family: inherit;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: #4090f2;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: #4090f2;
+      color: white;
+    }
+    .btn-primary:hover { background: #5ca0ff; }
+    .btn-primary:disabled { background: #444; cursor: not-allowed; }
+    .btn-danger {
+      background: #f24040;
+      color: white;
+    }
+    .btn-danger:hover { background: #ff5555; }
+    .users-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .user-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      background: rgba(255,255,255,0.05);
+      border-radius: 4px;
+    }
+    .user-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: bold;
+      color: white;
+    }
+    .user-name {
+      flex: 1;
+      font-size: 0.85rem;
+    }
+    .user-me {
+      font-size: 0.7rem;
+      color: #36d399;
+    }
+    .log-container {
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 0.75rem;
+      font-family: monospace;
+    }
+    .log-entry {
+      padding: 0.25rem 0;
+      border-bottom: 1px solid #222;
+    }
+    .log-time { color: #666; }
+    .log-join { color: #36d399; }
+    .log-leave { color: #f24040; }
+    .log-cursor { color: #4090f2; }
+    .log-selection { color: #f2c94c; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>👥 多人协同测试</h1>
+      <div class="connection-status status-disconnected" id="connection-status">
+        <span class="status-dot"></span>
+        <span id="status-text">未连接</span>
+      </div>
+    </header>
+
+    <div class="main-layout">
+      <div class="canvas-container">
+        <canvas id="canvas" width="900" height="600"></canvas>
+        <div class="remote-cursors" id="remote-cursors"></div>
+      </div>
+
+      <div class="sidebar">
+        <!-- 加入房间 -->
+        <div class="panel" id="join-panel">
+          <h3>🚪 加入房间</h3>
+          <div class="join-form">
+            <div class="form-group">
+              <label>房间 ID</label>
+              <input type="text" id="room-id" value="default" placeholder="输入房间 ID">
+            </div>
+            <div class="form-group">
+              <label>你的名字</label>
+              <input type="text" id="user-name" placeholder="输入你的名字">
+            </div>
+            <button class="btn-primary" id="btn-join">加入房间</button>
+          </div>
+        </div>
+
+        <!-- 房间信息 -->
+        <div class="panel" id="room-panel" style="display:none">
+          <h3>🏠 房间: <span id="current-room">-</span></h3>
+          <div class="users-list" id="users-list"></div>
+          <button class="btn-danger" id="btn-leave" style="margin-top:1rem;width:100%">离开房间</button>
+        </div>
+
+        <!-- 在线用户 -->
+        <div class="panel">
+          <h3>📋 事件日志</h3>
+          <div class="log-container" id="log-container"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // ============ 协同客户端 ============
+    
+    class CollaborationClient {
+      constructor(serverUrl) {
+        this.serverUrl = serverUrl;
+        this.ws = null;
+        this.state = 'disconnected';
+        this.events = {};
+        this.myUserId = null;
+        this.remoteUsers = new Map();
+        this.reconnectAttempts = 0;
+        this.maxReconnects = 10;
+        this.reconnectDelay = 1000;
+        this.cursorThrottleMs = 50;
+        this.lastCursorSend = 0;
+      }
+
+      on(event, callback) {
+        this.events[event] = callback;
+        return this;
+      }
+
+      emit(event, ...args) {
+        this.events[event]?.(...args);
+      }
+
+      connect(roomId, userName) {
+        this.roomId = roomId;
+        this.userName = userName;
+        this.doConnect();
+      }
+
+      disconnect() {
+        if (this.ws) {
+          this.ws.close();
+          this.ws = null;
+        }
+        this.setState('disconnected');
+      }
+
+      doConnect() {
+        this.setState('connecting');
+        this.ws = new WebSocket(this.serverUrl);
+
+        this.ws.onopen = () => {
+          console.log('[Client] Connected');
+          this.reconnectAttempts = 0;
+          this.setState('connected');
+          this.send({ type: 'join', roomId: this.roomId, userName: this.userName });
+        };
+
+        this.ws.onmessage = (e) => {
+          const msg = JSON.parse(e.data);
+          this.handleMessage(msg);
+        };
+
+        this.ws.onclose = () => {
+          console.log('[Client] Disconnected');
+          if (this.state !== 'disconnected' && this.reconnectAttempts < this.maxReconnects) {
+            this.setState('reconnecting');
+            this.reconnectAttempts++;
+            setTimeout(() => this.doConnect(), this.reconnectDelay * this.reconnectAttempts);
+          } else {
+            this.setState('disconnected');
+          }
+        };
+
+        this.ws.onerror = (err) => {
+          console.error('[Client] Error:', err);
+        };
+      }
+
+      handleMessage(msg) {
+        switch (msg.type) {
+          case 'room_state':
+            this.myUserId = msg.yourUserId;
+            this.remoteUsers.clear();
+            msg.users.forEach(u => {
+              if (u.id !== this.myUserId) this.remoteUsers.set(u.id, u);
+            });
+            this.emit('room_joined', msg.roomId, msg.users, this.myUserId);
+            break;
+          case 'user_joined':
+            this.remoteUsers.set(msg.user.id, msg.user);
+            this.emit('user_joined', msg.user);
+            break;
+          case 'user_left':
+            this.remoteUsers.delete(msg.userId);
+            this.emit('user_left', msg.userId);
+            break;
+          case 'cursor_update':
+            const user = this.remoteUsers.get(msg.userId);
+            if (user) user.cursor = msg.position;
+            this.emit('cursor_update', msg.userId, msg.position);
+            break;
+          case 'selection_update':
+            this.emit('selection_update', msg.userId, msg.selection);
+            break;
+        }
+      }
+
+      send(msg) {
+        if (this.ws?.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify(msg));
+        }
+      }
+
+      sendCursor(position) {
+        const now = Date.now();
+        if (now - this.lastCursorSend >= this.cursorThrottleMs) {
+          this.lastCursorSend = now;
+          this.send({ type: 'cursor_move', position });
+        }
+      }
+
+      sendSelection(selection) {
+        this.send({ type: 'selection_change', selection });
+      }
+
+      setState(state) {
+        this.state = state;
+        this.emit('state_change', state);
+      }
+
+      getRemoteUsers() {
+        return Array.from(this.remoteUsers.values());
+      }
+    }
+
+    // ============ UI 逻辑 ============
+
+    const client = new CollaborationClient('ws://localhost:8080');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const remoteCursors = document.getElementById('remote-cursors');
+
+    // 随机用户名
+    const randomNames = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve', 'Frank'];
+    document.getElementById('user-name').value = 
+      randomNames[Math.floor(Math.random() * randomNames.length)] + '_' + 
+      Math.floor(Math.random() * 1000);
+
+    // 状态更新
+    client.on('state_change', (state) => {
+      const statusEl = document.getElementById('connection-status');
+      const textEl = document.getElementById('status-text');
+      statusEl.className = 'connection-status status-' + state;
+      const stateText = {
+        disconnected: '未连接',
+        connecting: '连接中...',
+        connected: '已连接',
+        reconnecting: '重连中...'
+      };
+      textEl.textContent = stateText[state];
+
+      document.getElementById('btn-join').disabled = state === 'connecting';
+    });
+
+    // 房间加入
+    client.on('room_joined', (roomId, users, myId) => {
+      document.getElementById('join-panel').style.display = 'none';
+      document.getElementById('room-panel').style.display = 'block';
+      document.getElementById('current-room').textContent = roomId;
+      updateUsersList(users, myId);
+      addLog('join', `已加入房间 ${roomId}`);
+    });
+
+    // 用户加入
+    client.on('user_joined', (user) => {
+      updateUsersList([...client.getRemoteUsers(), { id: client.myUserId, name: client.userName }], client.myUserId);
+      addLog('join', `${user.name} 加入了房间`);
+    });
+
+    // 用户离开
+    client.on('user_left', (userId) => {
+      updateUsersList([...client.getRemoteUsers(), { id: client.myUserId, name: client.userName }], client.myUserId);
+      removeCursor(userId);
+      addLog('leave', `用户离开了房间`);
+    });
+
+    // 光标更新
+    client.on('cursor_update', (userId, position) => {
+      const user = client.remoteUsers.get(userId);
+      if (user) {
+        updateCursor(userId, user.name, user.color, position);
+      }
+    });
+
+    // 更新用户列表
+    function updateUsersList(users, myId) {
+      const list = document.getElementById('users-list');
+      list.innerHTML = users.map(u => `
+        <div class="user-item">
+          <div class="user-avatar" style="background:${u.color || '#666'}">${u.name[0]}</div>
+          <span class="user-name">${u.name}</span>
+          ${u.id === myId ? '<span class="user-me">(你)</span>' : ''}
+        </div>
+      `).join('');
+    }
+
+    // 更新远程光标
+    function updateCursor(userId, name, color, position) {
+      let cursor = document.getElementById('cursor-' + userId);
+      if (!cursor) {
+        cursor = document.createElement('div');
+        cursor.id = 'cursor-' + userId;
+        cursor.className = 'remote-cursor';
+        cursor.innerHTML = `
+          <svg class="cursor-icon" viewBox="0 0 24 24" fill="${color}">
+            <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86h8.28c.45 0 .67-.54.35-.85L5.85 2.86c-.31-.31-.85-.09-.85.35z"/>
+          </svg>
+          <span class="cursor-label" style="background:${color}">${name}</span>
+        `;
+        remoteCursors.appendChild(cursor);
+      }
+      cursor.style.transform = `translate(${position.x}px, ${position.y}px)`;
+    }
+
+    // 移除光标
+    function removeCursor(userId) {
+      const cursor = document.getElementById('cursor-' + userId);
+      if (cursor) cursor.remove();
+    }
+
+    // 添加日志
+    function addLog(type, message) {
+      const container = document.getElementById('log-container');
+      const time = new Date().toLocaleTimeString();
+      container.innerHTML = `
+        <div class="log-entry log-${type}">
+          <span class="log-time">[${time}]</span> ${message}
+        </div>
+      ` + container.innerHTML;
+    }
+
+    // 加入按钮
+    document.getElementById('btn-join').onclick = () => {
+      const roomId = document.getElementById('room-id').value.trim() || 'default';
+      const userName = document.getElementById('user-name').value.trim() || 'Anonymous';
+      client.connect(roomId, userName);
+    };
+
+    // 离开按钮
+    document.getElementById('btn-leave').onclick = () => {
+      client.disconnect();
+      document.getElementById('join-panel').style.display = 'block';
+      document.getElementById('room-panel').style.display = 'none';
+      remoteCursors.innerHTML = '';
+      addLog('leave', '已离开房间');
+    };
+
+    // 画布鼠标移动
+    canvas.addEventListener('mousemove', (e) => {
+      if (client.state === 'connected') {
+        const rect = canvas.getBoundingClientRect();
+        client.sendCursor({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        });
+      }
+    });
+
+    // 绘制画布
+    function drawCanvas() {
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 绘制网格
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 50) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      // 提示文字
+      ctx.fillStyle = '#666';
+      ctx.font = '14px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('移动鼠标，其他用户将看到你的光标', canvas.width / 2, canvas.height / 2);
+
+      requestAnimationFrame(drawCanvas);
+    }
+    drawCanvas();
+
+    console.log('✅ 协同测试页面已加载');
+    console.log('💡 打开多个标签页测试多人协同功能');
+  </script>
+</body>
+</html>
+

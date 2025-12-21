@@ -95,10 +95,10 @@
 
 ---
 
-## M4: 多人协同 (0/10) - 📋 待开始
+## M4: 多人协同 (2/10) - 🔄 进行中
 
-- [ ] M4.1: 服务端基础
-- [ ] M4.2: 客户端 WebSocket
+- [x] M4.1: 服务端基础（Node.js + ws，房间管理，用户会话）
+- [x] M4.2: 客户端 WebSocket（连接管理器，自动重连，状态UI）
 - [ ] M4.3: CRDT 集成 - Yjs
 - [ ] M4.4: 操作同步
 - [ ] M4.5: 光标同步
@@ -172,12 +172,12 @@
 
 ## 总体进度
 
-- 已完成任务: 27 / 40（主任务）
-- 总体进度: 67.5%
+- 已完成任务: 29 / 40（主任务）
+- 总体进度: 72.5%
 - M1 核心渲染: ✅ 100% 完成
 - M2 交互系统: ✅ 100% 完成
 - M3 场景管理: 🔄 67% 完成（6/9）
-- M4 多人协同: 📋 0% 待开始
+- M4 多人协同: 🔄 20% 进行中（2/10）
 
 ---
 
@@ -187,9 +187,10 @@
 
 | 页面 | URL | 用途 |
 |------|-----|------|
-| 框选测试 | http://localhost:3000/test-selection.html | 交互功能测试 |
-| 压力测试 | http://localhost:3000/test-stress.html | 性能测试 |
-| 纹理测试 | http://localhost:3000/test-texture.html | 图片渲染测试 |
+| 框选测试 | http://localhost:5179/test-selection.html | 交互功能测试 |
+| 压力测试 | http://localhost:5179/test-stress.html | 性能测试 |
+| 纹理测试 | http://localhost:5179/test-texture.html | 图片渲染测试 |
+| 协同测试 | http://localhost:5179/test-collaboration.html | 多人协同测试 |
 
 ### 运行测试
 
@@ -198,12 +199,17 @@
 cd infinitecanvas_engine
 ./build-wasm.sh
 
-# 2. 启动开发服务器
+# 2. 启动前端开发服务器
 cd www
-npm run dev
+npm run dev  # 端口 5179
 
-# 3. 打开浏览器访问测试页面
-open http://localhost:3000/test-selection.html
+# 3. 启动协同服务器（可选，测试多人协同时需要）
+cd packages/server
+npm run dev  # 端口 8080
+
+# 4. 打开浏览器访问测试页面
+open http://localhost:5179/test-selection.html
+open http://localhost:5179/test-collaboration.html  # 多人协同
 ```
 
 ### 验收标准
