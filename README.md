@@ -4,6 +4,7 @@
 
 Open-source infinite canvas: a Rust core, WebGPU rendering, and a WebAssembly API for the browser.
 
+[![CI](https://github.com/shinjiyu/infinitecanvas_engine/actions/workflows/ci.yml/badge.svg)](https://github.com/shinjiyu/infinitecanvas_engine/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](./LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange)](./rust-toolchain.toml)
 [![wgpu 27](https://img.shields.io/badge/wgpu-27-76b900)](./Cargo.toml)

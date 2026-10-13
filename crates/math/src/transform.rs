@@ -1,7 +1,6 @@
-///! 2D 变换
-///!
-///! 提供平移、缩放、旋转的组合变换
-
+//! 2D 变换
+//!
+//! 提供平移、缩放、旋转的组合变换
 use glam::{Mat3, Mat4, Quat, Vec2};
 use serde::{Deserialize, Serialize};
 

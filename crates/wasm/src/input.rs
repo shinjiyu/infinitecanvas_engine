@@ -13,16 +13,20 @@ pub enum PointerEventKind {
     Up,
 }
 
-impl PointerEventKind {
-    pub fn from_str(kind: &str) -> Option<Self> {
+impl std::str::FromStr for PointerEventKind {
+    type Err = ();
+
+    fn from_str(kind: &str) -> Result<Self, Self::Err> {
         match kind {
-            "down" => Some(Self::Down),
-            "move" => Some(Self::Move),
-            "up" => Some(Self::Up),
-            _ => None,
+            "down" => Ok(Self::Down),
+            "move" => Ok(Self::Move),
+            "up" => Ok(Self::Up),
+            _ => Err(()),
         }
     }
+}
 
+impl PointerEventKind {
     pub fn into_event(self, payload: PointerEvent) -> Event {
         match self {
             Self::Down => Event::PointerDown(payload),
@@ -83,7 +87,11 @@ pub fn wheel_event_from_js(delta: Vec2, mode: u32, modifiers: Modifiers) -> Even
         _ => WheelDeltaMode::Pixel,
     };
 
-    Event::Wheel(WheelEvent { delta, mode, modifiers })
+    Event::Wheel(WheelEvent {
+        delta,
+        mode,
+        modifiers,
+    })
 }
 
 pub enum KeyboardEventKind {
@@ -91,15 +99,19 @@ pub enum KeyboardEventKind {
     Up,
 }
 
-impl KeyboardEventKind {
-    pub fn from_str(kind: &str) -> Option<Self> {
+impl std::str::FromStr for KeyboardEventKind {
+    type Err = ();
+
+    fn from_str(kind: &str) -> Result<Self, Self::Err> {
         match kind {
-            "down" => Some(Self::Down),
-            "up" => Some(Self::Up),
-            _ => None,
+            "down" => Ok(Self::Down),
+            "up" => Ok(Self::Up),
+            _ => Err(()),
         }
     }
+}
 
+impl KeyboardEventKind {
     pub fn into_event(self, payload: KeyboardEvent) -> Event {
         match self {
             Self::Down => Event::KeyDown(payload),

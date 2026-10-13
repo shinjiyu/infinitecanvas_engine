@@ -12,6 +12,14 @@
 //! - 批量处理：事件队列、元素操作
 //! - 避免高频跨界调用
 
+// `cargo build` / `cargo clippy` / `cargo test` run on the host target.
+// The WebGPU canvas surface and several browser-only helpers are wasm32-only,
+// so native checks must not treat that unused-on-host code as a failure.
+#![cfg_attr(
+    not(target_arch = "wasm32"),
+    allow(dead_code, clippy::too_many_arguments)
+)]
+
 mod canvas;
 mod input;
 mod renderer;
@@ -20,18 +28,17 @@ mod texture_manager;
 use infinitecanvas_engine::{
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
     math::{Color, Vec2},
-    AnyElement, Circle, CommandHistory, ElementId, ElementStyle, Event, EventQueue, Image, MoveCommand, PointerButton, PointerEvent, Rectangle, Scene, SelectionBox, SelectionManager, Tool, ToolManager, Viewport,
+    AnyElement, Circle, CommandHistory, ElementId, ElementStyle, Event, EventQueue, Image,
+    MoveCommand, PointerButton, PointerEvent, Rectangle, Scene, SelectionBox, SelectionManager,
+    Tool, ToolManager, Viewport,
 };
 use input::{
-    keyboard_event_from_js,
-    modifiers_from_flags,
-    pointer_event_from_js,
-    KeyboardEventKind,
-    PointerEventKind,
-    wheel_event_from_js,
+    keyboard_event_from_js, modifiers_from_flags, pointer_event_from_js, wheel_event_from_js,
+    KeyboardEventKind, PointerEventKind,
 };
 use js_sys::{Array, Object, Reflect};
 use renderer::WebGPURenderer;
+use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 
 const BUILD_SIGNATURE: &str = match option_env!("BUILD_SIGNATURE") {
@@ -111,18 +118,18 @@ impl InfiniteCanvas {
         // 初始化 panic hook（更好的错误信息）
         #[cfg(feature = "console_error_panic_hook")]
         console_error_panic_hook::set_once();
-        
+
         // 初始化日志系统
         console_log::init_with_level(log::Level::Debug)
             .map_err(|e| JsValue::from_str(&format!("Failed to init logger: {:?}", e)))?;
-        
+
         log::info!("InfiniteCanvas WASM module initialized");
         log::info!(
             "🆔 InfiniteCanvas build info: version={}, signature={}",
             BUILD_VERSION,
             BUILD_SIGNATURE
         );
-        
+
         Ok(InfiniteCanvas {
             webgpu_renderer: None,
             scene: Scene::new(),
@@ -137,7 +144,7 @@ impl InfiniteCanvas {
             perf_stats: PerformanceStats::default(),
         })
     }
-    
+
     /// 初始化画布（异步，因为 WebGPU 初始化需要异步）
     ///
     /// # 参数
@@ -149,58 +156,65 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub async fn init(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
         log::info!("Initializing InfiniteCanvas with WebGPU...");
-        
+
         let width = canvas.width();
         let height = canvas.height();
-        
+
         // 更新视口尺寸
         self.viewport.resize(Vec2::new(width as f32, height as f32));
-        
+
         // 设置视口中心，使屏幕左上角 (0,0) 对应世界坐标 (0,0)
         // 视口中心应该在画布中心对应的世界位置
-        self.viewport.move_to(Vec2::new(width as f32 / 2.0, height as f32 / 2.0));
-        
+        self.viewport
+            .move_to(Vec2::new(width as f32 / 2.0, height as f32 / 2.0));
+
         // 初始化 WebGPU（不再有 Canvas 2D 后备方案）
         let renderer = WebGPURenderer::new(canvas, width, height).await
             .map_err(|e| JsValue::from_str(&format!("WebGPU initialization failed: {:?}. Please use a browser that supports WebGPU.", e)))?;
-        
+
         log::info!("✅ WebGPU renderer initialized successfully");
         self.webgpu_renderer = Some(renderer);
-        
+
         // 不再初始化测试场景 - 用户会手动添加元素
         // self.init_test_scene();
-        
+
         log::info!("✅ InfiniteCanvas initialization complete");
         Ok(())
     }
-    
+
     /// 初始化测试场景
     fn init_test_scene(&mut self) {
         let id1 = self.scene.next_id();
         let rect = Rectangle::new(id1, Vec2::new(100.0, 100.0), Vec2::new(200.0, 150.0))
             .with_style(ElementStyle::fill_only(Color::from_hex("#3b82f6").unwrap()));
         self.scene.add_rect(rect);
-        
+
         let id2 = self.scene.next_id();
-        let rect2 = Rectangle::new(id2, Vec2::new(375.0, 125.0), Vec2::new(200.0, 150.0))
-            .with_style(ElementStyle::stroke_only(Color::from_hex("#ef4444").unwrap(), 3.0));
+        let rect2 =
+            Rectangle::new(id2, Vec2::new(375.0, 125.0), Vec2::new(200.0, 150.0)).with_style(
+                ElementStyle::stroke_only(Color::from_hex("#ef4444").unwrap(), 3.0),
+            );
         self.scene.add_rect(rect2);
-        
+
         let id3 = self.scene.next_id();
         let mut circle_style = ElementStyle::fill_only(Color::from_hex("#10b981").unwrap());
         circle_style.stroke = Some(Color::from_hex("#059669").unwrap());
         circle_style.stroke_width = 2.0;
         let circle = Circle::new(id3, Vec2::new(450.0, 350.0), 50.0).with_style(circle_style);
         self.scene.add_circle(circle);
-        
+
         let id4 = self.scene.next_id();
-        let circle2 = Circle::new(id4, Vec2::new(200.0, 350.0), 60.0)
-            .with_style(ElementStyle::stroke_only(Color::from_hex("#f59e0b").unwrap(), 3.0));
+        let circle2 = Circle::new(id4, Vec2::new(200.0, 350.0), 60.0).with_style(
+            ElementStyle::stroke_only(Color::from_hex("#f59e0b").unwrap(), 3.0),
+        );
         self.scene.add_circle(circle2);
-        
-        log::info!("Test scene initialized with {} elements", self.scene.count());
+
+        log::info!(
+            "Test scene initialized with {} elements",
+            self.scene.count()
+        );
     }
-    
+
     /// 渲染一帧
     ///
     /// # 返回
@@ -213,19 +227,20 @@ impl InfiniteCanvas {
             // 获取当前框选矩形（如果有）
             let selection_box = self.selection_box.bounds();
             renderer.render(&self.scene, &self.viewport, selection_box)?;
-            
+
             // 更新性能统计
             self.perf_stats.frame_count += 1;
             // 估算顶点数：每个矩形 6 顶点（2 个三角形），每个圆形约 96 顶点
             self.perf_stats.last_vertex_count = self.scene.count() * 50; // 平均估算
             self.perf_stats.last_draw_calls = 3; // fill + stroke + textured（估算）
-            
+
             Ok(())
         } else {
-            Err(JsValue::from_str("WebGPU renderer not initialized. Call init() first."))
+            Err(JsValue::from_str(
+                "WebGPU renderer not initialized. Call init() first.",
+            ))
         }
     }
-
 
     // ========== 输入事件 API ==========
     #[wasm_bindgen]
@@ -244,7 +259,7 @@ impl InfiniteCanvas {
         alt_key: bool,
         meta_key: bool,
     ) {
-        if let Some(event_kind) = PointerEventKind::from_str(&kind) {
+        if let Ok(event_kind) = PointerEventKind::from_str(&kind) {
             let modifiers = modifiers_from_flags(shift_key, ctrl_key, alt_key, meta_key);
             let screen_pos = Vec2::new(x, y);
             let screen_delta = Vec2::new(movement_x, movement_y);
@@ -293,7 +308,7 @@ impl InfiniteCanvas {
         alt_key: bool,
         meta_key: bool,
     ) {
-        if let Some(event_kind) = KeyboardEventKind::from_str(&kind) {
+        if let Ok(event_kind) = KeyboardEventKind::from_str(&kind) {
             let modifiers = modifiers_from_flags(shift_key, ctrl_key, alt_key, meta_key);
             let event = keyboard_event_from_js(event_kind, key, code, repeat, modifiers);
             self.event_queue.push(event);
@@ -326,7 +341,8 @@ impl InfiniteCanvas {
 
     #[wasm_bindgen]
     pub fn select_element(&mut self, element_id: u64, additive: bool) -> bool {
-        self.selection.select_element(&mut self.scene, element_id, additive)
+        self.selection
+            .select_element(&mut self.scene, element_id, additive)
     }
 
     #[wasm_bindgen]
@@ -351,7 +367,7 @@ impl InfiniteCanvas {
     }
 
     /// 获取当前框选矩形（如果正在框选）
-    /// 
+    ///
     /// # 返回
     /// 如果正在框选，返回 { x, y, width, height }；否则返回 null
     #[wasm_bindgen]
@@ -360,8 +376,16 @@ impl InfiniteCanvas {
             let obj = Object::new();
             let _ = Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from(rect.x));
             let _ = Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from(rect.y));
-            let _ = Reflect::set(&obj, &JsValue::from_str("width"), &JsValue::from(rect.width));
-            let _ = Reflect::set(&obj, &JsValue::from_str("height"), &JsValue::from(rect.height));
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("width"),
+                &JsValue::from(rect.width),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("height"),
+                &JsValue::from(rect.height),
+            );
             obj.into()
         } else {
             JsValue::NULL
@@ -381,7 +405,7 @@ impl InfiniteCanvas {
     }
 
     /// 移动选中的元素
-    /// 
+    ///
     /// # 参数
     /// - `dx`: X 方向移动量（世界坐标）
     /// - `dy`: Y 方向移动量（世界坐标）
@@ -392,7 +416,7 @@ impl InfiniteCanvas {
         if selected_ids.is_empty() {
             return;
         }
-        
+
         // 创建并执行移动命令
         let cmd = MoveCommand::new(selected_ids, delta);
         self.command_history.execute(Box::new(cmd), &mut self.scene);
@@ -401,7 +425,7 @@ impl InfiniteCanvas {
     // ========== 撤销/重做 API ==========
 
     /// 撤销上一个操作
-    /// 
+    ///
     /// # 返回
     /// 是否成功撤销
     #[wasm_bindgen]
@@ -410,7 +434,7 @@ impl InfiniteCanvas {
     }
 
     /// 重做上一个撤销的操作
-    /// 
+    ///
     /// # 返回
     /// 是否成功重做
     #[wasm_bindgen]
@@ -445,15 +469,15 @@ impl InfiniteCanvas {
     // ========== 工具 API ==========
 
     /// 设置当前工具
-    /// 
+    ///
     /// # 参数
     /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "pan")
-    /// 
+    ///
     /// # 返回
     /// 是否成功设置
     #[wasm_bindgen]
     pub fn set_tool(&mut self, tool_name: String) -> bool {
-        if let Some(tool) = Tool::from_str(&tool_name) {
+        if let Ok(tool) = Tool::from_str(&tool_name) {
             self.tool_manager.set_tool(tool);
             true
         } else {
@@ -488,7 +512,7 @@ impl InfiniteCanvas {
     // ========== UI 状态查询 API ==========
 
     /// 获取完整的画布状态（用于 UI 同步）
-    /// 
+    ///
     /// # 返回
     /// 包含以下字段的对象：
     /// - tool: 当前工具名称
@@ -503,20 +527,56 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn get_state(&self) -> JsValue {
         let obj = Object::new();
-        let _ = Reflect::set(&obj, &JsValue::from_str("tool"), &JsValue::from_str(self.tool_manager.current().name()));
-        let _ = Reflect::set(&obj, &JsValue::from_str("cursor"), &JsValue::from_str(self.tool_manager.current().cursor()));
-        let _ = Reflect::set(&obj, &JsValue::from_str("selectionCount"), &JsValue::from(self.selection.len() as u32));
-        let _ = Reflect::set(&obj, &JsValue::from_str("elementCount"), &JsValue::from(self.scene.count() as u32));
-        let _ = Reflect::set(&obj, &JsValue::from_str("canUndo"), &JsValue::from(self.command_history.can_undo()));
-        let _ = Reflect::set(&obj, &JsValue::from_str("canRedo"), &JsValue::from(self.command_history.can_redo()));
-        let _ = Reflect::set(&obj, &JsValue::from_str("isDragging"), &JsValue::from(self.drag_state.is_dragging));
-        let _ = Reflect::set(&obj, &JsValue::from_str("isSelectionBoxActive"), &JsValue::from(self.selection_box.is_active()));
-        let _ = Reflect::set(&obj, &JsValue::from_str("zoom"), &JsValue::from(self.viewport.zoom()));
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("tool"),
+            &JsValue::from_str(self.tool_manager.current().name()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("cursor"),
+            &JsValue::from_str(self.tool_manager.current().cursor()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("selectionCount"),
+            &JsValue::from(self.selection.len() as u32),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("elementCount"),
+            &JsValue::from(self.scene.count() as u32),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("canUndo"),
+            &JsValue::from(self.command_history.can_undo()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("canRedo"),
+            &JsValue::from(self.command_history.can_redo()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("isDragging"),
+            &JsValue::from(self.drag_state.is_dragging),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("isSelectionBoxActive"),
+            &JsValue::from(self.selection_box.is_active()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("zoom"),
+            &JsValue::from(self.viewport.zoom()),
+        );
         obj.into()
     }
 
     /// 获取选中元素的边界框
-    /// 
+    ///
     /// # 返回
     /// 如果有选中元素，返回 { x, y, width, height }；否则返回 null
     #[wasm_bindgen]
@@ -548,13 +608,21 @@ impl InfiniteCanvas {
         let obj = Object::new();
         let _ = Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from(min_x));
         let _ = Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from(min_y));
-        let _ = Reflect::set(&obj, &JsValue::from_str("width"), &JsValue::from(max_x - min_x));
-        let _ = Reflect::set(&obj, &JsValue::from_str("height"), &JsValue::from(max_y - min_y));
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("width"),
+            &JsValue::from(max_x - min_x),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("height"),
+            &JsValue::from(max_y - min_y),
+        );
         obj.into()
     }
 
     /// 获取元素信息
-    /// 
+    ///
     /// # 返回
     /// 如果元素存在，返回元素信息对象；否则返回 null
     #[wasm_bindgen]
@@ -563,17 +631,41 @@ impl InfiniteCanvas {
             let elem = element.as_element();
             let props = elem.props();
             let bounds = elem.world_bounds();
-            
+
             let obj = Object::new();
             let _ = Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from(props.id));
-            let _ = Reflect::set(&obj, &JsValue::from_str("type"), &JsValue::from_str(elem.type_name()));
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("type"),
+                &JsValue::from_str(elem.type_name()),
+            );
             let _ = Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from(bounds.x));
             let _ = Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from(bounds.y));
-            let _ = Reflect::set(&obj, &JsValue::from_str("width"), &JsValue::from(bounds.width));
-            let _ = Reflect::set(&obj, &JsValue::from_str("height"), &JsValue::from(bounds.height));
-            let _ = Reflect::set(&obj, &JsValue::from_str("visible"), &JsValue::from(props.visible));
-            let _ = Reflect::set(&obj, &JsValue::from_str("selected"), &JsValue::from(props.selected));
-            let _ = Reflect::set(&obj, &JsValue::from_str("zIndex"), &JsValue::from(props.z_index));
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("width"),
+                &JsValue::from(bounds.width),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("height"),
+                &JsValue::from(bounds.height),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("visible"),
+                &JsValue::from(props.visible),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("selected"),
+                &JsValue::from(props.selected),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("zIndex"),
+                &JsValue::from(props.z_index),
+            );
             obj.into()
         } else {
             JsValue::NULL
@@ -612,7 +704,7 @@ impl InfiniteCanvas {
     ) -> u64 {
         let id = self.scene.next_id();
         let mut style = ElementStyle::new();
-        
+
         // 转换颜色字符串到 Color
         style.fill = fill_color.and_then(|s| Color::from_hex(&s).ok());
         style.stroke = stroke_color.and_then(|s| Color::from_hex(&s).ok());
@@ -648,7 +740,7 @@ impl InfiniteCanvas {
     ) -> u64 {
         let id = self.scene.next_id();
         let mut style = ElementStyle::new();
-        
+
         // 转换颜色字符串到 Color
         style.fill = fill_color.and_then(|s| Color::from_hex(&s).ok());
         style.stroke = stroke_color.and_then(|s| Color::from_hex(&s).ok());
@@ -728,18 +820,22 @@ impl InfiniteCanvas {
         log::info!("  - Height: {}", height);
         log::info!("  - Data length: {} bytes", data.len());
         log::info!("  - Expected length: {} bytes", width * height * 4);
-        
+
         // 检查前几个字节
         if data.len() >= 20 {
             log::info!("  - First 20 bytes: {:?}", &data[0..20]);
-            log::info!("  - Sample pixel at (0,0): R={}, G={}, B={}, A={}", 
-                data[0], data[1], data[2], data[3]);
+            log::info!(
+                "  - Sample pixel at (0,0): R={}, G={}, B={}, A={}",
+                data[0],
+                data[1],
+                data[2],
+                data[3]
+            );
         }
-        
-        let renderer = self
-            .webgpu_renderer
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("WebGPU renderer not initialized. Call init() first."))?;
+
+        let renderer = self.webgpu_renderer.as_mut().ok_or_else(|| {
+            JsValue::from_str("WebGPU renderer not initialized. Call init() first.")
+        })?;
 
         renderer
             .upload_texture(texture_id.clone(), width, height, data)
@@ -770,7 +866,7 @@ impl InfiniteCanvas {
     /// ```js
     /// // 上传纹理
     /// await canvas.upload_texture("logo", 256, 256, imageData);
-    /// 
+    ///
     /// // 添加图片元素
     /// const imageId = canvas.add_image(100, 100, 200, 150, "logo");
     /// ```
@@ -784,7 +880,12 @@ impl InfiniteCanvas {
         texture_id: String,
     ) -> u64 {
         let id = self.scene.next_id();
-        let image = Image::new(id, Vec2::new(x, y), Vec2::new(width, height), texture_id.clone());
+        let image = Image::new(
+            id,
+            Vec2::new(x, y),
+            Vec2::new(width, height),
+            texture_id.clone(),
+        );
         self.scene.add_image(image);
 
         log::info!(
@@ -882,7 +983,7 @@ impl InfiniteCanvas {
     // ========== 性能监控 API ==========
 
     /// 获取性能统计信息
-    /// 
+    ///
     /// # 返回
     /// 包含以下字段的对象：
     /// - frameCount: 总帧数
@@ -893,11 +994,31 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn get_performance_stats(&self) -> JsValue {
         let obj = Object::new();
-        let _ = Reflect::set(&obj, &JsValue::from_str("frameCount"), &JsValue::from(self.perf_stats.frame_count as f64));
-        let _ = Reflect::set(&obj, &JsValue::from_str("vertexCount"), &JsValue::from(self.perf_stats.last_vertex_count as u32));
-        let _ = Reflect::set(&obj, &JsValue::from_str("drawCalls"), &JsValue::from(self.perf_stats.last_draw_calls as u32));
-        let _ = Reflect::set(&obj, &JsValue::from_str("frameTimeMs"), &JsValue::from(self.perf_stats.last_frame_time_ms));
-        let _ = Reflect::set(&obj, &JsValue::from_str("elementCount"), &JsValue::from(self.scene.count() as u32));
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("frameCount"),
+            &JsValue::from(self.perf_stats.frame_count as f64),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("vertexCount"),
+            &JsValue::from(self.perf_stats.last_vertex_count as u32),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("drawCalls"),
+            &JsValue::from(self.perf_stats.last_draw_calls as u32),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("frameTimeMs"),
+            &JsValue::from(self.perf_stats.last_frame_time_ms),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("elementCount"),
+            &JsValue::from(self.scene.count() as u32),
+        );
         obj.into()
     }
 
@@ -942,7 +1063,7 @@ impl InfiniteCanvas {
         }
 
         let current_tool = self.tool_manager.current();
-        
+
         match current_tool {
             Tool::Select => self.handle_select_tool_down(event),
             Tool::Rectangle | Tool::Circle => self.handle_draw_tool_down(event, current_tool),
@@ -952,7 +1073,7 @@ impl InfiniteCanvas {
 
     fn handle_pointer_move(&mut self, event: PointerEvent) {
         let current_tool = self.tool_manager.current();
-        
+
         match current_tool {
             Tool::Select => self.handle_select_tool_move(event),
             Tool::Rectangle | Tool::Circle => self.handle_draw_tool_move(event),
@@ -962,7 +1083,7 @@ impl InfiniteCanvas {
 
     fn handle_pointer_up(&mut self, event: PointerEvent) {
         let current_tool = self.tool_manager.current();
-        
+
         match current_tool {
             Tool::Select => self.handle_select_tool_up(event),
             Tool::Rectangle | Tool::Circle => self.handle_draw_tool_up(event, current_tool),
@@ -987,7 +1108,8 @@ impl InfiniteCanvas {
                 self.selection_box.cancel();
             } else {
                 // 点击到未选中的元素：选中它，并开始拖动
-                self.selection.select_element(&mut self.scene, hit.id, additive);
+                self.selection
+                    .select_element(&mut self.scene, hit.id, additive);
                 self.start_drag(event.pointer_id, event.world_position);
                 self.selection_box.cancel();
             }
@@ -1010,7 +1132,8 @@ impl InfiniteCanvas {
             self.drag_state.total_delta += delta;
         } else {
             // 否则更新框选
-            self.selection_box.update(event.pointer_id, event.world_position);
+            self.selection_box
+                .update(event.pointer_id, event.world_position);
         }
     }
 
@@ -1023,7 +1146,9 @@ impl InfiniteCanvas {
 
         // 结束框选
         if let Some((rect, additive)) = self.selection_box.finish(event.pointer_id) {
-            let hits = self.selection.select_in_rect(&mut self.scene, rect, additive);
+            let hits = self
+                .selection
+                .select_in_rect(&mut self.scene, rect, additive);
             log::trace!("Selection box picked {} elements", hits.len());
         }
     }
@@ -1037,7 +1162,7 @@ impl InfiniteCanvas {
         self.drag_state.start_position = event.world_position;
         self.drag_state.last_position = event.world_position;
         self.drag_state.total_delta = Vec2::ZERO;
-        
+
         // 清除当前选择
         self.selection.clear(&mut self.scene);
     }
@@ -1056,7 +1181,7 @@ impl InfiniteCanvas {
 
         let start = self.drag_state.start_position;
         let end = event.world_position;
-        
+
         // 计算矩形尺寸
         let min_x = start.x.min(end.x);
         let min_y = start.y.min(end.y);
@@ -1068,24 +1193,32 @@ impl InfiniteCanvas {
         if width > MIN_SIZE && height > MIN_SIZE {
             let id = self.scene.next_id();
             let center = Vec2::new(min_x + width / 2.0, min_y + height / 2.0);
-            
+
             match tool {
                 Tool::Rectangle => {
-                    let style = ElementStyle::fill_only(Color::from_hex("#4090f2").unwrap_or(Color::BLUE));
-                    let rect = Rectangle::new(id, center, Vec2::new(width, height)).with_style(style);
+                    let style =
+                        ElementStyle::fill_only(Color::from_hex("#4090f2").unwrap_or(Color::BLUE));
+                    let rect =
+                        Rectangle::new(id, center, Vec2::new(width, height)).with_style(style);
                     self.scene.add_rect(rect);
-                    log::info!("Created rectangle {} at {:?}, size {:?}", id, center, (width, height));
+                    log::info!(
+                        "Created rectangle {} at {:?}, size {:?}",
+                        id,
+                        center,
+                        (width, height)
+                    );
                 }
                 Tool::Circle => {
                     let radius = width.min(height) / 2.0;
-                    let style = ElementStyle::fill_only(Color::from_hex("#36d399").unwrap_or(Color::GREEN));
+                    let style =
+                        ElementStyle::fill_only(Color::from_hex("#36d399").unwrap_or(Color::GREEN));
                     let circle = Circle::new(id, center, radius).with_style(style);
                     self.scene.add_circle(circle);
                     log::info!("Created circle {} at {:?}, radius {}", id, center, radius);
                 }
                 _ => {}
             }
-            
+
             // 选中新创建的元素
             self.selection.select_element(&mut self.scene, id, false);
         }
@@ -1131,7 +1264,9 @@ impl InfiniteCanvas {
     fn finish_drag(&mut self) {
         // 只有在有实际移动时才创建命令
         const MIN_MOVE_THRESHOLD: f32 = 0.1;
-        if self.drag_state.total_delta.length() > MIN_MOVE_THRESHOLD && !self.drag_state.dragged_ids.is_empty() {
+        if self.drag_state.total_delta.length() > MIN_MOVE_THRESHOLD
+            && !self.drag_state.dragged_ids.is_empty()
+        {
             // 注意：元素已经被移动了，这里我们需要先撤销移动，然后让命令重新执行
             // 或者直接创建一个已执行的命令添加到历史
             // 为了简单起见，我们直接记录命令（不重复执行）
@@ -1153,7 +1288,11 @@ impl InfiniteCanvas {
     fn move_selected_elements_internal(&mut self, delta: Vec2) {
         for id in &self.drag_state.dragged_ids {
             if let Some(element) = self.scene.get_mut(*id) {
-                element.as_element_mut().props_mut().transform.translate(delta);
+                element
+                    .as_element_mut()
+                    .props_mut()
+                    .transform
+                    .translate(delta);
             }
         }
     }
@@ -1164,8 +1303,16 @@ fn hit_results_to_js_array(hits: Vec<HitTestResult>) -> Array {
     for hit in hits {
         let obj = Object::new();
         let _ = Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from(hit.id));
-        let _ = Reflect::set(&obj, &JsValue::from_str("zIndex"), &JsValue::from(hit.z_index));
-        let _ = Reflect::set(&obj, &JsValue::from_str("elementType"), &JsValue::from_str(hit.element_type));
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("zIndex"),
+            &JsValue::from(hit.z_index),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("elementType"),
+            &JsValue::from_str(hit.element_type),
+        );
         array.push(&obj);
     }
     array
@@ -1177,4 +1324,3 @@ fn selection_ids_to_js_array(ids: Vec<ElementId>) -> Array {
     }
     array
 }
-

@@ -20,18 +20,24 @@ pub enum Tool {
     Hand,
 }
 
-impl Tool {
-    /// 从字符串创建工具类型
-    pub fn from_str(s: &str) -> Option<Self> {
+impl std::str::FromStr for Tool {
+    type Err = ();
+
+    /// 从字符串创建工具类型。
+    ///
+    /// 未知名称返回 `Err(())`。`"hand"` 与 `"pan"` 都映射到 [`Tool::Pan`]。
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "select" | "v" => Some(Tool::Select),
-            "rectangle" | "rect" | "r" => Some(Tool::Rectangle),
-            "circle" | "ellipse" | "o" => Some(Tool::Circle),
-            "pan" | "hand" | "h" => Some(Tool::Pan),
-            _ => None,
+            "select" | "v" => Ok(Tool::Select),
+            "rectangle" | "rect" | "r" => Ok(Tool::Rectangle),
+            "circle" | "ellipse" | "o" => Ok(Tool::Circle),
+            "pan" | "hand" | "h" => Ok(Tool::Pan),
+            _ => Err(()),
         }
     }
+}
 
+impl Tool {
     /// 获取工具名称
     pub fn name(&self) -> &'static str {
         match self {
@@ -125,16 +131,17 @@ impl ToolManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_tool_from_str() {
-        assert_eq!(Tool::from_str("select"), Some(Tool::Select));
-        assert_eq!(Tool::from_str("v"), Some(Tool::Select));
-        assert_eq!(Tool::from_str("rectangle"), Some(Tool::Rectangle));
-        assert_eq!(Tool::from_str("r"), Some(Tool::Rectangle));
-        assert_eq!(Tool::from_str("circle"), Some(Tool::Circle));
-        assert_eq!(Tool::from_str("o"), Some(Tool::Circle));
-        assert_eq!(Tool::from_str("unknown"), None);
+        assert_eq!(Tool::from_str("select"), Ok(Tool::Select));
+        assert_eq!(Tool::from_str("v"), Ok(Tool::Select));
+        assert_eq!(Tool::from_str("rectangle"), Ok(Tool::Rectangle));
+        assert_eq!(Tool::from_str("r"), Ok(Tool::Rectangle));
+        assert_eq!(Tool::from_str("circle"), Ok(Tool::Circle));
+        assert_eq!(Tool::from_str("o"), Ok(Tool::Circle));
+        assert!(Tool::from_str("unknown").is_err());
     }
 
     #[test]
@@ -156,8 +163,3 @@ mod tests {
         assert_eq!(manager.current(), Tool::Rectangle);
     }
 }
-
-
-
-
-

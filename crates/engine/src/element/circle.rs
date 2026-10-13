@@ -1,5 +1,4 @@
-///! 圆形元素
-
+//! 圆形元素
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Rect, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -75,7 +74,7 @@ impl Circle {
 
         let color = self.style.fill.unwrap();
         let transform = &self.props.transform;
-        
+
         // 中心点（局部坐标系）
         let center = Vec2::ZERO;
         let center_world = transform.transform_point(center);
@@ -221,10 +220,10 @@ mod tests {
             .with_style(ElementStyle::fill_only(Color::RED));
 
         let vertices = circle.generate_fill_vertices_with_segments(16);
-        
+
         // 16 个三角形 = 48 个顶点
         assert_eq!(vertices.len(), 48);
-        
+
         // 检查颜色
         for v in &vertices {
             assert_eq!(v.color, [1.0, 0.0, 0.0, 1.0]);
@@ -237,10 +236,10 @@ mod tests {
             .with_style(ElementStyle::stroke_only(Color::BLUE, 2.0));
 
         let vertices = circle.generate_stroke_vertices_with_segments(16);
-        
+
         // 16 条边 = 32 个顶点
         assert_eq!(vertices.len(), 32);
-        
+
         // 检查颜色
         for v in &vertices {
             assert_eq!(v.color, [0.0, 0.0, 1.0, 1.0]);
@@ -251,12 +250,11 @@ mod tests {
     fn test_generate_vertices_both() {
         let mut style = ElementStyle::fill_only(Color::RED);
         style.stroke = Some(Color::BLUE);
-        
-        let circle = Circle::new(1, Vec2::new(100.0, 100.0), 50.0)
-            .with_style(style);
+
+        let circle = Circle::new(1, Vec2::new(100.0, 100.0), 50.0).with_style(style);
 
         let vertices = circle.generate_vertices();
-        
+
         // 32 个三角形 + 32 条边 = 96 + 64 = 160 个顶点
         assert_eq!(vertices.len(), 160);
     }

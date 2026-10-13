@@ -1,7 +1,6 @@
-///! 场景容器
-///!
-///! 管理无限画布上的所有元素
-
+//! 场景容器
+//!
+//! 管理无限画布上的所有元素
 use crate::element::{Circle, Element, ElementId, Image, Rectangle};
 use std::collections::HashMap;
 
@@ -251,4 +250,3 @@ mod tests {
         assert_eq!(scene.next_id(), 3);
     }
 }
-

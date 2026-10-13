@@ -25,4 +25,3 @@ pub use glam::{vec2, Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
 pub use rect::Rect;
 pub use transform::Transform;
 pub use vertex::Vertex;
-

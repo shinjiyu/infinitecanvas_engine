@@ -1,12 +1,11 @@
 /// WebGPU 纹理管理器
-/// 
+///
 /// 负责：
 /// - GPU 纹理的创建和销毁
 /// - 纹理缓存和引用计数
 /// - ImageData 到 wgpu::Texture 的转换
 use std::collections::HashMap;
 use std::sync::Arc;
-use wgpu;
 
 /// 纹理条目
 struct TextureEntry {
@@ -21,12 +20,13 @@ struct TextureEntry {
 }
 
 /// 纹理管理器
-/// 
+///
 /// # 示例
-/// 
-/// ```
+///
+/// ```ignore
+/// // Requires a wgpu Device and Queue, so `cargo test` does not run this example.
 /// let mut manager = TextureManager::new(device, queue);
-/// 
+///
 /// // 创建纹理
 /// manager.create_texture(
 ///     "logo".to_string(),
@@ -34,12 +34,12 @@ struct TextureEntry {
 ///     256,
 ///     256,
 /// )?;
-/// 
+///
 /// // 获取纹理视图
 /// if let Some(view) = manager.get_texture_view("logo") {
 ///     // 使用纹理视图...
 /// }
-/// 
+///
 /// // 删除纹理
 /// manager.remove_texture("logo");
 /// ```
@@ -63,16 +63,16 @@ impl TextureManager {
     }
 
     /// 从 RGBA8 数据创建纹理
-    /// 
+    ///
     /// # 参数
-    /// 
+    ///
     /// - `id`: 纹理的唯一标识符
     /// - `data`: RGBA8 格式的图像数据（每像素 4 字节）
     /// - `width`: 图像宽度（像素）
     /// - `height`: 图像高度（像素）
-    /// 
+    ///
     /// # 错误
-    /// 
+    ///
     /// - 如果纹理 ID 已存在，返回错误
     /// - 如果数据长度不匹配 (width * height * 4)，返回错误
     /// - 如果纹理尺寸超过 GPU 限制，返回错误
@@ -133,7 +133,7 @@ impl TextureManager {
             view_formats: &[],
         });
 
-        // 上传数据到 GPU  
+        // 上传数据到 GPU
         let bytes_per_row = 4 * width;
         log::info!("📤 Writing texture data to GPU...");
         log::info!("  - Texture size: {}x{}", width, height);
@@ -144,11 +144,17 @@ impl TextureManager {
         for i in 0..4.min(width * height) {
             let offset = (i * 4) as usize;
             if offset + 3 < data.len() {
-                log::info!("    Pixel[{}]: R={}, G={}, B={}, A={}", 
-                    i, data[offset], data[offset+1], data[offset+2], data[offset+3]);
+                log::info!(
+                    "    Pixel[{}]: R={}, G={}, B={}, A={}",
+                    i,
+                    data[offset],
+                    data[offset + 1],
+                    data[offset + 2],
+                    data[offset + 3]
+                );
             }
         }
-        
+
         // 对于 write_texture，bytes_per_row 不需要 256 字节对齐（不同于 copyBufferToTexture）
         // 直接使用实际的行字节数即可
         self.queue.write_texture(
@@ -157,7 +163,7 @@ impl TextureManager {
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bytes_per_row),
-                rows_per_image: None,  // 对于单层2D纹理，使用None
+                rows_per_image: None, // 对于单层2D纹理，使用None
             },
             wgpu::Extent3d {
                 width,
@@ -185,9 +191,9 @@ impl TextureManager {
     }
 
     /// 获取纹理视图
-    /// 
+    ///
     /// # 返回
-    /// 
+    ///
     /// - `Some(&wgpu::TextureView)`: 如果纹理存在
     /// - `None`: 如果纹理不存在
     pub fn get_texture_view(&self, id: &str) -> Option<&wgpu::TextureView> {
@@ -195,9 +201,9 @@ impl TextureManager {
     }
 
     /// 获取纹理尺寸
-    /// 
+    ///
     /// # 返回
-    /// 
+    ///
     /// - `Some((width, height))`: 如果纹理存在
     /// - `None`: 如果纹理不存在
     pub fn get_texture_size(&self, id: &str) -> Option<(u32, u32)> {
@@ -205,7 +211,7 @@ impl TextureManager {
     }
 
     /// 增加纹理引用计数
-    /// 
+    ///
     /// 当创建新的 Image 元素使用此纹理时调用
     pub fn add_ref(&mut self, id: &str) {
         if let Some(entry) = self.textures.get_mut(id) {
@@ -215,7 +221,7 @@ impl TextureManager {
     }
 
     /// 减少纹理引用计数
-    /// 
+    ///
     /// 当删除 Image 元素时调用。如果引用计数降到 0，纹理会被自动删除。
     pub fn release(&mut self, id: &str) {
         if let Some(entry) = self.textures.get_mut(id) {
@@ -230,9 +236,9 @@ impl TextureManager {
     }
 
     /// 强制删除纹理（忽略引用计数）
-    /// 
+    ///
     /// # 注意
-    /// 
+    ///
     /// 如果有 Image 元素仍在使用此纹理，会导致渲染错误。
     /// 通常应该使用 `release()` 而不是此方法。
     pub fn remove_texture(&mut self, id: &str) {
@@ -257,7 +263,7 @@ impl TextureManager {
     }
 
     /// 计算纹理占用的内存（字节）
-    /// 
+    ///
     /// 这只是估算值（RGBA8 格式），实际 GPU 内存占用可能不同。
     pub fn memory_usage(&self) -> usize {
         self.textures
@@ -270,9 +276,9 @@ impl TextureManager {
     }
 
     /// 清空所有纹理
-    /// 
+    ///
     /// # 警告
-    /// 
+    ///
     /// 会删除所有纹理，包括正在使用的纹理。
     pub fn clear(&mut self) {
         let count = self.textures.len();
@@ -283,8 +289,6 @@ impl TextureManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Note: 这些测试需要 WebGPU 环境，在 WASM 外无法运行
     // 仅作为文档和结构验证
 
@@ -310,4 +314,3 @@ mod tests {
         assert_eq!(memory, 1_048_576); // 1 MB
     }
 }
-

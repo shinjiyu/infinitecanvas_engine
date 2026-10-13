@@ -1,7 +1,6 @@
-///! Canvas 2D Context 封装
-///!
-///! 提供对 HTMLCanvasElement 和 Canvas 2D API 的 Rust 封装
-
+//! Canvas 2D Context 封装
+//!
+//! 提供对 HTMLCanvasElement 和 Canvas 2D API 的 Rust 封装
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
@@ -109,21 +108,13 @@ impl CanvasContext {
     ///
     /// 使用白色背景清空整个画布
     pub fn clear(&self) {
-        self.context.clear_rect(
-            0.0,
-            0.0,
-            self.width as f64,
-            self.height as f64,
-        );
-        
+        self.context
+            .clear_rect(0.0, 0.0, self.width as f64, self.height as f64);
+
         // 填充白色背景
-        self.context.set_fill_style(&"#ffffff".into());
-        self.context.fill_rect(
-            0.0,
-            0.0,
-            self.width as f64,
-            self.height as f64,
-        );
+        self.context.set_fill_style_str("#ffffff");
+        self.context
+            .fill_rect(0.0, 0.0, self.width as f64, self.height as f64);
     }
 
     /// 绘制填充矩形
@@ -135,13 +126,9 @@ impl CanvasContext {
     /// - `height`: 高度
     /// - `color`: 颜色（CSS 颜色字符串，如 "#ff0000"）
     pub fn fill_rect(&self, x: f32, y: f32, width: f32, height: f32, color: &str) {
-        self.context.set_fill_style(&color.into());
-        self.context.fill_rect(
-            x as f64,
-            y as f64,
-            width as f64,
-            height as f64,
-        );
+        self.context.set_fill_style_str(color);
+        self.context
+            .fill_rect(x as f64, y as f64, width as f64, height as f64);
     }
 
     /// 绘制描边矩形
@@ -153,15 +140,19 @@ impl CanvasContext {
     /// - `height`: 高度
     /// - `color`: 颜色
     /// - `line_width`: 线宽
-    pub fn stroke_rect(&self, x: f32, y: f32, width: f32, height: f32, color: &str, line_width: f32) {
-        self.context.set_stroke_style(&color.into());
+    pub fn stroke_rect(
+        &self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: &str,
+        line_width: f32,
+    ) {
+        self.context.set_stroke_style_str(color);
         self.context.set_line_width(line_width as f64);
-        self.context.stroke_rect(
-            x as f64,
-            y as f64,
-            width as f64,
-            height as f64,
-        );
+        self.context
+            .stroke_rect(x as f64, y as f64, width as f64, height as f64);
     }
 
     /// 绘制圆形
@@ -194,12 +185,12 @@ impl CanvasContext {
             .ok();
 
         if let Some(color) = fill_color {
-            self.context.set_fill_style(&color.into());
+            self.context.set_fill_style_str(color);
             self.context.fill();
         }
 
         if let Some(color) = stroke_color {
-            self.context.set_stroke_style(&color.into());
+            self.context.set_stroke_style_str(color);
             self.context.set_line_width(line_width as f64);
             self.context.stroke();
         }
@@ -243,7 +234,7 @@ impl CanvasContext {
     /// - `color`: 颜色
     /// - `width`: 线宽
     pub fn draw_line(&self, x1: f32, y1: f32, x2: f32, y2: f32, color: &str, width: f32) {
-        self.context.set_stroke_style(&color.into());
+        self.context.set_stroke_style_str(color);
         self.context.set_line_width(width as f64);
         self.context.begin_path();
         self.context.move_to(x1 as f64, y1 as f64);

@@ -2,7 +2,7 @@
 
 use infinitecanvas_math::Vec2;
 
-use crate::{element::Element, ElementId, Scene};
+use crate::{ElementId, Scene};
 
 /// Configuration for hit testing.
 #[derive(Debug, Clone)]
@@ -31,11 +31,7 @@ pub struct HitTestResult {
 }
 
 /// Hit test the scene at a world-space point. Results are returned from top-most element.
-pub fn hit_test_point(
-    scene: &Scene,
-    point: Vec2,
-    options: &HitTestOptions,
-) -> Vec<HitTestResult> {
+pub fn hit_test_point(scene: &Scene, point: Vec2, options: &HitTestOptions) -> Vec<HitTestResult> {
     if scene.is_empty() {
         return Vec::new();
     }
@@ -68,7 +64,8 @@ pub fn hit_test_point(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{element::Rectangle, Scene};
+    use crate::element::{Element, Rectangle};
+    use crate::Scene;
     use infinitecanvas_math::Vec2;
 
     #[test]

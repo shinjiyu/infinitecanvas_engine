@@ -1,7 +1,6 @@
-///! 视口管理器
-///!
-///! 管理无限画布的视口位置和缩放
-
+//! 视口管理器
+//!
+//! 管理无限画布的视口位置和缩放
 use infinitecanvas_math::{Rect, Transform, Vec2};
 use serde::{Deserialize, Serialize};
 
@@ -168,7 +167,7 @@ mod tests {
     #[test]
     fn test_screen_to_world() {
         let viewport = Viewport::new(Vec2::new(800.0, 600.0));
-        
+
         // 屏幕中心 → 世界原点
         let center = Vec2::new(400.0, 300.0);
         assert_eq!(viewport.screen_to_world(center), Vec2::ZERO);
@@ -183,7 +182,10 @@ mod tests {
         let viewport = Viewport::new(Vec2::new(800.0, 600.0));
 
         // 世界原点 → 屏幕中心
-        assert_eq!(viewport.world_to_screen(Vec2::ZERO), Vec2::new(400.0, 300.0));
+        assert_eq!(
+            viewport.world_to_screen(Vec2::ZERO),
+            Vec2::new(400.0, 300.0)
+        );
     }
 
     #[test]

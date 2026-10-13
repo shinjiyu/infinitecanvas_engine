@@ -1,7 +1,6 @@
-///! 矩形
-///!
-///! 用于边界框计算和碰撞检测
-
+//! 矩形
+//!
+//! 用于边界框计算和碰撞检测
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +18,12 @@ pub struct Rect {
 impl Rect {
     /// 创建矩形
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// 从两个点创建矩形
