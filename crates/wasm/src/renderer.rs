@@ -1,12 +1,15 @@
-///! WebGPU 渲染器
-///!
-///! 使用 wgpu 实现高性能 GPU 渲染
+//! WebGPU 渲染器
+//!
+//! 使用 wgpu 实现高性能 GPU 渲染
 
-use infinitecanvas_engine::{element::Element, math::{Rect, Vertex}, AnyElement, Scene, Viewport};
-use wasm_bindgen::prelude::*;
-use wgpu::util::DeviceExt;
-use std::sync::Arc;
 use crate::texture_manager::TextureManager;
+use infinitecanvas_engine::{
+    element::Element,
+    math::{Rect, Vertex},
+    AnyElement, Scene, Viewport,
+};
+use std::sync::Arc;
+use wasm_bindgen::prelude::*;
 
 const VERBOSE_RENDER_LOGS: bool = false;
 
@@ -24,7 +27,7 @@ pub struct WebGPURenderer {
     queue: Arc<wgpu::Queue>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
-    
+
     // 基础渲染管线（纯色）
     fill_pipeline: wgpu::RenderPipeline,
     stroke_pipeline: wgpu::RenderPipeline,
@@ -32,12 +35,12 @@ pub struct WebGPURenderer {
     vertex_buffer_size: usize,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
-    
+
     // 纹理渲染管线
     texture_pipeline: wgpu::RenderPipeline,
     texture_sampler: wgpu::Sampler,
     texture_manager: TextureManager,
-    
+
     // 占位纹理（用于无纹理绑定时）
     placeholder_texture: wgpu::Texture,
     placeholder_texture_view: wgpu::TextureView,
@@ -45,7 +48,34 @@ pub struct WebGPURenderer {
 
 impl WebGPURenderer {
     /// 初始化 WebGPU 渲染器
-    pub async fn new(canvas: web_sys::HtmlCanvasElement, width: u32, height: u32) -> Result<Self, JsValue> {
+    ///
+    /// `SurfaceTarget::Canvas` 只在 `wasm32`（非 Emscripten）目标上存在。
+    /// 原生 `cargo clippy` / `cargo test` 会走到错误分支，避免引用该变体。
+    pub async fn new(
+        canvas: web_sys::HtmlCanvasElement,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, JsValue> {
+        #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
+        {
+            Self::new_wasm(canvas, width, height).await
+        }
+        #[cfg(not(all(target_arch = "wasm32", not(target_os = "emscripten"))))]
+        {
+            let _ = (canvas, width, height);
+            Err(JsValue::from_str(
+                "WebGPU canvas surface is only available when targeting wasm32",
+            ))
+        }
+    }
+
+    /// wasm32 上的 WebGPU 初始化实现
+    #[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
+    async fn new_wasm(
+        canvas: web_sys::HtmlCanvasElement,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, JsValue> {
         log::info!("Initializing WebGPU renderer...");
 
         // 1. 获取 WebGPU 实例
@@ -102,9 +132,14 @@ impl WebGPURenderer {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        
+
         surface.configure(&device, &surface_config);
-        log::info!("Surface configured: {}x{}, format: {:?}", width, height, surface_format);
+        log::info!(
+            "Surface configured: {}x{}, format: {:?}",
+            width,
+            height,
+            surface_format
+        );
 
         // 6. 创建 Uniform Buffer（用于视口变换矩阵）
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -288,8 +323,8 @@ impl WebGPURenderer {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,    // 放大时线性插值
-            min_filter: wgpu::FilterMode::Linear,    // 缩小时线性插值
+            mag_filter: wgpu::FilterMode::Linear, // 放大时线性插值
+            min_filter: wgpu::FilterMode::Linear, // 缩小时线性插值
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
@@ -326,43 +361,45 @@ impl WebGPURenderer {
             },
         );
 
-        let placeholder_texture_view = placeholder_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let placeholder_texture_view =
+            placeholder_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         // 15. 创建纹理 BindGroup 布局
-        let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Texture Bind Group Layout"),
-            entries: &[
-                // Uniform buffer (transform)
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture Bind Group Layout"),
+                entries: &[
+                    // Uniform buffer (transform)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // Texture
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    // Texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                // Sampler
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+                    // Sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         // 16. 加载纹理 Shader
         let texture_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -371,11 +408,12 @@ impl WebGPURenderer {
         });
 
         // 17. 创建纹理渲染管线
-        let texture_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Texture Pipeline Layout"),
-            bind_group_layouts: &[&texture_bind_group_layout],
-            push_constant_ranges: &[],
-        });
+        let texture_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Texture Pipeline Layout"),
+                bind_group_layouts: &[&texture_bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let texture_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Texture Pipeline"),
@@ -465,29 +503,35 @@ impl WebGPURenderer {
     }
 
     /// 渲染场景
-    /// 
+    ///
     /// # 参数
     /// - `scene`: 场景数据
     /// - `_viewport`: 视口（当前未使用）
     /// - `selection_box`: 框选矩形（如果正在框选）
     pub fn render(
-        &mut self, 
-        scene: &Scene, 
+        &mut self,
+        scene: &Scene,
         viewport: &Viewport,
         selection_box: Option<Rect>,
     ) -> Result<(), JsValue> {
         // 1. 收集所有顶点（带视口裁剪）
-        let (fill_vertices, stroke_vertices, _culled_count) = self.collect_vertices(scene, viewport);
+        let (fill_vertices, stroke_vertices, _culled_count) =
+            self.collect_vertices(scene, viewport);
         let textured_groups = self.collect_textured_vertices(scene, viewport);
-        
+
         // 1.5 收集选中元素的高亮顶点和框选矩形顶点
-        let (selection_fill_vertices, selection_stroke_vertices) = self.collect_selection_overlay_vertices(scene, selection_box);
-        
+        let (selection_fill_vertices, selection_stroke_vertices) =
+            self.collect_selection_overlay_vertices(scene, selection_box);
+
         // 计算总顶点数
         let textured_vertex_count: usize = textured_groups.iter().map(|(_, v)| v.len()).sum();
-        let selection_vertex_count = selection_fill_vertices.len() + selection_stroke_vertices.len();
-        let total_vertices = fill_vertices.len() + stroke_vertices.len() + textured_vertex_count + selection_vertex_count;
-        
+        let selection_vertex_count =
+            selection_fill_vertices.len() + selection_stroke_vertices.len();
+        let total_vertices = fill_vertices.len()
+            + stroke_vertices.len()
+            + textured_vertex_count
+            + selection_vertex_count;
+
         render_log!(
             "🎨 Collected {} fill, {} stroke, {} textured, {} selection vertices",
             fill_vertices.len(),
@@ -537,14 +581,14 @@ impl WebGPURenderer {
                     );
                 }
             }
-            
-            self.queue.write_buffer(
-                &self.vertex_buffer,
-                0,
-                bytemuck::cast_slice(&fill_vertices),
-            );
+
+            self.queue
+                .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&fill_vertices));
             vertex_offset += fill_vertices.len();
-            render_log!("[RENDER] Fill vertices uploaded. Next offset: {}", vertex_offset);
+            render_log!(
+                "[RENDER] Fill vertices uploaded. Next offset: {}",
+                vertex_offset
+            );
         }
 
         // 4. 上传描边顶点
@@ -563,9 +607,8 @@ impl WebGPURenderer {
 
         // 5. 上传纹理顶点（在渲染通道开始前）
         render_log!("[RENDER] ========== UPLOADING TEXTURED VERTICES ==========");
-        let base_textured_vertex_offset = vertex_offset;
         let mut textured_vertex_ranges = Vec::new();
-        
+
         for (texture_id, vertices) in &textured_groups {
             if !vertices.is_empty() {
                 render_log!(
@@ -592,18 +635,18 @@ impl WebGPURenderer {
                         log::info!("[RENDER]     NDC approx: ({:.3}, {:.3})", ndc_x, ndc_y);
                     }
                 }
-                
+
                 let offset_bytes = (vertex_offset * std::mem::size_of::<Vertex>()) as u64;
                 self.queue.write_buffer(
                     &self.vertex_buffer,
                     offset_bytes,
                     bytemuck::cast_slice(vertices),
                 );
-                
+
                 let start = vertex_offset as u32;
                 let end = start + vertices.len() as u32;
                 textured_vertex_ranges.push((texture_id.clone(), start..end));
-                
+
                 vertex_offset += vertices.len();
                 render_log!(
                     "[RENDER] Uploaded {} vertices for texture '{}': vertex range {}..{}",
@@ -649,54 +692,54 @@ impl WebGPURenderer {
         let selection_stroke_end = vertex_offset as u32;
 
         // 6. 更新 Uniform Buffer（视口变换矩阵）
-        
+
         // 组合视口变换 + 正交投影矩阵（列优先，WGSL 格式）
-        // 
+        //
         // 坐标转换流程：世界坐标 → 屏幕坐标 → NDC
-        // 
+        //
         // 视口变换：
         //   screen_x = (world_x - viewport_center_x) * zoom + screen_width / 2
         //   screen_y = (world_y - viewport_center_y) * zoom + screen_height / 2
-        // 
+        //
         // 正交投影：
         //   ndc_x = screen_x * 2 / screen_width - 1
         //   ndc_y = 1 - screen_y * 2 / screen_height
-        // 
+        //
         // 组合后：
         //   ndc_x = world_x * (2 * zoom / width) - viewport_center_x * (2 * zoom / width)
         //   ndc_y = world_y * (-2 * zoom / height) + viewport_center_y * (2 * zoom / height)
-        
+
         let zoom = viewport.zoom();
         let center = viewport.center();
-        
-        let sx = 2.0 * zoom / width;   // X 缩放因子
+
+        let sx = 2.0 * zoom / width; // X 缩放因子
         let sy = -2.0 * zoom / height; // Y 缩放因子（翻转 Y 轴）
-        let tx = -center.x * sx;       // X 平移
-        let ty = -center.y * sy;       // Y 平移
-        
+        let tx = -center.x * sx; // X 平移
+        let ty = -center.y * sy; // Y 平移
+
         let projection_matrix: [[f32; 4]; 4] = [
-            [sx,  0.0, 0.0, 0.0],  // 第1列：X 缩放
-            [0.0, sy,  0.0, 0.0],  // 第2列：Y 缩放并翻转
-            [0.0, 0.0, 1.0, 0.0],  // 第3列：Z 保持不变
-            [tx,  ty,  0.0, 1.0],  // 第4列：平移
+            [sx, 0.0, 0.0, 0.0],  // 第1列：X 缩放
+            [0.0, sy, 0.0, 0.0],  // 第2列：Y 缩放并翻转
+            [0.0, 0.0, 1.0, 0.0], // 第3列：Z 保持不变
+            [tx, ty, 0.0, 1.0],   // 第4列：平移
         ];
-        
+
         render_log!("[RENDER] ========== UPLOADING UNIFORM BUFFER ==========");
         render_log!("[RENDER] Canvas size: {}x{}", width, height);
         if VERBOSE_RENDER_LOGS {
             log::info!("[RENDER] Projection matrix (column-major for WGSL):");
-            for col in 0..4 {
+            for (col, column) in projection_matrix.iter().enumerate() {
                 log::info!(
                     "[RENDER]   Col {}: [{:.6}, {:.6}, {:.6}, {:.6}]",
                     col,
-                    projection_matrix[col][0],
-                    projection_matrix[col][1],
-                    projection_matrix[col][2],
-                    projection_matrix[col][3]
+                    column[0],
+                    column[1],
+                    column[2],
+                    column[3]
                 );
             }
         }
-        
+
         self.queue.write_buffer(
             &self.uniform_buffer,
             0,
@@ -782,36 +825,41 @@ impl WebGPURenderer {
                 render_log!("[RENDER] ========== DRAWING TEXTURES ==========");
                 render_log!("[RENDER] Pipeline: texture_pipeline");
                 render_pass.set_pipeline(&self.texture_pipeline);
-                
+
                 for (texture_id, range) in &textured_vertex_ranges {
                     // 获取纹理视图
-                    let (texture_view, is_placeholder) = match self.texture_manager.get_texture_view(texture_id) {
-                        Some(view) => (view, false),
-                        None => {
-                            log::warn!("[RENDER] Texture '{}' not found. Using placeholder view", texture_id);
-                            (&self.placeholder_texture_view, true)
-                        }
-                    };
+                    let (texture_view, is_placeholder) =
+                        match self.texture_manager.get_texture_view(texture_id) {
+                            Some(view) => (view, false),
+                            None => {
+                                log::warn!(
+                                    "[RENDER] Texture '{}' not found. Using placeholder view",
+                                    texture_id
+                                );
+                                (&self.placeholder_texture_view, true)
+                            }
+                        };
 
                     // 为此纹理创建 BindGroup
-                    let texture_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some(&format!("Texture Bind Group: {}", texture_id)),
-                        layout: &self.texture_pipeline.get_bind_group_layout(0),
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: self.uniform_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(texture_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Sampler(&self.texture_sampler),
-                            },
-                        ],
-                    });
+                    let texture_bind_group =
+                        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some(&format!("Texture Bind Group: {}", texture_id)),
+                            layout: &self.texture_pipeline.get_bind_group_layout(0),
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: self.uniform_buffer.as_entire_binding(),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(texture_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Sampler(&self.texture_sampler),
+                                },
+                            ],
+                        });
 
                     // 绑定纹理并绘制
                     render_log!(
@@ -821,7 +869,9 @@ impl WebGPURenderer {
                         range.end,
                         is_placeholder
                     );
-                    render_log!("[RENDER] BindGroup slot 0 -> [uniform_buffer, texture_view, sampler]");
+                    render_log!(
+                        "[RENDER] BindGroup slot 0 -> [uniform_buffer, texture_view, sampler]"
+                    );
                     render_pass.set_bind_group(0, &texture_bind_group, &[]);
                     render_pass.draw(range.clone(), 0..1);
                     render_log!(
@@ -872,20 +922,24 @@ impl WebGPURenderer {
     }
 
     /// 收集场景中所有元素的顶点（带视口裁剪）
-    /// 
+    ///
     /// # 参数
     /// - `scene`: 场景数据
     /// - `viewport`: 视口（用于裁剪）
-    /// 
+    ///
     /// # 返回
     /// (fill_vertices, stroke_vertices, culled_count)
-    fn collect_vertices(&self, scene: &Scene, viewport: &Viewport) -> (Vec<Vertex>, Vec<Vertex>, usize) {
+    fn collect_vertices(
+        &self,
+        scene: &Scene,
+        viewport: &Viewport,
+    ) -> (Vec<Vertex>, Vec<Vertex>, usize) {
         render_log!("[COLLECT] ========== COLLECTING VERTICES ==========");
         render_log!(
             "[COLLECT] Total elements in scene: {}",
             scene.elements_sorted().len()
         );
-        
+
         let mut fill_vertices = Vec::new();
         let mut stroke_vertices = Vec::new();
         let mut culled_count = 0;
@@ -903,10 +957,10 @@ impl WebGPURenderer {
                     render_log!("[COLLECT] Element[{}]: Rectangle ID={}", idx, rect.props.id);
                     let fill_count_before = fill_vertices.len();
                     let stroke_count_before = stroke_vertices.len();
-                    
+
                     fill_vertices.extend(rect.generate_fill_vertices());
                     stroke_vertices.extend(rect.generate_stroke_vertices());
-                    
+
                     let fill_added = fill_vertices.len() - fill_count_before;
                     let stroke_added = stroke_vertices.len() - stroke_count_before;
                     render_log!(
@@ -919,10 +973,10 @@ impl WebGPURenderer {
                     render_log!("[COLLECT] Element[{}]: Circle ID={}", idx, circle.props.id);
                     let fill_count_before = fill_vertices.len();
                     let stroke_count_before = stroke_vertices.len();
-                    
+
                     fill_vertices.extend(circle.generate_fill_vertices());
                     stroke_vertices.extend(circle.generate_stroke_vertices());
-                    
+
                     let fill_added = fill_vertices.len() - fill_count_before;
                     let stroke_added = stroke_vertices.len() - stroke_count_before;
                     render_log!(
@@ -953,7 +1007,11 @@ impl WebGPURenderer {
     ///
     /// # 返回
     /// Vec<(texture_id, vertices)> - 每个纹理的顶点列表
-    fn collect_textured_vertices(&self, scene: &Scene, viewport: &Viewport) -> Vec<(String, Vec<Vertex>)> {
+    fn collect_textured_vertices(
+        &self,
+        scene: &Scene,
+        viewport: &Viewport,
+    ) -> Vec<(String, Vec<Vertex>)> {
         use std::collections::HashMap;
 
         let mut texture_groups: HashMap<String, Vec<Vertex>> = HashMap::new();
@@ -963,7 +1021,7 @@ impl WebGPURenderer {
                 if !image.props.visible {
                     continue;
                 }
-                
+
                 // 视口裁剪：跳过不在视口内的图片
                 let bounds = image.world_bounds();
                 if !viewport.is_visible(&bounds) {
@@ -975,7 +1033,7 @@ impl WebGPURenderer {
 
                 texture_groups
                     .entry(texture_id)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .extend(vertices);
             }
         }
@@ -984,17 +1042,17 @@ impl WebGPURenderer {
     }
 
     /// 收集选中高亮覆盖层的顶点
-    /// 
+    ///
     /// # 参数
     /// - `scene`: 场景，用于获取选中元素
     /// - `selection_box`: 框选矩形（如果正在框选）
-    /// 
+    ///
     /// # 返回
     /// (fill_vertices, stroke_vertices) - 填充顶点和描边顶点
     fn collect_selection_overlay_vertices(
-        &self, 
-        scene: &Scene, 
-        selection_box: Option<Rect>
+        &self,
+        scene: &Scene,
+        selection_box: Option<Rect>,
     ) -> (Vec<Vertex>, Vec<Vertex>) {
         let mut fill_vertices = Vec::new();
         let mut stroke_vertices = Vec::new();
@@ -1025,11 +1083,23 @@ impl WebGPURenderer {
         // 2. 绘制框选矩形
         if let Some(rect) = selection_box {
             // 框选填充（半透明）
-            let fill = self.generate_rect_fill_vertices(rect.x, rect.y, rect.width, rect.height, selection_fill_color);
+            let fill = self.generate_rect_fill_vertices(
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                selection_fill_color,
+            );
             fill_vertices.extend(fill);
 
             // 框选边框
-            let stroke = self.generate_rect_stroke_vertices(rect.x, rect.y, rect.width, rect.height, selection_color);
+            let stroke = self.generate_rect_stroke_vertices(
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                selection_color,
+            );
             stroke_vertices.extend(stroke);
         }
 
@@ -1037,7 +1107,14 @@ impl WebGPURenderer {
     }
 
     /// 生成矩形填充顶点（两个三角形）
-    fn generate_rect_fill_vertices(&self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex> {
+    fn generate_rect_fill_vertices(
+        &self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        color: [f32; 4],
+    ) -> Vec<Vertex> {
         let tl = [x, y];
         let tr = [x + w, y];
         let bl = [x, y + h];
@@ -1045,17 +1122,48 @@ impl WebGPURenderer {
         let uv = [0.0, 0.0];
 
         vec![
-            Vertex { position: tl, color, uv },
-            Vertex { position: tr, color, uv },
-            Vertex { position: br, color, uv },
-            Vertex { position: tl, color, uv },
-            Vertex { position: br, color, uv },
-            Vertex { position: bl, color, uv },
+            Vertex {
+                position: tl,
+                color,
+                uv,
+            },
+            Vertex {
+                position: tr,
+                color,
+                uv,
+            },
+            Vertex {
+                position: br,
+                color,
+                uv,
+            },
+            Vertex {
+                position: tl,
+                color,
+                uv,
+            },
+            Vertex {
+                position: br,
+                color,
+                uv,
+            },
+            Vertex {
+                position: bl,
+                color,
+                uv,
+            },
         ]
     }
 
     /// 生成矩形描边顶点（四条线）
-    fn generate_rect_stroke_vertices(&self, x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Vec<Vertex> {
+    fn generate_rect_stroke_vertices(
+        &self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        color: [f32; 4],
+    ) -> Vec<Vertex> {
         let tl = [x, y];
         let tr = [x + w, y];
         let bl = [x, y + h];
@@ -1064,17 +1172,49 @@ impl WebGPURenderer {
 
         vec![
             // 上边
-            Vertex { position: tl, color, uv },
-            Vertex { position: tr, color, uv },
+            Vertex {
+                position: tl,
+                color,
+                uv,
+            },
+            Vertex {
+                position: tr,
+                color,
+                uv,
+            },
             // 右边
-            Vertex { position: tr, color, uv },
-            Vertex { position: br, color, uv },
+            Vertex {
+                position: tr,
+                color,
+                uv,
+            },
+            Vertex {
+                position: br,
+                color,
+                uv,
+            },
             // 下边
-            Vertex { position: br, color, uv },
-            Vertex { position: bl, color, uv },
+            Vertex {
+                position: br,
+                color,
+                uv,
+            },
+            Vertex {
+                position: bl,
+                color,
+                uv,
+            },
             // 左边
-            Vertex { position: bl, color, uv },
-            Vertex { position: tl, color, uv },
+            Vertex {
+                position: bl,
+                color,
+                uv,
+            },
+            Vertex {
+                position: tl,
+                color,
+                uv,
+            },
         ]
     }
 
@@ -1121,4 +1261,3 @@ impl WebGPURenderer {
         self.texture_manager.remove_texture(texture_id);
     }
 }
-

@@ -1,7 +1,6 @@
-///! 颜色工具
-///!
-///! 提供颜色类型和解析功能
-
+//! 颜色工具
+//!
+//! 提供颜色类型和解析功能
 use serde::{Deserialize, Serialize};
 
 /// RGBA 颜色（GPU 格式）
@@ -71,7 +70,11 @@ impl Color {
                     .map_err(|_| format!("Invalid hex: {}", hex))?;
                 let b = u8::from_str_radix(&hex[2..3].repeat(2), 16)
                     .map_err(|_| format!("Invalid hex: {}", hex))?;
-                Ok(Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0))
+                Ok(Color::rgb(
+                    r as f32 / 255.0,
+                    g as f32 / 255.0,
+                    b as f32 / 255.0,
+                ))
             }
             // #RRGGBB
             6 => {
@@ -81,7 +84,11 @@ impl Color {
                     .map_err(|_| format!("Invalid hex: {}", hex))?;
                 let b = u8::from_str_radix(&hex[4..6], 16)
                     .map_err(|_| format!("Invalid hex: {}", hex))?;
-                Ok(Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0))
+                Ok(Color::rgb(
+                    r as f32 / 255.0,
+                    g as f32 / 255.0,
+                    b as f32 / 255.0,
+                ))
             }
             // #RRGGBBAA
             8 => {
@@ -168,4 +175,3 @@ mod tests {
         assert_eq!(arr, [0.5, 0.25, 0.75, 1.0]);
     }
 }
-

@@ -1,5 +1,4 @@
-///! 矩形元素
-
+//! 矩形元素
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Rect, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -218,10 +217,10 @@ mod tests {
             .with_style(ElementStyle::fill_only(Color::RED));
 
         let vertices = rect.generate_fill_vertices();
-        
+
         // 2个三角形 = 6个顶点
         assert_eq!(vertices.len(), 6);
-        
+
         // 检查颜色
         for v in &vertices {
             assert_eq!(v.color, [1.0, 0.0, 0.0, 1.0]);
@@ -234,10 +233,10 @@ mod tests {
             .with_style(ElementStyle::stroke_only(Color::BLUE, 2.0));
 
         let vertices = rect.generate_stroke_vertices();
-        
+
         // 4条边 = 8个顶点
         assert_eq!(vertices.len(), 8);
-        
+
         // 检查颜色
         for v in &vertices {
             assert_eq!(v.color, [0.0, 0.0, 1.0, 1.0]);
@@ -248,12 +247,12 @@ mod tests {
     fn test_generate_vertices_both() {
         let mut style = ElementStyle::fill_only(Color::RED);
         style.stroke = Some(Color::BLUE);
-        
-        let rect = Rectangle::new(1, Vec2::new(100.0, 100.0), Vec2::new(50.0, 30.0))
-            .with_style(style);
+
+        let rect =
+            Rectangle::new(1, Vec2::new(100.0, 100.0), Vec2::new(50.0, 30.0)).with_style(style);
 
         let vertices = rect.generate_vertices();
-        
+
         // 填充6个 + 描边8个 = 14个顶点
         assert_eq!(vertices.len(), 14);
     }

@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn test_insert_and_query_point() {
         let mut tree = QuadTree::new(Rect::new(0.0, 0.0, 1000.0, 1000.0));
-        
+
         tree.insert(1, Rect::new(100.0, 100.0, 50.0, 50.0));
         tree.insert(2, Rect::new(200.0, 200.0, 50.0, 50.0));
         tree.insert(3, Rect::new(500.0, 500.0, 50.0, 50.0));
@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn test_query_rect() {
         let mut tree = QuadTree::new(Rect::new(0.0, 0.0, 1000.0, 1000.0));
-        
+
         tree.insert(1, Rect::new(100.0, 100.0, 50.0, 50.0));
         tree.insert(2, Rect::new(200.0, 200.0, 50.0, 50.0));
         tree.insert(3, Rect::new(500.0, 500.0, 50.0, 50.0));
@@ -237,10 +237,13 @@ mod tests {
     #[test]
     fn test_subdivide() {
         let mut tree = QuadTree::new(Rect::new(0.0, 0.0, 1000.0, 1000.0));
-        
+
         // 插入足够多的对象触发分裂
         for i in 0..15 {
-            tree.insert(i as u64, Rect::new(i as f32 * 50.0, i as f32 * 50.0, 40.0, 40.0));
+            tree.insert(
+                i as u64,
+                Rect::new(i as f32 * 50.0, i as f32 * 50.0, 40.0, 40.0),
+            );
         }
 
         assert!(tree.children.is_some());
@@ -249,7 +252,7 @@ mod tests {
     #[test]
     fn test_remove() {
         let mut tree = QuadTree::new(Rect::new(0.0, 0.0, 1000.0, 1000.0));
-        
+
         tree.insert(1, Rect::new(100.0, 100.0, 50.0, 50.0));
         tree.insert(2, Rect::new(200.0, 200.0, 50.0, 50.0));
 
@@ -259,8 +262,3 @@ mod tests {
         assert!(results.is_empty());
     }
 }
-
-
-
-
-

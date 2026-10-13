@@ -1,7 +1,6 @@
-///! GPU 顶点结构
-///!
-///! 定义用于 WebGPU 渲染的顶点数据
-
+//! GPU 顶点结构
+//!
+//! 定义用于 WebGPU 渲染的顶点数据
 use crate::Color;
 
 /// 2D 顶点（位置 + 颜色 + UV）
@@ -103,4 +102,3 @@ mod tests {
         assert_eq!(bytes.len(), 32);
     }
 }
-

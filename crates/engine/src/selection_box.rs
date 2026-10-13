@@ -62,8 +62,14 @@ impl SelectionBox {
             return None;
         }
 
-        let min = Vec2::new(self.start.x.min(self.current.x), self.start.y.min(self.current.y));
-        let max = Vec2::new(self.start.x.max(self.current.x), self.start.y.max(self.current.y));
+        let min = Vec2::new(
+            self.start.x.min(self.current.x),
+            self.start.y.min(self.current.y),
+        );
+        let max = Vec2::new(
+            self.start.x.max(self.current.x),
+            self.start.y.max(self.current.y),
+        );
         Some(Rect::from_corners(min, max))
     }
 

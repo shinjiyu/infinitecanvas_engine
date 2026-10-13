@@ -1,5 +1,5 @@
 /// Image 元素 - 用于在画布上显示图片/纹理
-/// 
+///
 /// 支持：
 /// - 位置和尺寸控制
 /// - 旋转和缩放变换
@@ -10,13 +10,13 @@ use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use crate::element::{Element, ElementId, ElementProps};
 
 /// Image 元素
-/// 
+///
 /// # 示例
-/// 
+///
 /// ```
 /// use infinitecanvas_engine::element::Image;
-/// use infinitecanvas_math::Vec2;
-/// 
+/// use infinitecanvas_math::{Rect, Vec2};
+///
 /// // 创建一个 256x256 的图片元素
 /// let img = Image::new(
 ///     1,
@@ -24,7 +24,7 @@ use crate::element::{Element, ElementId, ElementProps};
 ///     Vec2::new(256.0, 256.0),
 ///     "logo".to_string(),
 /// );
-/// 
+///
 /// // 使用 UV 裁剪显示纹理的左上角 1/4
 /// let cropped = Image::with_uv_crop(
 ///     2,
@@ -43,15 +43,15 @@ pub struct Image {
     /// 纹理 ID（对应 TextureManager 中的纹理）
     pub texture_id: String,
     /// UV 裁剪区域（可选）
-    /// 
+    ///
     /// 坐标范围 [0, 1]，表示纹理的归一化坐标：
     /// - (0.0, 0.0) = 左上角
     /// - (1.0, 1.0) = 右下角
-    /// 
+    ///
     /// 如果为 None，使用完整纹理 (0,0)-(1,1)
     pub uv_rect: Option<Rect>,
     /// 透明度 [0.0 - 1.0]
-    /// 
+    ///
     /// - 0.0 = 完全透明
     /// - 1.0 = 完全不透明
     pub alpha: f32,
@@ -59,9 +59,9 @@ pub struct Image {
 
 impl Image {
     /// 创建新的 Image 元素
-    /// 
+    ///
     /// # 参数
-    /// 
+    ///
     /// - `id`: 元素唯一 ID
     /// - `position`: 左上角位置（像素坐标）
     /// - `size`: 显示尺寸（width, height）
@@ -83,19 +83,25 @@ impl Image {
     }
 
     /// 创建带 UV 裁剪的 Image 元素
-    /// 
+    ///
     /// # 参数
-    /// 
+    ///
     /// - `uv_rect`: UV 坐标裁剪区域
     ///   - x, y: 左上角（归一化坐标 0-1）
     ///   - width, height: 尺寸（归一化坐标 0-1）
-    /// 
+    ///
     /// # 示例
-    /// 
+    ///
     /// ```
+    /// use infinitecanvas_engine::element::Image;
+    /// use infinitecanvas_math::{Rect, Vec2};
+    ///
     /// // 显示纹理的右下角 1/4
     /// let rect = Rect::new(0.5, 0.5, 0.5, 0.5);
+    /// let pos = Vec2::new(0.0, 0.0);
+    /// let size = Vec2::new(64.0, 64.0);
     /// let img = Image::with_uv_crop(1, pos, size, "tex".to_string(), rect);
+    /// assert!(img.uv_rect.is_some());
     /// ```
     pub fn with_uv_crop(
         id: ElementId,
@@ -120,9 +126,9 @@ impl Image {
     }
 
     /// 设置透明度
-    /// 
+    ///
     /// # 参数
-    /// 
+    ///
     /// - `alpha`: 透明度 [0.0 - 1.0]
     pub fn set_alpha(&mut self, alpha: f32) {
         self.alpha = alpha.clamp(0.0, 1.0);
@@ -133,10 +139,35 @@ impl Image {
         self.uv_rect = uv_rect;
     }
 
+    /// 元素 ID
+    pub fn id(&self) -> ElementId {
+        self.props.id
+    }
+
+    /// 元素当前是否可见
+    pub fn is_visible(&self) -> bool {
+        self.props.visible
+    }
+
+    /// 设置元素可见性
+    pub fn set_visible(&mut self, visible: bool) {
+        self.props.visible = visible;
+    }
+
+    /// 元素层级
+    pub fn z_index(&self) -> i32 {
+        self.props.z_index
+    }
+
+    /// 设置元素层级
+    pub fn set_z_index(&mut self, z_index: i32) {
+        self.props.z_index = z_index;
+    }
+
     /// 获取 UV 坐标（用于顶点生成）
-    /// 
+    ///
     /// # 返回
-    /// 
+    ///
     /// `((uv_min_x, uv_min_y), (uv_max_x, uv_max_y))`
     pub fn get_uv_coords(&self) -> ((f32, f32), (f32, f32)) {
         match &self.uv_rect {
@@ -149,9 +180,9 @@ impl Image {
     }
 
     /// 计算世界空间中的边界框
-    /// 
+    ///
     /// # 返回
-    /// 
+    ///
     /// 包含此图片的最小矩形（考虑变换）
     pub fn bounding_box(&self) -> Rect {
         let pos = self.props.transform.translation;
@@ -163,43 +194,43 @@ impl Image {
     }
 
     /// 生成纹理顶点（6个顶点 = 2个三角形）
-    /// 
+    ///
     /// # 返回
-    /// 
+    ///
     /// 顶点数组，包含位置、颜色（用于 tint）和 UV 坐标
-    /// 
+    ///
     /// # 布局
-    /// 
+    ///
     /// ```text
     /// v0 ---- v1
     /// |     / |
     /// |   /   |
     /// | /     |
     /// v2 ---- v3
-    /// 
+    ///
     /// Triangle 1: v0, v2, v1
     /// Triangle 2: v1, v2, v3
     /// ```
     pub fn generate_vertices(&self) -> Vec<Vertex> {
         let pos = self.props.transform.translation;
         let size = self.size;
-        
+
         // 计算 UV 坐标（考虑可选的裁剪）
         let (uv_min, uv_max) = self.get_uv_coords();
-        
+
         // 顶点颜色（用于 tint 着色和透明度）
         let color = Color::new(1.0, 1.0, 1.0, self.alpha);
-        
+
         // 4个角的顶点
-        let v0 = Vertex::with_uv(pos.x, pos.y, color, uv_min.0, uv_min.1);                           // 左上
-        let v1 = Vertex::with_uv(pos.x + size.x, pos.y, color, uv_max.0, uv_min.1);                 // 右上
-        let v2 = Vertex::with_uv(pos.x, pos.y + size.y, color, uv_min.0, uv_max.1);                 // 左下
-        let v3 = Vertex::with_uv(pos.x + size.x, pos.y + size.y, color, uv_max.0, uv_max.1);       // 右下
-        
+        let v0 = Vertex::with_uv(pos.x, pos.y, color, uv_min.0, uv_min.1); // 左上
+        let v1 = Vertex::with_uv(pos.x + size.x, pos.y, color, uv_max.0, uv_min.1); // 右上
+        let v2 = Vertex::with_uv(pos.x, pos.y + size.y, color, uv_min.0, uv_max.1); // 左下
+        let v3 = Vertex::with_uv(pos.x + size.x, pos.y + size.y, color, uv_max.0, uv_max.1); // 右下
+
         // 两个三角形（逆时针绕序）
         vec![
-            v0, v2, v1,  // 第一个三角形
-            v1, v2, v3,  // 第二个三角形
+            v0, v2, v1, // 第一个三角形
+            v1, v2, v3, // 第二个三角形
         ]
     }
 }
@@ -229,7 +260,12 @@ mod tests {
 
     #[test]
     fn test_image_creation() {
-        let img = Image::new(1, Vec2::new(10.0, 20.0), Vec2::new(100.0, 100.0), "test".to_string());
+        let img = Image::new(
+            1,
+            Vec2::new(10.0, 20.0),
+            Vec2::new(100.0, 100.0),
+            "test".to_string(),
+        );
         assert_eq!(img.id(), 1);
         assert_eq!(img.size.x, 100.0);
         assert_eq!(img.size.y, 100.0);
@@ -264,22 +300,27 @@ mod tests {
     #[test]
     fn test_alpha_clamping() {
         let mut img = Image::new(1, Vec2::ZERO, Vec2::new(100.0, 100.0), "test".to_string());
-        
+
         img.set_alpha(1.5);
         assert_eq!(img.alpha, 1.0);
-        
+
         img.set_alpha(-0.5);
         assert_eq!(img.alpha, 0.0);
-        
+
         img.set_alpha(0.5);
         assert_eq!(img.alpha, 0.5);
     }
 
     #[test]
     fn test_bounding_box() {
-        let img = Image::new(1, Vec2::new(10.0, 20.0), Vec2::new(100.0, 50.0), "test".to_string());
+        let img = Image::new(
+            1,
+            Vec2::new(10.0, 20.0),
+            Vec2::new(100.0, 50.0),
+            "test".to_string(),
+        );
         let bounds = img.bounding_box();
-        
+
         assert_eq!(bounds.x, 10.0);
         assert_eq!(bounds.y, 20.0);
         assert_eq!(bounds.width, 100.0);
@@ -288,16 +329,21 @@ mod tests {
 
     #[test]
     fn test_generate_vertices() {
-        let img = Image::new(1, Vec2::new(100.0, 100.0), Vec2::new(200.0, 100.0), "test".to_string());
+        let img = Image::new(
+            1,
+            Vec2::new(100.0, 100.0),
+            Vec2::new(200.0, 100.0),
+            "test".to_string(),
+        );
         let vertices = img.generate_vertices();
-        
+
         // 应该生成 6 个顶点（2 个三角形）
         assert_eq!(vertices.len(), 6);
-        
+
         // 检查第一个顶点（左上角）
         assert_eq!(vertices[0].position, [100.0, 100.0]);
         assert_eq!(vertices[0].uv, [0.0, 0.0]);
-        
+
         // 检查右下角顶点
         assert_eq!(vertices[5].position, [300.0, 200.0]);
         assert_eq!(vertices[5].uv, [1.0, 1.0]);
@@ -314,19 +360,19 @@ mod tests {
             uv_rect,
         );
         let vertices = img.generate_vertices();
-        
+
         // UV 坐标应该被裁剪
-        assert_eq!(vertices[0].uv, [0.25, 0.25]);  // 左上
-        assert_eq!(vertices[5].uv, [0.75, 0.75]);  // 右下
+        assert_eq!(vertices[0].uv, [0.25, 0.25]); // 左上
+        assert_eq!(vertices[5].uv, [0.75, 0.75]); // 右下
     }
 
     #[test]
     fn test_generate_vertices_alpha() {
         let mut img = Image::new(1, Vec2::ZERO, Vec2::new(100.0, 100.0), "test".to_string());
         img.set_alpha(0.5);
-        
+
         let vertices = img.generate_vertices();
-        
+
         // 所有顶点的 alpha 应该是 0.5
         for v in &vertices {
             assert_eq!(v.color[3], 0.5);
@@ -336,9 +382,9 @@ mod tests {
     #[test]
     fn test_visibility() {
         let mut img = Image::new(1, Vec2::ZERO, Vec2::new(100.0, 100.0), "test".to_string());
-        
+
         assert!(img.is_visible());
-        
+
         img.set_visible(false);
         assert!(!img.is_visible());
     }
@@ -346,11 +392,10 @@ mod tests {
     #[test]
     fn test_z_index() {
         let mut img = Image::new(1, Vec2::ZERO, Vec2::new(100.0, 100.0), "test".to_string());
-        
+
         assert_eq!(img.z_index(), 0);
-        
+
         img.set_z_index(10);
         assert_eq!(img.z_index(), 10);
     }
 }
-

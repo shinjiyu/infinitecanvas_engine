@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::{element::Element, ElementId, Scene};
+use crate::{ElementId, Scene};
 use infinitecanvas_math::Rect;
 
 /// Manages currently selected elements.
@@ -20,12 +20,7 @@ impl SelectionManager {
     }
 
     /// Select a single element. When `additive` is false, previous selection is cleared.
-    pub fn select_element(
-        &mut self,
-        scene: &mut Scene,
-        id: ElementId,
-        additive: bool,
-    ) -> bool {
+    pub fn select_element(&mut self, scene: &mut Scene, id: ElementId, additive: bool) -> bool {
         if !scene.contains(id) {
             return false;
         }
@@ -84,7 +79,12 @@ impl SelectionManager {
         ids
     }
 
-    pub fn select_in_rect(&mut self, scene: &mut Scene, rect: Rect, additive: bool) -> Vec<ElementId> {
+    pub fn select_in_rect(
+        &mut self,
+        scene: &mut Scene,
+        rect: Rect,
+        additive: bool,
+    ) -> Vec<ElementId> {
         const MIN_SIZE: f32 = 2.0;
         if rect.width.abs() < MIN_SIZE || rect.height.abs() < MIN_SIZE {
             if !additive {
@@ -118,6 +118,11 @@ impl SelectionManager {
 
     pub fn len(&self) -> usize {
         self.selected.len()
+    }
+
+    /// Returns true when no elements are selected.
+    pub fn is_empty(&self) -> bool {
+        self.selected.is_empty()
     }
 
     pub fn is_selected(&self, id: ElementId) -> bool {
@@ -167,8 +172,16 @@ mod tests {
     #[test]
     fn select_in_rect_picks_elements() {
         let mut scene = Scene::new();
-        scene.add_rect(Rectangle::new(1, Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)));
-        scene.add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(20.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
 
         let mut selection = SelectionManager::new();
         let rect = Rect::new(-5.0, -5.0, 20.0, 20.0);

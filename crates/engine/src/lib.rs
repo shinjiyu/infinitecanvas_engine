@@ -32,7 +32,7 @@ pub mod viewport;
 pub use command::{AddElementCommand, Command, CommandHistory, MoveCommand, RemoveElementCommand};
 pub use element::{Circle, Element, ElementId, ElementProps, ElementStyle, Image, Rectangle};
 pub use event::{
-    Event, EventQueue, KeyboardEvent, Modifiers, PointerEvent, PointerButton, WheelDeltaMode,
+    Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,
     WheelEvent,
 };
 pub use hit_test::{hit_test_point, HitTestOptions, HitTestResult};
@@ -55,6 +55,7 @@ pub use viewport::Viewport;
 /// use infinitecanvas_engine::Renderer;
 /// let renderer = Renderer::new();
 /// ```
+#[derive(Default)]
 pub struct Renderer;
 
 impl Renderer {
@@ -63,4 +64,3 @@ impl Renderer {
         Self
     }
 }
-
