@@ -991,6 +991,26 @@ impl WebGPURenderer {
                         idx
                     );
                 }
+                AnyElement::Line(line) => {
+                    render_log!("[COLLECT] Element[{}]: Line ID={}", idx, line.props.id);
+                    let fill_count_before = fill_vertices.len();
+                    fill_vertices.extend(line.generate_vertices());
+                    render_log!(
+                        "[COLLECT]   Added {} fill vertices, {} stroke vertices",
+                        fill_vertices.len() - fill_count_before,
+                        0
+                    );
+                }
+                AnyElement::Path(path) => {
+                    render_log!("[COLLECT] Element[{}]: Path ID={}", idx, path.props.id);
+                    let fill_count_before = fill_vertices.len();
+                    fill_vertices.extend(path.generate_vertices());
+                    render_log!(
+                        "[COLLECT]   Added {} fill vertices, {} stroke vertices",
+                        fill_vertices.len() - fill_count_before,
+                        0
+                    );
+                }
             }
         }
 

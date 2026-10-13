@@ -183,6 +183,8 @@
       <button class="btn-primary tool-btn active" onclick="setTool('select')" id="tool-select">选择 (V)</button>
       <button class="btn-primary tool-btn" onclick="setTool('rectangle')" id="tool-rect">矩形 (R)</button>
       <button class="btn-primary tool-btn" onclick="setTool('circle')" id="tool-circle">圆形 (O)</button>
+      <button class="btn-primary tool-btn" onclick="setTool('line')" id="tool-line">直线 (L)</button>
+      <button class="btn-primary tool-btn" onclick="setTool('pen')" id="tool-pen">画笔 (P)</button>
       <button class="btn-primary tool-btn" onclick="setTool('pan')" id="tool-pan">平移 (H)</button>
     </div>
     <div class="controls">
@@ -199,6 +201,8 @@
         <li><span class="highlight">V</span> 选择工具 - 点击选中，拖动移动，框选多个</li>
         <li><span class="highlight">R</span> 矩形工具 - 拖动绘制矩形</li>
         <li><span class="highlight">O</span> 圆形工具 - 拖动绘制圆形</li>
+        <li><span class="highlight">L</span> 直线工具 - 拖动绘制直线，按住 Shift 带箭头</li>
+        <li><span class="highlight">P</span> 画笔工具 - 按住自由绘制，松开后可选中、拖动、撤销</li>
         <li><span class="highlight">H</span> 平移工具 - 拖动平移画布</li>
         <li><span class="highlight">空格</span> 按住临时切换到手型工具</li>
         <li><span class="highlight">Ctrl+Z/Y</span> 撤销/重做</li>
@@ -435,6 +439,8 @@
         'select': 'tool-select',
         'rectangle': 'tool-rect',
         'circle': 'tool-circle',
+        'line': 'tool-line',
+        'pen': 'tool-pen',
         'pan': 'tool-pan'
       };
       const activeBtn = document.getElementById(toolMap[currentTool]);
@@ -471,6 +477,12 @@
           break;
         case 'o':
           setTool('circle');
+          break;
+        case 'l':
+          setTool('line');
+          break;
+        case 'p':
+          setTool('pen');
           break;
         case 'h':
           setTool('pan');
