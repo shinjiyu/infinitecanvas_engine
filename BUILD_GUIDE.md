@@ -168,11 +168,13 @@ pnpm dev
 
 ### 1. `index.html` - 主页
 
-基础功能演示：
-- 矩形渲染
-- 圆形渲染
-- 视口平移/缩放
-- FPS 监控
+在线 Demo 入口，合并选择、压力测试和纹理：
+- 工具栏：选择 / 矩形 / 圆形 / 平移，撤销重做
+- 批量添加元素（+100 / +1k / +5k）和 FPS
+- 程序生成纹理并上传到 GPU
+- 没有 WebGPU 时显示友好提示
+
+Vite `base` 为 `/infinitecanvas_engine/`，对应 GitHub Pages 项目站。本地预览地址是 `http://localhost:5179/infinitecanvas_engine/`。
 
 ### 2. `test-custom-image.html` - 自定义图片渲染
 
@@ -275,13 +277,13 @@ pnpm build:wasm
 
 ```bash
 # 1. 构建 WASM (release 模式，已优化)
-pnpm build:wasm
+cd crates/wasm && wasm-pack build --target web --out-dir ../../packages/core/wasm
 
-# 2. 构建前端 (如果有配置)
-pnpm build
-
-# 3. 部署 dist/ 目录
+# 2. 构建 www（产物在仓库根目录 dist/）
+npm run build --workspace=@infinitecanvas/www
 ```
+
+推送到 `master` 时，`.github/workflows/pages.yml` 会执行同样的两步并部署到 GitHub Pages。仓库 Settings → Pages 的 Source 需要选 GitHub Actions。
 
 ---
 
