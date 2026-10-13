@@ -1,110 +1,508 @@
 /**
- * InfiniteCanvas Demo
+ * InfiniteCanvas 首页 Demo。
+ *
+ * 把选择、压力测试和纹理上传放在同一张画布上：
+ * 工具栏切换选择 / 绘制 / 平移，压力按钮批量加元素，纹理按钮上传一张程序生成的图片。
+ *
+ * @example
+ * ```html
+ * <script type="module" src="./main.js"></script>
+ * ```
  */
 
-// 直接导入 WASM（简化版本，不使用 @infinitecanvas/core）
 import init, { InfiniteCanvas as WasmCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
+import wasmUrl from '../packages/core/wasm/infinitecanvas_wasm_bg.wasm?url';
+
+const TEXTURE_ID = 'landing-badge';
+const COLORS = ['#4090f2', '#36d399', '#f2c94c', '#f24040', '#9b59b6', '#e91e63', '#00bcd4', '#ff9800'];
+
+/** @type {WasmCanvas | null} */
+let wasm = null;
+/** @type {HTMLCanvasElement | null} */
+let canvasEl = null;
+let textureReady = false;
+let adding = false;
+let frameCount = 0;
+let lastFpsTime = performance.now();
+let spaceHeld = false;
 
 /**
- * 简化的 InfiniteCanvas 封装
+ * 浏览器没有可用的 WebGPU 时抛出，用来展示友好提示而不是原始异常。
  */
-class InfiniteCanvas {
-  constructor() {
-    this.wasmInstance = null;
-    this.animationId = null;
-  }
-
-  async init(selector) {
-    const canvas = document.querySelector(selector);
-    if (!(canvas instanceof HTMLCanvasElement)) {
-      throw new Error(`Element ${selector} is not a canvas`);
-    }
-    
-    await init();
-    this.wasmInstance = new WasmCanvas();
-    await this.wasmInstance.init(canvas); // 异步初始化 - 等待 WebGPU 准备好
-    console.log('InfiniteCanvas initialized');
-  }
-
-  render() {
-    if (!this.wasmInstance) throw new Error('Not initialized');
-    this.wasmInstance.render();
-  }
-
-  startRenderLoop() {
-    const loop = () => {
-      this.render();
-      this.animationId = requestAnimationFrame(loop);
-    };
-    loop();
-  }
-
-  stopRenderLoop() {
-    if (this.animationId !== null) {
-      cancelAnimationFrame(this.animationId);
-      this.animationId = null;
-    }
-  }
-  
-  getStats() {
-    return this.wasmInstance ? this.wasmInstance.getStats() : null;
+class WebGPUUnavailableError extends Error {
+  /**
+   * @param {string} message 给访客看的原因
+   */
+  constructor(message) {
+    super(message);
+    this.name = 'WebGPUUnavailableError';
   }
 }
 
-// 状态更新
-const updateStatus = (id, text, isError = false) => {
+/**
+ * 显示或隐藏 WebGPU 不可用提示。
+ *
+ * @param {string | null} detail 具体原因；传 null 时关掉提示
+ */
+function showWebGPUMessage(detail) {
+  const panel = document.getElementById('webgpu-fallback');
+  const detailEl = document.getElementById('webgpu-detail');
+  if (!panel || !detailEl) return;
+  if (detail) {
+    detailEl.textContent = detail;
+    panel.hidden = false;
+    setStatus(detail, true);
+  } else {
+    detailEl.textContent = '';
+    panel.hidden = true;
+  }
+}
+
+/**
+ * @param {string} text
+ * @param {boolean} [isError]
+ */
+function setStatus(text, isError = false) {
+  const el = document.getElementById('status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = isError ? 'err' : 'ok';
+}
+
+/**
+ * @param {string} id
+ * @param {string | number} value
+ */
+function setText(id, value) {
   const el = document.getElementById(id);
-  if (el) {
-    el.textContent = text;
-    el.classList.toggle('error', isError);
+  if (el) el.textContent = String(value);
+}
+
+/**
+ * 确认浏览器能提供 WebGPU 适配器。
+ *
+ * @returns {Promise<void>}
+ */
+async function assertWebGPU() {
+  if (!navigator.gpu) {
+    throw new WebGPUUnavailableError('未检测到 WebGPU（navigator.gpu 不存在）。');
   }
-};
-
-// FPS 计数器
-let frameCount = 0;
-let lastTime = performance.now();
-
-const updateFPS = () => {
-  frameCount++;
-  const now = performance.now();
-  if (now - lastTime >= 1000) {
-    const fps = Math.round((frameCount * 1000) / (now - lastTime));
-    updateStatus('fps', fps.toString());
-    frameCount = 0;
-    lastTime = now;
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    throw new WebGPUUnavailableError('没有可用的 GPU 适配器。请开启硬件加速后重试。');
   }
-  requestAnimationFrame(updateFPS);
-};
+}
 
-// 主函数
-async function main() {
+/**
+ * 让画布像素尺寸跟上舞台，初始化前调用一次。
+ * 指针坐标按显示尺寸换算，避免 CSS 拉伸后点选偏移。
+ *
+ * @param {HTMLCanvasElement} canvas
+ */
+function fitCanvas(canvas) {
+  const stage = canvas.parentElement;
+  if (!stage) return;
+  const width = Math.max(320, Math.floor(stage.clientWidth));
+  const height = Math.max(240, Math.floor(stage.clientHeight));
+  canvas.width = width;
+  canvas.height = height;
+}
+
+/**
+ * @param {PointerEvent | WheelEvent | MouseEvent} event
+ * @param {HTMLCanvasElement} canvas
+ * @returns {{ x: number, y: number }}
+ */
+function canvasPoint(event, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+  const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+  return {
+    x: (event.clientX - rect.left) * scaleX,
+    y: (event.clientY - rect.top) * scaleY,
+  };
+}
+
+/**
+ * 生成一张渐变加棋盘的演示纹理。
+ *
+ * @param {number} size
+ * @returns {ImageData}
+ */
+function createBadge(size) {
+  const surface = document.createElement('canvas');
+  surface.width = size;
+  surface.height = size;
+  const ctx = surface.getContext('2d');
+  if (!ctx) {
+    throw new Error('无法创建纹理画布');
+  }
+
+  const gradient = ctx.createLinearGradient(0, 0, size, size);
+  gradient.addColorStop(0, '#4090f2');
+  gradient.addColorStop(0.55, '#7c5cff');
+  gradient.addColorStop(1, '#36d399');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  const cell = 16;
+  for (let y = 0; y < size; y += cell) {
+    for (let x = 0; x < size; x += cell) {
+      const even = (Math.floor(x / cell) + Math.floor(y / cell)) % 2 === 0;
+      if (!even) continue;
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.fillRect(x, y, cell, cell);
+    }
+  }
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 42px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Texture', size / 2, size / 2 - 8);
+  ctx.font = '18px sans-serif';
+  ctx.fillText('WebGPU', size / 2, size / 2 + 28);
+  return ctx.getImageData(0, 0, size, size);
+}
+
+/**
+ * 上传演示纹理。重复调用是安全的。
+ *
+ * @param {WasmCanvas} engine
+ */
+function ensureTexture(engine) {
+  if (textureReady) return;
+  const image = createBadge(256);
+  engine.upload_texture(TEXTURE_ID, image.width, image.height, image.data);
+  textureReady = true;
+}
+
+/**
+ * @param {WasmCanvas} engine
+ * @param {number} width
+ * @param {number} height
+ */
+function addRandomShape(engine, width, height) {
+  const x = 40 + Math.random() * Math.max(40, width - 80);
+  const y = 40 + Math.random() * Math.max(40, height - 80);
+  const size = 16 + Math.random() * 48;
+  const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+  if (Math.random() > 0.5) {
+    engine.add_rectangle(x, y, size, size * 0.7, color, null, 0);
+  } else {
+    engine.add_circle(x, y, size / 2, color, null, 0);
+  }
+}
+
+/**
+ * 放入一组可框选的图形和一张纹理，方便第一次打开就能操作。
+ *
+ * @param {WasmCanvas} engine
+ * @param {HTMLCanvasElement} canvas
+ */
+function loadSample(engine, canvas) {
+  engine.clear_scene();
+  const w = canvas.width;
+  const h = canvas.height;
+  engine.add_rectangle(w * 0.32, h * 0.38, 200, 130, '#4090f2', '#d6e6ff', 2);
+  engine.add_rectangle(w * 0.52, h * 0.58, 150, 96, '#f2c94c', null, 0);
+  engine.add_circle(w * 0.66, h * 0.34, 58, '#36d399', '#0f5c40', 3);
+  engine.add_circle(w * 0.76, h * 0.66, 40, '#f24040', null, 0);
+  engine.add_rectangle(w * 0.22, h * 0.7, 90, 70, '#9b59b6', null, 0);
+  ensureTexture(engine);
+  engine.add_image(w * 0.08, h * 0.12, 168, 168, TEXTURE_ID);
+}
+
+/**
+ * @param {WasmCanvas} engine
+ * @param {HTMLCanvasElement} canvas
+ * @param {number} count
+ * @returns {Promise<void>}
+ */
+async function addElements(engine, canvas, count) {
+  if (adding) return;
+  adding = true;
+  setStatus(`正在添加 ${count} 个元素…`);
+  const buttons = document.querySelectorAll('[data-count]');
+  buttons.forEach((button) => {
+    button.disabled = true;
+  });
   try {
-    updateStatus('status', '初始化中...');
-    updateStatus('wasm-status', '加载中...');
-    
-    // 创建画布实例
-    const canvas = new InfiniteCanvas();
-    
-    // 初始化
-    await canvas.init('#canvas');
-    
-    updateStatus('wasm-status', '✓ 已加载');
-    updateStatus('status', '✓ 运行中');
-    
-    // 启动渲染循环
-    canvas.startRenderLoop();
-    
-    // 启动 FPS 计数
-    updateFPS();
-    
-    console.log('✅ InfiniteCanvas started successfully');
-    
+    for (let i = 0; i < count; i += 1) {
+      addRandomShape(engine, canvas.width, canvas.height);
+      if (i > 0 && i % 250 === 0) {
+        await new Promise((resolve) => {
+          requestAnimationFrame(resolve);
+        });
+      }
+    }
+    setStatus(`已添加 ${count} 个元素`);
+  } finally {
+    adding = false;
+    buttons.forEach((button) => {
+      button.disabled = false;
+    });
+  }
+}
+
+/**
+ * @param {string} toolName
+ */
+function setTool(toolName) {
+  if (!wasm) return;
+  wasm.set_tool(toolName);
+  document.querySelectorAll('.tool').forEach((button) => {
+    button.classList.toggle('active', button.dataset.tool === toolName);
+  });
+  setText('current-tool', wasm.get_current_tool());
+}
+
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {WasmCanvas} engine
+ */
+function bindInput(canvas, engine) {
+  canvas.addEventListener('pointerdown', (event) => {
+    const point = canvasPoint(event, canvas);
+    engine.handle_pointer_event(
+      'down',
+      event.pointerId,
+      point.x,
+      point.y,
+      event.movementX,
+      event.movementY,
+      event.button,
+      event.buttons,
+      event.shiftKey,
+      event.ctrlKey,
+      event.altKey,
+      event.metaKey,
+    );
+    canvas.setPointerCapture(event.pointerId);
+  });
+
+  canvas.addEventListener('pointermove', (event) => {
+    const point = canvasPoint(event, canvas);
+    engine.handle_pointer_event(
+      'move',
+      event.pointerId,
+      point.x,
+      point.y,
+      event.movementX,
+      event.movementY,
+      event.button,
+      event.buttons,
+      event.shiftKey,
+      event.ctrlKey,
+      event.altKey,
+      event.metaKey,
+    );
+  });
+
+  canvas.addEventListener('pointerup', (event) => {
+    const point = canvasPoint(event, canvas);
+    engine.handle_pointer_event(
+      'up',
+      event.pointerId,
+      point.x,
+      point.y,
+      event.movementX,
+      event.movementY,
+      event.button,
+      event.buttons,
+      event.shiftKey,
+      event.ctrlKey,
+      event.altKey,
+      event.metaKey,
+    );
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  });
+
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+
+  canvas.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    const point = canvasPoint(event, canvas);
+    const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+    engine.zoom_at(point.x, point.y, factor);
+  }, { passive: false });
+
+  document.querySelectorAll('.tool').forEach((button) => {
+    button.addEventListener('click', () => {
+      const toolName = button.dataset.tool;
+      if (toolName) setTool(toolName);
+    });
+  });
+
+  document.getElementById('undo-btn')?.addEventListener('click', () => {
+    if (engine.can_undo()) engine.undo();
+  });
+  document.getElementById('redo-btn')?.addEventListener('click', () => {
+    if (engine.can_redo()) engine.redo();
+  });
+  document.getElementById('sample-btn')?.addEventListener('click', () => {
+    loadSample(engine, canvas);
+    setStatus('已载入示例');
+  });
+  document.getElementById('texture-btn')?.addEventListener('click', () => {
+    ensureTexture(engine);
+    const x = 24 + Math.random() * Math.max(24, canvas.width - 200);
+    const y = 24 + Math.random() * Math.max(24, canvas.height - 200);
+    engine.add_image(x, y, 160, 160, TEXTURE_ID);
+    setStatus('已添加纹理');
+  });
+  document.getElementById('clear-btn')?.addEventListener('click', () => {
+    engine.clear_scene();
+    setStatus('场景已清空');
+  });
+  document.getElementById('clear-selection-btn')?.addEventListener('click', () => {
+    engine.clear_selection();
+  });
+  document.querySelectorAll('[data-count]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const count = Number(button.dataset.count);
+      if (count > 0) addElements(engine, canvas, count);
+    });
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.target instanceof HTMLElement && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA')) {
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      event.preventDefault();
+      if (engine.can_undo()) engine.undo();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))) {
+      event.preventDefault();
+      if (engine.can_redo()) engine.redo();
+      return;
+    }
+    if (event.key === ' ' && !spaceHeld) {
+      event.preventDefault();
+      spaceHeld = true;
+      engine.push_hand_tool();
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    switch (event.key.toLowerCase()) {
+      case 'v':
+        setTool('select');
+        break;
+      case 'r':
+        setTool('rectangle');
+        break;
+      case 'o':
+        setTool('circle');
+        break;
+      case 'h':
+        setTool('pan');
+        break;
+      default:
+        break;
+    }
+  });
+
+  document.addEventListener('keyup', (event) => {
+    if (event.key === ' ' && spaceHeld) {
+      spaceHeld = false;
+      engine.pop_temporary_tool();
+    }
+  });
+}
+
+/**
+ * 刷新 FPS 和场景统计。按渲染帧计数，约每 500ms 更新一次帧率。
+ *
+ * @param {WasmCanvas} engine
+ */
+function updateHud(engine) {
+  frameCount += 1;
+  const now = performance.now();
+  const elapsed = now - lastFpsTime;
+  if (elapsed >= 500) {
+    const fps = Math.round((frameCount * 1000) / elapsed);
+    const fpsEl = document.getElementById('fps');
+    if (fpsEl) {
+      fpsEl.textContent = String(fps);
+      fpsEl.className = fps < 30 ? 'bad' : fps < 50 ? 'warn' : '';
+    }
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+
+  const stats = engine.get_performance_stats();
+  setText('element-count', stats.elementCount?.toLocaleString?.() ?? engine.get_element_count());
+  setText('selection-count', engine.get_selection_count());
+  setText('vertex-count', stats.vertexCount?.toLocaleString?.() ?? engine.get_last_vertex_count());
+  setText('draw-calls', stats.drawCalls ?? engine.get_last_draw_calls());
+  setText('zoom', engine.get_zoom().toFixed(2));
+  setText('current-tool', engine.get_current_tool());
+  canvasEl.style.cursor = engine.get_tool_cursor();
+
+  const undoBtn = document.getElementById('undo-btn');
+  const redoBtn = document.getElementById('redo-btn');
+  if (undoBtn) undoBtn.disabled = !engine.can_undo();
+  if (redoBtn) redoBtn.disabled = !engine.can_redo();
+}
+
+/**
+ * 启动渲染循环。WebGPU 渲染失败时停下来并给出提示。
+ *
+ * @param {WasmCanvas} engine
+ */
+function startLoop(engine) {
+  const loop = () => {
+    try {
+      engine.render();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      showWebGPUMessage(message);
+      return;
+    }
+    updateHud(engine);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+
+/**
+ * 页面入口：检测 WebGPU，初始化引擎，并放入示例场景。
+ *
+ * @returns {Promise<void>}
+ */
+async function main() {
+  canvasEl = document.querySelector('#canvas');
+  if (!(canvasEl instanceof HTMLCanvasElement)) {
+    throw new Error('找不到画布');
+  }
+
+  try {
+    setStatus('检查 WebGPU…');
+    await assertWebGPU();
+    showWebGPUMessage(null);
+
+    setStatus('加载 WASM…');
+    fitCanvas(canvasEl);
+    await init(wasmUrl);
+    wasm = new WasmCanvas();
+    await wasm.init(canvasEl);
+    bindInput(canvasEl, wasm);
+    loadSample(wasm, canvasEl);
+    setStatus('运行中');
+    startLoop(wasm);
   } catch (error) {
-    console.error('❌ Failed to initialize:', error);
-    updateStatus('status', '初始化失败', true);
-    updateStatus('wasm-status', error.message, true);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('InfiniteCanvas demo failed:', error);
+    if (error instanceof WebGPUUnavailableError || /webgpu/i.test(message)) {
+      showWebGPUMessage(message);
+    } else {
+      showWebGPUMessage(`初始化失败：${message}`);
+    }
   }
 }
 
 main();
-

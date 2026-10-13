@@ -3,146 +3,341 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>InfiniteCanvas Engine - Demo</title>
+  <meta name="description" content="InfiniteCanvas 在线 Demo：选择、压力测试与纹理渲染，基于 Rust、WebGPU 与 WASM。">
+  <title>InfiniteCanvas Engine</title>
   <style>
-    * {
+    :root {
+      --bg: #101218;
+      --panel: #181b22;
+      --panel-2: #20242d;
+      --line: rgba(255, 255, 255, 0.08);
+      --text: #eef1f6;
+      --muted: #8d97a8;
+      --accent: #7eb6ff;
+      --mint: #3dd68c;
+      --amber: #f2c94c;
+      --danger: #f07178;
+      --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
       margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
     }
-    
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #1a1a1a;
-      color: #fff;
-      overflow: hidden;
-    }
-    
+
+    button, canvas { font: inherit; }
+
     #app {
-      width: 100vw;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
     }
-    
+
     header {
-      padding: 1rem 2rem;
-      background: #2a2a2a;
-      border-bottom: 1px solid #3a3a3a;
-    }
-    
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 600;
-    }
-    
-    .subtitle {
-      font-size: 0.875rem;
-      color: #888;
-      margin-top: 0.25rem;
-    }
-    
-    main {
-      flex: 1;
       display: flex;
       align-items: center;
-      justify-content: center;
-      padding: 2rem;
-    }
-    
-    #canvas {
-      width: 800px;
-      height: 600px;
-      background: #fff;
-      border-radius: 8px;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-    }
-    
-    .status {
-      position: fixed;
-      top: 5rem;
-      right: 2rem;
-      padding: 1rem;
-      background: #2a2a2a;
-      border-radius: 8px;
-      border: 1px solid #3a3a3a;
-      font-size: 0.875rem;
-    }
-    
-    .status-item {
-      display: flex;
       justify-content: space-between;
-      gap: 2rem;
-      margin-bottom: 0.5rem;
+      gap: 1rem;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: rgba(16, 18, 24, 0.92);
     }
-    
-    .status-label {
-      color: #888;
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      min-width: 0;
     }
-    
-    .status-value {
-      color: #4ade80;
-      font-weight: 600;
+
+    .mark {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.35), transparent 42%),
+        linear-gradient(140deg, #7eb6ff, #3dd68c);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
     }
-    
-    .error {
-      color: #ef4444;
+
+    h1 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 650;
+      letter-spacing: 0.01em;
+    }
+
+    .subtitle {
+      margin: 0.15rem 0 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .fps {
+      display: flex;
+      align-items: baseline;
+      gap: 0.45rem;
+      padding: 0.35rem 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      min-width: 6.5rem;
+      justify-content: flex-end;
+    }
+
+    .fps-label {
+      color: var(--muted);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+    }
+
+    #fps {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--mint);
+    }
+
+    #fps.warn { color: var(--amber); }
+    #fps.bad { color: var(--danger); }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+    }
+
+    .toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      padding: 0.85rem;
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+      overflow: auto;
+    }
+
+    .group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .group-label {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.5rem 0.55rem;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    button:hover { border-color: rgba(126, 182, 255, 0.55); }
+    button:disabled { opacity: 0.4; cursor: default; }
+
+    button.active {
+      background: #24344a;
+      border-color: rgba(126, 182, 255, 0.8);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+
+    button kbd {
+      float: right;
+      color: var(--muted);
+      font-family: ui-monospace, monospace;
+      font-size: 0.72rem;
+    }
+
+    .hint {
+      margin-top: auto;
+      color: var(--muted);
+      font-size: 0.75rem;
+      line-height: 1.45;
+    }
+
+    #stage {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(126, 182, 255, 0.08), transparent 32%),
+        #14161c;
+    }
+
+    #canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+
+    .fallback {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 1.5rem;
+      background: rgba(12, 14, 18, 0.78);
+    }
+
+    .fallback[hidden] { display: none; }
+
+    .fallback-card {
+      width: min(440px, 100%);
+      padding: 1.4rem 1.5rem 1.3rem;
+      border-radius: 16px;
+      background: #1c212b;
+      border: 1px solid rgba(240, 113, 120, 0.35);
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow {
+      margin: 0 0 0.4rem;
+      color: var(--danger);
+      font-size: 0.75rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .fallback-card h2 {
+      margin: 0 0 0.6rem;
+      font-size: 1.25rem;
+    }
+
+    .fallback-card p {
+      margin: 0;
+      color: #c9d0db;
+      line-height: 1.55;
+    }
+
+    #webgpu-detail {
+      margin-top: 0.8rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    footer {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      align-items: center;
+      padding: 0.45rem 1rem;
+      border-top: 1px solid var(--line);
+      background: #12141a;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    footer strong {
+      color: var(--text);
+      font-weight: 650;
+      font-family: ui-monospace, monospace;
+    }
+
+    #status.ok { color: var(--mint); }
+    #status.err { color: var(--danger); }
+
+    @media (max-width: 800px) {
+      .workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+      .toolbar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        max-height: 38vh;
+      }
+      .hint { margin-top: 0.25rem; }
     }
   </style>
 </head>
 <body>
   <div id="app">
     <header>
-      <h1>🎨 InfiniteCanvas Engine</h1>
-      <p class="subtitle">Rust + WebGPU + WASM | 高性能无限画布</p>
+      <div class="brand">
+        <div class="mark" aria-hidden="true"></div>
+        <div>
+          <h1>InfiniteCanvas</h1>
+          <p class="subtitle">选择、绘制、纹理与压力测试 · Rust + WebGPU + WASM</p>
+        </div>
+      </div>
+      <div class="fps" title="渲染帧率">
+        <span class="fps-label">FPS</span>
+        <span id="fps">--</span>
+      </div>
     </header>
-    
-    <main>
-      <canvas id="canvas"></canvas>
-    </main>
-    
-    <div class="status">
-      <div class="status-item">
-        <span class="status-label">状态:</span>
-        <span class="status-value" id="status">初始化中...</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">WASM:</span>
-        <span class="status-value" id="wasm-status">加载中...</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">FPS:</span>
-        <span class="status-value" id="fps">--</span>
+
+    <div class="workspace">
+      <aside class="toolbar" aria-label="工具栏">
+        <div class="group">
+          <p class="group-label">工具</p>
+          <button type="button" class="tool active" data-tool="select">选择 <kbd>V</kbd></button>
+          <button type="button" class="tool" data-tool="rectangle">矩形 <kbd>R</kbd></button>
+          <button type="button" class="tool" data-tool="circle">圆形 <kbd>O</kbd></button>
+          <button type="button" class="tool" data-tool="pan">平移 <kbd>H</kbd></button>
+        </div>
+        <div class="group">
+          <p class="group-label">编辑</p>
+          <div class="row">
+            <button type="button" id="undo-btn">撤销</button>
+            <button type="button" id="redo-btn">重做</button>
+          </div>
+          <button type="button" id="sample-btn">载入示例</button>
+          <button type="button" id="texture-btn">添加纹理</button>
+          <button type="button" id="clear-btn">清空场景</button>
+        </div>
+        <div class="group">
+          <p class="group-label">压力</p>
+          <div class="row">
+            <button type="button" data-count="100">+100</button>
+            <button type="button" data-count="1000">+1k</button>
+            <button type="button" data-count="5000">+5k</button>
+            <button type="button" id="clear-selection-btn">取消选择</button>
+          </div>
+        </div>
+        <p class="hint">拖拽框选或移动。滚轮缩放，按住空格临时平移。Shift / Ctrl 多选。矩形与圆形工具拖拽绘制。</p>
+      </aside>
+
+      <div id="stage">
+        <canvas id="canvas" width="960" height="640"></canvas>
+        <div id="webgpu-fallback" class="fallback" hidden>
+          <div class="fallback-card" role="alert">
+            <p class="eyebrow">WebGPU</p>
+            <h2>这个浏览器还不能运行画布</h2>
+            <p>InfiniteCanvas 使用 WebGPU 绘制。请换用桌面版 Chrome 113+、Edge 113+ 或 Safari 18+，并在系统设置里打开硬件加速后再刷新。</p>
+            <p id="webgpu-detail"></p>
+          </div>
+        </div>
       </div>
     </div>
+
+    <footer>
+      <span>状态 <strong id="status">准备中</strong></span>
+      <span>元素 <strong id="element-count">0</strong></span>
+      <span>选中 <strong id="selection-count">0</strong></span>
+      <span>顶点 <strong id="vertex-count">0</strong></span>
+      <span>绘制 <strong id="draw-calls">0</strong></span>
+      <span>缩放 <strong id="zoom">1.00</strong></span>
+      <span>工具 <strong id="current-tool">select</strong></span>
+    </footer>
   </div>
-  
-  <script type="module" src="/main.js"></script>
+  <script type="module" src="./main.js"></script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
