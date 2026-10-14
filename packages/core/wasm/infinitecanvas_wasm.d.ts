@@ -570,6 +570,7 @@ export class InfiniteCanvas {
      *   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
      * - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
      * - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
+     * - `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字。`shadowColor` 是 `#rrggbbaa`（面板只用 RGB，浓度在 `shadowOpacity`）。没有形状、文本或图片时 `shadowSupported` 为 false
      *
      * # 示例（JavaScript）
      * ```js
@@ -1056,6 +1057,8 @@ export class InfiniteCanvas {
      * `cornerRadius` 也可以写成 `corner_radius`。`sides` 也可以写成 `points`，并钳到 3–64。
      * `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
      * `textColor` 是十六进制颜色。圆角只写到矩形上。
+     * `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
+     * `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。空选择或没有变化时返回 false。
      * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
      * 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
      * 没有任何变化时返回 false，也不入栈。

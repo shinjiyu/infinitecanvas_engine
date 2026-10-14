@@ -444,7 +444,9 @@ fn mesh_for(scene: &Scene, element: &AnyElement) -> Mesh {
 fn generate_mesh(element: &AnyElement) -> Mesh {
     match element {
         AnyElement::Rectangle(rect) => {
-            let mut fill = rect.generate_fill_vertices();
+            // 阴影在填充之前，这样本体盖住自己的投影，z 顺序仍按元素。
+            let mut fill = rect.shadow_vertices();
+            fill.extend(rect.generate_fill_vertices());
             // 线段管线宽度固定，线宽变化靠填充缓冲里的三角形带立刻画出来。
             fill.extend(rect.stroke_ribbon_vertices());
             Mesh {
@@ -456,7 +458,8 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             }
         }
         AnyElement::Circle(circle) => {
-            let mut fill = circle.generate_fill_vertices();
+            let mut fill = circle.shadow_vertices();
+            fill.extend(circle.generate_fill_vertices());
             fill.extend(circle.stroke_ribbon_vertices());
             Mesh {
                 fill,
@@ -467,7 +470,8 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             }
         }
         AnyElement::Polygon(polygon) => {
-            let mut fill = polygon.generate_fill_vertices();
+            let mut fill = polygon.shadow_vertices();
+            fill.extend(polygon.generate_fill_vertices());
             fill.extend(polygon.stroke_ribbon_vertices());
             Mesh {
                 fill,
@@ -488,29 +492,37 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 };
             }
             Mesh {
-                fill: Vec::new(),
+                fill: image.shadow_vertices(),
                 stroke: Vec::new(),
                 textured: image.generate_vertices(),
                 texture_id: Some(image.texture_id.clone()),
                 underlay: true,
             }
         }
-        AnyElement::Line(line) => Mesh {
-            fill: line.generate_vertices(),
-            stroke: Vec::new(),
-            textured: Vec::new(),
-            texture_id: None,
-            underlay: false,
-        },
-        AnyElement::Path(path) => Mesh {
-            fill: path.generate_vertices(),
-            stroke: Vec::new(),
-            textured: Vec::new(),
-            texture_id: None,
-            underlay: false,
-        },
+        AnyElement::Line(line) => {
+            let mut fill = line.shadow_vertices();
+            fill.extend(line.generate_vertices());
+            Mesh {
+                fill,
+                stroke: Vec::new(),
+                textured: Vec::new(),
+                texture_id: None,
+                underlay: false,
+            }
+        }
+        AnyElement::Path(path) => {
+            let mut fill = path.shadow_vertices();
+            fill.extend(path.generate_vertices());
+            Mesh {
+                fill,
+                stroke: Vec::new(),
+                textured: Vec::new(),
+                texture_id: None,
+                underlay: false,
+            }
+        }
         AnyElement::Text(text) => Mesh {
-            fill: Vec::new(),
+            fill: text.shadow_vertices(),
             stroke: Vec::new(),
             textured: text.generate_vertices(),
             texture_id: text.texture_id.clone(),

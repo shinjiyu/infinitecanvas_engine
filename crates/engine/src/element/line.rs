@@ -2,6 +2,7 @@
 //!
 //! 两个端点之间生成带线宽的三角形带。命中测试使用点到线段距离。
 
+use super::shadow::{soft_shadow_vertices, stroke_capsule_shadow};
 use super::stroke::{
     arrow_length_for, arrow_points, arrow_width_for, bounds_containing, effective_width,
     paint_color, point_in_triangle, point_to_segment_distance, shorten_end, stroke_styled,
@@ -134,6 +135,24 @@ impl Line {
         opaque_color(paint_color(&self.style))
     }
 
+    /// 局部点到笔画剪影的有符号距离。负值在笔画内。PNG 阴影用它，命中测试不用。
+    pub(crate) fn silhouette_distance(&self, local: Vec2) -> f32 {
+        let (start, end, arrow) = self.local_shaft_and_arrow();
+        let mut distance = point_to_segment_distance(local, start, end) - self.stroke_width() * 0.5;
+        if let Some(tri) = arrow {
+            let edge = point_to_segment_distance(local, tri[0], tri[1])
+                .min(point_to_segment_distance(local, tri[1], tri[2]))
+                .min(point_to_segment_distance(local, tri[2], tri[0]));
+            let signed = if point_in_triangle(local, tri) {
+                -edge
+            } else {
+                edge
+            };
+            distance = distance.min(signed);
+        }
+        distance
+    }
+
     /// 局部坐标下的箭杆端点和箭头三角形。
     ///
     /// 有箭头时箭杆终点会缩短，给三角形留出位置。尺寸与 [`Line::generate_vertices`]
@@ -144,6 +163,32 @@ impl Line {
     pub fn local_shaft_and_arrow(&self) -> (Vec2, Vec2, Option<[Vec2; 3]>) {
         let (shaft, arrow) = self.shaft_and_arrow();
         (shaft[0], shaft[1], arrow)
+    }
+
+    /// 投影顶点。笔画是胶囊，箭头是单独的三角形剪影。关闭时为空。
+    ///
+    /// 命中仍是线宽加余量，不包含偏移和模糊。
+    pub(crate) fn shadow_vertices(&self) -> Vec<Vertex> {
+        if self.style.shadow.is_off() {
+            return Vec::new();
+        }
+        let (start, end, arrow) = self.local_shaft_and_arrow();
+        let mut vertices = stroke_capsule_shadow(
+            &[start, end],
+            self.stroke_width() * 0.5,
+            self.style.shadow,
+            self.style.opacity,
+            &self.props.transform,
+        );
+        if let Some(tri) = arrow {
+            vertices.extend(soft_shadow_vertices(
+                &[tri[0], tri[1], tri[2], tri[0]],
+                self.style.shadow,
+                self.style.opacity,
+                &self.props.transform,
+            ));
+        }
+        vertices
     }
 
     /// 生成描边三角形（含可选箭头），坐标已变换到世界空间。

@@ -1,4 +1,5 @@
 //! 圆形元素
+use super::shadow::soft_shadow_vertices;
 use super::stroke::{
     color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled, transform_vertices,
     StrokePaint,
@@ -57,6 +58,28 @@ impl Circle {
     /// 获取半径
     pub fn radius(&self) -> f32 {
         self.radius
+    }
+
+    /// 投影顶点。关闭时为空。轮廓是 32 段圆，变换之后可以是椭圆。
+    ///
+    /// 不改变包围盒或命中测试。
+    pub(crate) fn shadow_vertices(&self) -> Vec<Vertex> {
+        const SEGMENTS: usize = 32;
+        let mut points = Vec::with_capacity(SEGMENTS + 1);
+        let step = 2.0 * PI / SEGMENTS as f32;
+        for index in 0..=SEGMENTS {
+            let angle = index as f32 * step;
+            points.push(Vec2::new(
+                angle.cos() * self.radius,
+                angle.sin() * self.radius,
+            ));
+        }
+        soft_shadow_vertices(
+            &points,
+            self.style.shadow,
+            self.style.opacity,
+            &self.props.transform,
+        )
     }
 
     /// 生成填充顶点（三角扇形）

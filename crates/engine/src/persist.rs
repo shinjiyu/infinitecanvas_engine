@@ -14,7 +14,8 @@
 //! `#[serde(default)]`。新增元素种类时扩展解码分支；未知种类会报错，避免静默丢数据。
 
 use crate::asset::{AssetError, AssetRecord, AssetTable};
-use crate::element::{Circle, Element, Image, Polygon, PolygonKind, Rectangle, Text};
+use crate::element::shadow::{composite_over, feather_coverage};
+use crate::element::{Circle, DropShadow, Element, Image, Polygon, PolygonKind, Rectangle, Text};
 use crate::guides::{GuideStore, ManualGuide};
 use crate::scene::{AnyElement, Scene};
 use crate::snap::GuideAxis;
@@ -515,7 +516,32 @@ fn paint_bounds(element: &AnyElement) -> Rect {
         | AnyElement::Text(_)
         | AnyElement::Group(_) => 0.0,
     };
-    base.inflate(extra.max(0.0))
+    let (shadow, transform) = element_shadow(element);
+    base.inflate(extra.max(0.0) + shadow_reach(shadow, transform))
+}
+
+fn element_shadow(element: &AnyElement) -> (DropShadow, &Transform) {
+    match element {
+        AnyElement::Rectangle(rect) => (rect.style.shadow, &rect.props.transform),
+        AnyElement::Circle(circle) => (circle.style.shadow, &circle.props.transform),
+        AnyElement::Polygon(polygon) => (polygon.style.shadow, &polygon.props.transform),
+        AnyElement::Line(line) => (line.style.shadow, &line.props.transform),
+        AnyElement::Path(path) => (path.style.shadow, &path.props.transform),
+        AnyElement::Text(text) => (text.shadow, &text.props.transform),
+        AnyElement::Image(image) => (image.shadow, &image.props.transform),
+        AnyElement::Group(group) => (DropShadow::default(), &group.props.transform),
+    }
+}
+
+/// 阴影在世界空间里可能伸出包围盒的距离。关闭时为 0，命中盒不受影响。
+fn shadow_reach(shadow: DropShadow, transform: &Transform) -> f32 {
+    if shadow.is_off() {
+        return 0.0;
+    }
+    let shadow = shadow.sanitized();
+    let offset = transform.transform_vector(shadow.offset);
+    let scale = transform.scale.x.abs().max(transform.scale.y.abs());
+    offset.length() + shadow.blur * scale
 }
 
 fn scale_extent(transform: &Transform) -> f32 {
@@ -559,9 +585,9 @@ fn sample_element(scene: &Scene, element: &AnyElement, world: Vec2) -> Option<Co
         AnyElement::Circle(circle) => sample_circle(circle, world),
         AnyElement::Polygon(polygon) => sample_polygon(polygon, world),
         AnyElement::Image(image) => sample_image(scene, image, world),
-        AnyElement::Line(line) => line.color_at(world),
-        AnyElement::Path(path) => path.color_at(world),
-        AnyElement::Text(text) => text.color_at(world),
+        AnyElement::Line(line) => sample_line(line, world),
+        AnyElement::Path(path) => sample_path(path, world),
+        AnyElement::Text(text) => sample_text(text, world),
         AnyElement::Group(_) => None,
     }
 }
@@ -601,17 +627,25 @@ fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
                 && (ax >= (half.x - stroke).max(0.0) || ay >= (half.y - stroke).max(0.0)),
         )
     };
+    let mut body = None;
     if in_stroke {
         if let Some(color) = rect.style.stroke {
-            return with_opacity(color, rect.style.opacity);
+            body = with_opacity(color, rect.style.opacity);
         }
     }
-    if in_fill {
+    if body.is_none() && in_fill {
         if let Some(color) = rect.style.fill {
-            return with_opacity(color, rect.style.opacity);
+            body = with_opacity(color, rect.style.opacity);
         }
     }
-    None
+    let half_abs = Vec2::new(half.x.abs(), half.y.abs());
+    paint_with_shadow(
+        body,
+        local,
+        rect.style.shadow,
+        rect.style.opacity,
+        |point| rounded_box_sdf(point, half_abs, radius),
+    )
 }
 
 fn sample_polygon(polygon: &Polygon, world: Vec2) -> Option<Color> {
@@ -619,7 +653,14 @@ fn sample_polygon(polygon: &Polygon, world: Vec2) -> Option<Color> {
         return None;
     }
     let local = try_local(&polygon.props.transform, world)?;
-    polygon.sample_local(local)
+    let body = polygon.sample_local(local);
+    paint_with_shadow(
+        body,
+        local,
+        polygon.style.shadow,
+        polygon.style.opacity,
+        |point| polygon.silhouette_distance(point),
+    )
 }
 
 fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
@@ -632,32 +673,134 @@ fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
     let in_fill = dist <= circle.radius;
     let in_stroke =
         stroke > 0.0 && dist <= circle.radius + stroke && dist >= (circle.radius - stroke).max(0.0);
+    let mut body = None;
     if in_stroke {
         if let Some(color) = circle.style.stroke {
-            return with_opacity(color, circle.style.opacity);
+            body = with_opacity(color, circle.style.opacity);
         }
     }
-    if in_fill {
+    if body.is_none() && in_fill {
         if let Some(color) = circle.style.fill {
-            return with_opacity(color, circle.style.opacity);
+            body = with_opacity(color, circle.style.opacity);
         }
     }
-    None
+    let radius = circle.radius;
+    paint_with_shadow(
+        body,
+        local,
+        circle.style.shadow,
+        circle.style.opacity,
+        |point| point.length() - radius,
+    )
 }
 
 fn sample_image(scene: &Scene, image: &Image, world: Vec2) -> Option<Color> {
-    if !image.props.visible || !image.contains_point(world) {
+    if !image.props.visible {
         return None;
     }
-    if let Some(asset) = scene.image_asset(&image.asset_id) {
-        return image.sample_pixels(world, asset.width, asset.height, &asset.rgba);
-    }
-    let mut color = IMAGE_PNG_PLACEHOLDER;
-    color.a *= image.alpha.clamp(0.0, 1.0);
-    if color.a <= 0.0 {
-        None
+    let local = try_local(&image.props.transform, world)?;
+    let body = if image.contains_point(world) {
+        if let Some(asset) = scene.image_asset(&image.asset_id) {
+            image.sample_pixels(world, asset.width, asset.height, &asset.rgba)
+        } else {
+            let mut color = IMAGE_PNG_PLACEHOLDER;
+            color.a *= image.alpha.clamp(0.0, 1.0);
+            if color.a <= 0.0 {
+                None
+            } else {
+                Some(color)
+            }
+        }
     } else {
-        Some(color)
+        None
+    };
+    let size = image.size;
+    paint_with_shadow(body, local, image.shadow, image.alpha, |point| {
+        axis_box_sdf(point, Vec2::ZERO, size)
+    })
+}
+
+fn sample_line(line: &crate::element::Line, world: Vec2) -> Option<Color> {
+    let body = line.color_at(world);
+    let Some(local) = try_local(&line.props.transform, world) else {
+        return body;
+    };
+    paint_with_shadow(
+        body,
+        local,
+        line.style.shadow,
+        line.style.opacity,
+        |point| line.silhouette_distance(point),
+    )
+}
+
+fn sample_path(path: &crate::element::Path, world: Vec2) -> Option<Color> {
+    let body = path.color_at(world);
+    let Some(local) = try_local(&path.props.transform, world) else {
+        return body;
+    };
+    paint_with_shadow(
+        body,
+        local,
+        path.style.shadow,
+        path.style.opacity,
+        |point| path.silhouette_distance(point),
+    )
+}
+
+fn sample_text(text: &Text, world: Vec2) -> Option<Color> {
+    let body = text.color_at(world);
+    if text.editing {
+        return body;
+    }
+    let Some(local) = try_local(&text.props.transform, world) else {
+        return body;
+    };
+    let bounds = text.local_bounds();
+    paint_with_shadow(body, local, text.shadow, text.opacity, |point| {
+        axis_box_sdf(
+            point,
+            Vec2::new(bounds.x, bounds.y),
+            Vec2::new(bounds.width, bounds.height),
+        )
+    })
+}
+
+fn axis_box_sdf(point: Vec2, origin: Vec2, size: Vec2) -> f32 {
+    let min_x = origin.x.min(origin.x + size.x);
+    let min_y = origin.y.min(origin.y + size.y);
+    let max_x = origin.x.max(origin.x + size.x);
+    let max_y = origin.y.max(origin.y + size.y);
+    let half = Vec2::new((max_x - min_x) * 0.5, (max_y - min_y) * 0.5);
+    let center = Vec2::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
+    rounded_box_sdf(point - center, half, 0.0)
+}
+
+fn paint_with_shadow(
+    body: Option<Color>,
+    local: Vec2,
+    shadow: DropShadow,
+    opacity: f32,
+    distance_at: impl Fn(Vec2) -> f32,
+) -> Option<Color> {
+    if shadow.is_off() {
+        return body;
+    }
+    let shadow = shadow.sanitized();
+    let coverage = feather_coverage(distance_at(local - shadow.offset), shadow.blur);
+    let alpha = shadow.color.a * opacity.clamp(0.0, 1.0) * coverage;
+    if alpha <= 1.0e-4 {
+        return body;
+    }
+    let shadow_color = Color::new(
+        shadow.color.r,
+        shadow.color.g,
+        shadow.color.b,
+        alpha.clamp(0.0, 1.0),
+    );
+    match body {
+        Some(paint) => Some(composite_over(paint, shadow_color)),
+        None => Some(shadow_color),
     }
 }
 
@@ -740,16 +883,31 @@ fn encode_rgba(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, Persis
 mod tests {
     use super::{
         channel, export_selection_png, export_viewport_png, export_viewport_png_with_guides,
-        PersistError, IMAGE_PNG_PLACEHOLDER, MAX_PNG_DIMENSION, SCENE_FORMAT_VERSION,
+        sample_rectangle, PersistError, IMAGE_PNG_PLACEHOLDER, MAX_PNG_DIMENSION,
+        SCENE_FORMAT_VERSION,
     };
     use crate::element::{
-        Circle, Element, ElementStyle, Image, Line, Path, Polygon, PolygonKind, Rectangle, Text,
-        TextAlign,
+        Circle, DropShadow, Element, ElementStyle, Image, Line, Path, Polygon, PolygonKind,
+        Rectangle, Text, TextAlign,
     };
     use crate::snap::GuideAxis;
     use crate::{AnyElement, Scene, Viewport};
     use infinitecanvas_math::{Color, Rect, Transform, Vec2};
     use serde_json::{json, Value};
+
+    #[test]
+    fn drop_shadow_samples_beside_the_shape_without_replacing_an_opaque_fill() {
+        let mut rect = Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0))
+            .with_style(ElementStyle::fill_only(Color::WHITE));
+        rect.style.shadow =
+            DropShadow::new(Vec2::new(20.0, 0.0), 0.0, Color::new(0.0, 0.0, 0.0, 0.5));
+        let center = sample_rectangle(&rect, Vec2::ZERO).unwrap();
+        assert!(center.r > 0.9);
+        let shadow = sample_rectangle(&rect, Vec2::new(20.0, 0.0)).unwrap();
+        assert!(shadow.a > 0.4 && shadow.r < 0.05);
+        assert!(sample_rectangle(&rect, Vec2::new(80.0, 0.0)).is_none());
+        assert!(!rect.contains_point(Vec2::new(20.0, 0.0)));
+    }
 
     fn populated_scene() -> Scene {
         let mut scene = Scene::new();

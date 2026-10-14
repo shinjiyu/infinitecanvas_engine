@@ -2,6 +2,26 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #70: 投影
+
+- [x] 形状（含多边形和星形）、文本、图片各有 `shadow`（局部偏移、模糊、颜色含浓度）。全零默认值不写入 JSON，旧文档仍能打开
+- [x] 填充缓冲在元素本体前画偏移轮廓；模糊用外扩羽化环。命中和包围盒不包含投影
+- [x] 一次 `SetStyle` 改投影，空选和不改变的补丁不入栈。文本只改投影时保留光栅。边数和内径仍是同一条命令上的可选字段，未写出则保持原值，方便渐变和混合模式以后加自己的字段
+- [x] WASM 与属性面板：偏移、模糊、颜色、浓度。多选不一致为 mixed。勾选一次写入默认投影，取消只把浓度写成 0
+- [x] 吸管只写填充和描边。导入 SVG 不读 `feDropShadow`，新元素投影关闭
+
+```text
+面板勾选 / 滑块松手
+        │
+        ▼
+StylePatch.shadow_* ── SetStyle ── 一条历史
+        │
+        ▼
+mark_dirty ── 填充缓冲：羽化轮廓，然后元素本体
+        │
+        └─ 命中 AABB 不变；JSON 嵌套 shadow，默认省略
+```
+
 ## Issue #63: 导入 SVG
 
 - [x] `import_svg`：rect / circle / ellipse / line / polyline / polygon / path / text，嵌套 `g` 的变换压进子元素
@@ -19,6 +39,8 @@ import_svg ── ImportSvgCommand（一条历史）
     ├─ rect / circle / ellipse / line / text / image(data URL)
     └─ path / polygon / polyline → Path
 ```
+
+
 
 ## Issue #65: 多边形与星形
 

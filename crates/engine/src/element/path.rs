@@ -3,6 +3,7 @@
 //! 沿采样点生成带线宽的三角形带，拐角按斜接/斜角处理。
 //! 命中测试使用点到各线段的距离，而不是包围盒。
 
+use super::shadow::stroke_capsule_shadow;
 use super::stroke::{
     bounds_containing, distance_to_polyline, effective_width, paint_color, stroke_styled,
     transform_vertices, StrokePaint, HIT_SLOP, MITER_LIMIT,
@@ -113,6 +114,24 @@ impl Path {
         } else {
             Some(color)
         }
+    }
+
+    /// 局部点到笔画剪影的有符号距离。负值在笔画内。命中测试仍加点击余量。
+    pub(crate) fn silhouette_distance(&self, local: Vec2) -> f32 {
+        distance_to_polyline(local, &self.points) - self.stroke_width() * 0.5
+    }
+
+    /// 投影顶点。沿采样点的笔画胶囊。关闭或少于两个点时为空。
+    ///
+    /// 命中仍是点到折线的距离，不包含偏移和模糊。
+    pub(crate) fn shadow_vertices(&self) -> Vec<Vertex> {
+        stroke_capsule_shadow(
+            &self.points,
+            self.stroke_width() * 0.5,
+            self.style.shadow,
+            self.style.opacity,
+            &self.props.transform,
+        )
     }
 
     /// 生成描边三角形带（展开为三角形列表），坐标在世界空间。

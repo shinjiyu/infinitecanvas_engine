@@ -379,6 +379,27 @@ impl Polygon {
         vertices
     }
 
+    /// 投影顶点，画在填充之前。关闭时为空。命中测试不读这些顶点。
+    pub(crate) fn shadow_vertices(&self) -> Vec<Vertex> {
+        super::shadow::soft_shadow_vertices(
+            &self.local_points(),
+            self.style.shadow,
+            self.style.opacity,
+            &self.props.transform,
+        )
+    }
+
+    /// 到轮廓的有符号距离。内部为负，供 PNG 在本体外侧羽化投影。
+    pub(crate) fn silhouette_distance(&self, point: Vec2) -> f32 {
+        let outline = self.closed_outline();
+        let distance = distance_to_polyline(point, &outline);
+        if self.contains_local(point) {
+            -distance
+        } else {
+            distance
+        }
+    }
+
     /// 局部点是否在填充内部。边界附近用奇偶射线，测试请用明显在内或在外的点。
     pub fn contains_local(&self, point: Vec2) -> bool {
         point_in_polygon(point, &self.local_points())
@@ -532,6 +553,20 @@ mod tests {
         assert_eq!(wide.radius(), 4.0);
         wide.set_radius(f32::NAN);
         assert_eq!(wide.radius(), 0.0);
+    }
+
+    #[test]
+    fn drop_shadow_sits_beside_the_hexagon_without_growing_the_hit_box() {
+        let mut hex =
+            Polygon::hexagon(1, Vec2::ZERO, 10.0).with_style(ElementStyle::fill_only(Color::WHITE));
+        assert!(hex.shadow_vertices().is_empty());
+        hex.style.shadow =
+            crate::DropShadow::new(Vec2::new(30.0, 0.0), 0.0, Color::new(0.0, 0.0, 0.0, 0.5));
+        assert!(!hex.shadow_vertices().is_empty());
+        assert!(hex.contains_point(Vec2::ZERO));
+        assert!(!hex.contains_point(Vec2::new(30.0, 0.0)));
+        assert!(hex.silhouette_distance(Vec2::ZERO) < 0.0);
+        assert!(hex.silhouette_distance(Vec2::new(30.0, 0.0)) > 0.0);
     }
 
     #[test]

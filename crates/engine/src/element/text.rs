@@ -20,6 +20,9 @@
 use font8x8::UnicodeFonts;
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
+
+use super::shadow::quad_shadow;
+use super::DropShadow;
 use web_time::{Duration, Instant};
 
 use super::{Element, ElementId, ElementProps};
@@ -307,6 +310,11 @@ pub struct Text {
     /// 为 true 时不绘制纹理，把画面让给 DOM 编辑框。不写入场景 JSON。
     #[serde(skip)]
     pub editing: bool,
+    /// 投影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
+    ///
+    /// 有纹理且不在编辑时，按文字块包围盒画偏移羽化，不进字形光栅。
+    #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
+    pub shadow: DropShadow,
 }
 
 impl Text {
@@ -334,6 +342,7 @@ impl Text {
             pending_lod: None,
             pending_revision: 0,
             editing: false,
+            shadow: DropShadow::default(),
         }
     }
 
@@ -399,6 +408,7 @@ impl Text {
         self.pending_lod = None;
         self.pending_revision = 0;
         self.editing = false;
+        self.shadow = self.shadow.sanitized();
     }
 
     /// 丢掉纹理和编辑状态，保留文案、字号和对齐。
@@ -640,6 +650,23 @@ impl Text {
         self.pending_lod = None;
         self.pending_revision = 0;
         self.texture_id.take()
+    }
+
+    /// 文字块的投影。没有纹理或正在编辑时为空，和 [`Self::generate_vertices`] 一起出现。
+    ///
+    /// 这是包围盒的偏移羽化，不是逐字形模糊。命中测试仍按文字块，不含偏移。
+    pub(crate) fn shadow_vertices(&self) -> Vec<Vertex> {
+        if self.editing || self.texture_id.is_none() || !self.props.visible {
+            return Vec::new();
+        }
+        let bounds = self.local_bounds();
+        quad_shadow(
+            Vec2::new(bounds.x, bounds.y),
+            Vec2::new(bounds.width, bounds.height),
+            self.shadow,
+            self.opacity,
+            &self.props.transform,
+        )
     }
 
     /// 生成纹理四边形。没有纹理或正在编辑时返回空，渲染器就跳过它。

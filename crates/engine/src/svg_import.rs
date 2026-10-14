@@ -407,6 +407,7 @@ impl PaintStyle {
             stroke_dash: self.dash.clone(),
             stroke_cap: self.cap,
             stroke_join: self.join,
+            ..ElementStyle::new()
         };
         if style.stroke_width <= 0.0 {
             style.stroke = None;

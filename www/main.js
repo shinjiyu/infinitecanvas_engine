@@ -1522,7 +1522,7 @@ function syncRange(id, labelId, value, mixed, format) {
 /**
  * 按当前选择显示或隐藏属性面板，并把公共样式填进控件。
  * 多选不一致时标成「多种」，下一次编辑会写到全部选中元素。
- * 只选中图片时只留下不透明度；填充和描边仍只出现在形状或文本上。
+ * 只选中图片时只留下不透明度和投影；填充和描边仍只出现在形状或文本上。
  *
  * @param {WasmCanvas} engine
  */
@@ -1575,6 +1575,7 @@ function syncPropertyPanel(engine) {
   );
   syncCornerRadius(style);
   syncPolygonFields(style);
+  syncShadow(style);
 
   const textFields = document.getElementById('prop-text-fields');
   if (textFields) textFields.hidden = !style.hasText;
@@ -1746,6 +1747,7 @@ function bindPropertyPanel(engine) {
   bindRange('prop-opacity', 'opacity', 'prop-opacity-label', (value) => `${Math.round(value * 100)}%`);
   bindCornerRadius(engine);
   bindPolygonFields(engine);
+  bindShadow(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
 
   const bindColor = (id, key) => {
@@ -1760,6 +1762,7 @@ function bindPropertyPanel(engine) {
   bindColor('prop-fill', 'fill');
   bindColor('prop-stroke', 'stroke');
   bindColor('prop-text-color', 'textColor');
+  bindColor('prop-shadow-color', 'shadowColor');
 
   document.getElementById('prop-fill-enabled')?.addEventListener('change', (event) => {
     const input = event.currentTarget;
@@ -1832,9 +1835,6 @@ function syncCornerRadius(style) {
 }
 
 /**
- * @param {WasmCanvas} engine
- */
-/**
  * 边数在选中多边形或星形时出现。内径比只在选中星形时出现。
  * 滑块和数字框写同一个字段，松手收成一条 `SetStyle` 历史。
  *
@@ -1879,6 +1879,79 @@ function syncPolygonFields(style) {
 }
 
 /**
+ * 投影对形状、文本和图片都出现。多选不一致时标成多种。
+ * 启用一次写入偏移、模糊、颜色和浓度，撤销是一条记录。
+ *
+ * @param {Record<string, unknown>} style
+ */
+function syncShadow(style) {
+  const block = document.getElementById('prop-shadow');
+  if (block) block.hidden = !style.shadowSupported;
+  const mixed =
+    Boolean(style.shadowOpacityMixed) ||
+    Boolean(style.shadowBlurMixed) ||
+    Boolean(style.shadowOffsetXMixed) ||
+    Boolean(style.shadowOffsetYMixed);
+  const mixedEl = document.getElementById('prop-shadow-enabled-mixed');
+  if (mixedEl) mixedEl.hidden = !mixed;
+  const enabled = document.getElementById('prop-shadow-enabled');
+  if (enabled instanceof HTMLInputElement && activeStyleControl !== 'prop-shadow-enabled') {
+    enabled.indeterminate = mixed;
+    enabled.checked = !mixed && shadowLooksOn(style);
+  }
+  syncShadowNumber('prop-shadow-x', style.shadowOffsetX, style.shadowOffsetXMixed);
+  syncShadowNumber('prop-shadow-y', style.shadowOffsetY, style.shadowOffsetYMixed);
+  syncRange(
+    'prop-shadow-blur',
+    'prop-shadow-blur-label',
+    style.shadowBlur,
+    style.shadowBlurMixed,
+    (value) => String(value),
+  );
+  syncColorRow(
+    'prop-shadow-color',
+    null,
+    'prop-shadow-color-mixed',
+    style.shadowColor,
+    style.shadowColorMixed,
+    false,
+    style.shadowSupported,
+  );
+  syncRange(
+    'prop-shadow-opacity',
+    'prop-shadow-opacity-label',
+    style.shadowOpacity,
+    style.shadowOpacityMixed,
+    (value) => `${Math.round(value * 100)}%`,
+  );
+}
+
+/**
+ * @param {Record<string, unknown>} style
+ */
+function shadowLooksOn(style) {
+  const opacity = Number(style.shadowOpacity);
+  const blur = Number(style.shadowBlur);
+  const x = Number(style.shadowOffsetX);
+  const y = Number(style.shadowOffsetY);
+  if (!(opacity > 0.001)) return false;
+  return blur > 0.001 || Math.abs(x) > 0.001 || Math.abs(y) > 0.001;
+}
+
+/**
+ * @param {string} id
+ * @param {unknown} value
+ * @param {unknown} mixed
+ */
+function syncShadowNumber(id, value, mixed) {
+  const mixedEl = document.getElementById(`${id}-mixed`);
+  if (mixedEl) mixedEl.hidden = !mixed;
+  const input = document.getElementById(id);
+  if (!(input instanceof HTMLInputElement) || activeStyleControl === id) return;
+  if (typeof value === 'number' && Number.isFinite(value)) input.value = String(value);
+}
+
+/**
  * @param {WasmCanvas} engine
  */
 function bindPolygonFields(engine) {
@@ -1906,6 +1979,70 @@ function bindPolygonFields(engine) {
   };
   bindPair('prop-sides', 'prop-sides-number', 'sides', true);
   bindPair('prop-inner-radius', 'prop-inner-radius-number', 'innerRadius', false);
+}
+
+/**
+ * @param {WasmCanvas} engine
+ */
+function bindShadow(engine) {
+  const previewNumber = (id, key) => {
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement)) return;
+    input.addEventListener('input', () => {
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return;
+      activeStyleControl = id;
+      engine.preview_selection_style({ [key]: value });
+    });
+    input.addEventListener('change', () => finishStyleEdit(engine));
+  };
+  previewNumber('prop-shadow-x', 'shadowOffsetX');
+  previewNumber('prop-shadow-y', 'shadowOffsetY');
+  const blur = document.getElementById('prop-shadow-blur');
+  if (blur instanceof HTMLInputElement) {
+    blur.addEventListener('input', () => {
+      const value = Number(blur.value);
+      setText('prop-shadow-blur-label', String(value));
+      activeStyleControl = 'prop-shadow-blur';
+      engine.preview_selection_style({ shadowBlur: value });
+    });
+    blur.addEventListener('change', () => finishStyleEdit(engine));
+  }
+  const opacity = document.getElementById('prop-shadow-opacity');
+  if (opacity instanceof HTMLInputElement) {
+    opacity.addEventListener('input', () => {
+      const value = Number(opacity.value);
+      setText('prop-shadow-opacity-label', `${Math.round(value * 100)}%`);
+      activeStyleControl = 'prop-shadow-opacity';
+      engine.preview_selection_style({ shadowOpacity: value });
+    });
+    opacity.addEventListener('change', () => finishStyleEdit(engine));
+  }
+  document.getElementById('prop-shadow-enabled')?.addEventListener('change', (event) => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    if (input.checked) {
+      const style = engine.get_selection_style();
+      /** @type {Record<string, string | number>} */
+      const patch = { shadowOpacity: 0.4, shadowColor: '#000000' };
+      const unset =
+        !style ||
+        (!(Number(style.shadowOpacity) > 0) &&
+          !(Number(style.shadowBlur) > 0) &&
+          !(Math.abs(Number(style.shadowOffsetX)) > 0) &&
+          !(Math.abs(Number(style.shadowOffsetY)) > 0));
+      if (unset) {
+        patch.shadowOffsetX = 8;
+        patch.shadowOffsetY = 8;
+        patch.shadowBlur = 12;
+      }
+      engine.set_selection_style(patch);
+    } else {
+      engine.set_selection_style({ shadowOpacity: 0 });
+    }
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+  });
 }
 
 function bindCornerRadius(engine) {

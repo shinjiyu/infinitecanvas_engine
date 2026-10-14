@@ -63,8 +63,8 @@ pub use command::{
     TransformElementsCommand, UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{
-    Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Polygon,
-    PolygonKind, Rectangle, StrokeCap, StrokeJoin, Text, TextAlign, TextClickResolver,
+    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path,
+    Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin, Text, TextAlign, TextClickResolver,
     TextPlacement, TextVisual,
 };
 pub use event::{

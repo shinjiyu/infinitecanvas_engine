@@ -8,6 +8,7 @@ pub mod line;
 pub mod path;
 pub mod polygon;
 pub mod rect;
+pub(crate) mod shadow;
 mod stroke;
 pub mod text;
 
@@ -18,6 +19,7 @@ pub use line::Line;
 pub use path::Path;
 pub use polygon::{Polygon, PolygonKind};
 pub use rect::Rectangle;
+pub use shadow::DropShadow;
 pub use text::{
     estimate_size, lod_bucket, lod_scale, padding_world, raster_params, raster_texture_id,
     RasterParams, Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
@@ -262,6 +264,9 @@ pub struct ElementStyle {
     /// 线结。缺省斜接。
     #[serde(default, skip_serializing_if = "join_is_miter")]
     pub stroke_join: StrokeJoin,
+    /// 投影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
+    #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
+    pub shadow: DropShadow,
 }
 
 impl ElementStyle {
@@ -275,6 +280,7 @@ impl ElementStyle {
             stroke_dash: Vec::new(),
             stroke_cap: StrokeCap::Butt,
             stroke_join: StrokeJoin::Miter,
+            shadow: DropShadow::default(),
         }
     }
 
