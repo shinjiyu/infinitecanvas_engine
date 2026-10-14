@@ -27,8 +27,16 @@ SetStyleCommand ── apply / undo ──► Scene::mark_dirty
 
 圆角写在矩形上，经 `SetStyle` 的 `corner_radius` 补丁和填充、描边一起撤销。半径 0 仍是原来的两个三角形和四条边。大于 0 时 WebGPU 用同一半径的圆弧轮廓铺填充，描边（含虚线）沿这条轮廓走。命中测试保持轴对齐外接矩形（切掉的角仍能点中）；包围盒不随圆角缩小。面板在 `cornerRadiusSupported` 为 false（未选中，或选择里没有矩形）时隐藏圆角滑条和数字框。多选半径不一致时为 mixed。
 
+形状还可以把填充改成线性或径向渐变，仍然是一条 `SetStyle`。字段都带 `serde(default)`：`fill_kind`（`solid` / `linear` / `radial`，缺省纯色）、`fill_stops`（offset 与颜色）、`fill_angle`（度，0 为从左到右，90 为从上到下）、`fill_center`（局部坐标）和 `fill_radius`（0 表示用包围盒对角线的一半）。色标为空时退回纯色 `fill`。多选不一致为 mixed。面板在选中形状时给出类型、角度或圆心/半径，以及色标列表。关掉填充会把种类收回纯色。不另设快捷键。正多边形走凸轮廓切条；星形是凹的，线性按每张中心三角形切条，径向保持扇形并在顶点取色。
+
+WebGPU 把渐变烤进填充顶点：线性按色标把凸轮廓切成条带，条带内插值是准确的；径向从圆心（在形外时改用轮廓重心）发出射线，沿射线取色，射线之间是近似。描边仍是纯色。不透明度乘进顶点 alpha。隐藏元素和被隐藏的组不产生填充三角形，绘制顺序不变。
+
+PNG 按像素采样同一套渐变，描边像素仍是纯色。SVG 写成 `linearGradient`（objectBoundingBox）或 `radialGradient`（userSpaceOnUse）；没有渐变的形状仍是原来的 `fill` 颜色。投影另写 `feDropShadow`。
+
+吸管不走面板上的滑块预览。它采样一个叶子的填充和描边，再经同一条 `SetStyle` 写到当前选择。渐变上取的是该点的颜色，写回去时收成纯色。圆角、线宽、不透明度和投影不动。
+
 边数和星形内径走同一条 `SetStyle`。`sides` 只写到多边形和星形，`inner_radius` 只写到星形。面板在 `sidesSupported` 为 false 时隐藏边数控件；`innerRadiusSupported` 为 false 时隐藏内径。只选中星形时标签写成「角数」。多选不一致为 mixed。拖动松手仍是一条撤销。
 
-投影写在形状的 `ElementStyle::shadow`、文本和图片各自的 `shadow` 上。`StylePatch` 里是可选的 `shadow_offset_x` / `shadow_offset_y` / `shadow_blur` / `shadow_color`（只改 RGB）/ `shadow_opacity`（只改 alpha）。未写出的字段保持原值，所以渐变或混合模式以后可以在同一补丁上加自己的可选字段。勾选投影时，若当前是全零默认值，一次 `SetStyle` 写成偏移 (8, 8)、模糊 12、黑色、浓度 0.4；取消只把浓度写成 0。滑块和数字框走预览，松手一条历史。多选不一致时为 mixed。`shadowSupported` 在选择里有形状、文本或图片时为 true。偏移在局部空间，旋转和缩放会带着投影走。模糊是轮廓外扩的羽化环，不是离屏高斯。投影不改变命中和包围盒。隐藏元素不输出投影顶点。多边形和星形的剪影就是局部顶点环。
+投影写在形状的 `ElementStyle::shadow`、文本和图片各自的 `shadow` 上。`StylePatch` 里是可选的 `shadow_offset_x` / `shadow_offset_y` / `shadow_blur` / `shadow_color`（只改 RGB）/ `shadow_opacity`（只改 alpha）。未写出的字段保持原值。渐变已经是同一补丁上的可选字段；混合模式以后也可以这样加。勾选投影时，若当前是全零默认值，一次 `SetStyle` 写成偏移 (8, 8)、模糊 12、黑色、浓度 0.4；取消只把浓度写成 0。滑块和数字框走预览，松手一条历史。多选不一致时为 mixed。`shadowSupported` 在选择里有形状、文本或图片时为 true。偏移在局部空间，旋转和缩放会带着投影走。模糊是轮廓外扩的羽化环，不是离屏高斯。投影不改变命中和包围盒。隐藏元素不输出投影顶点。多边形和星形的剪影就是局部顶点环。
 
 吸管不走面板上的滑块预览。它采样一个叶子的填充和描边，再经同一条 `SetStyle` 写到当前选择。圆角、边数、内径、线宽、不透明度、投影都不动。

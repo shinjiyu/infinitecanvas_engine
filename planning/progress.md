@@ -2,6 +2,25 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #73: 线性 / 径向渐变填充
+
+- [x] `ElementStyle` 增加 `fill_kind` / `fill_stops` / `fill_angle` / `fill_center` / `fill_radius`，全部 `serde(default)`，缺省纯色
+- [x] WebGPU 把渐变烤进填充顶点（线性按色标切条，径向为射线近似）；描边保持纯色；不透明度、隐藏和绘制顺序不变
+- [x] 改渐变走一条 `SetStyle`；空选和无变化不入栈；执行和撤销 `mark_dirty`
+- [x] JSON 往返；旧文件没有这些字段仍能打开。PNG 按像素采样，SVG 写 `linearGradient` / `radialGradient`
+- [x] 属性面板可选纯色、线性、径向和色标。多选不一致为 mixed。不新增快捷键。`Ctrl/Cmd+'` 仍是网格，`G` 仍是标尺。投影字段保持可选，未写出则不动
+
+```text
+属性面板类型 / 色标
+        │
+        ▼
+StylePatch ── SetStyleCommand ── 一条历史
+        │
+        ├─ 填充顶点（线性条带 / 径向射线）
+        ├─ PNG 采样，SVG linearGradient / radialGradient
+        └─ 描边仍是纯色
+```
+
 ## Issue #70: 投影
 
 - [x] 形状（含多边形和星形）、文本、图片各有 `shadow`（局部偏移、模糊、颜色含浓度）。全零默认值不写入 JSON，旧文档仍能打开

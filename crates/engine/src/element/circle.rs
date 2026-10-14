@@ -1,4 +1,5 @@
 //! 圆形元素
+use super::gradient::paint_gradient_fill;
 use super::shadow::soft_shadow_vertices;
 use super::stroke::{
     color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled, transform_vertices,
@@ -96,12 +97,25 @@ impl Circle {
 
     /// 生成填充顶点（指定分段数）
     pub fn generate_fill_vertices_with_segments(&self, segments: usize) -> Vec<Vertex> {
-        if self.style.fill.is_none() || segments < 3 {
+        if !self.style.has_paintable_fill() || segments < 3 {
             return Vec::new();
         }
 
-        let color = color_with_opacity(self.style.fill.unwrap(), self.style.opacity);
         let transform = &self.props.transform;
+        if self.style.uses_gradient() {
+            let mut outline = Vec::with_capacity(segments);
+            let step = 2.0 * PI / segments as f32;
+            for index in 0..segments {
+                let angle = index as f32 * step;
+                outline.push(Vec2::new(
+                    angle.cos() * self.radius,
+                    angle.sin() * self.radius,
+                ));
+            }
+            return paint_gradient_fill(&outline, &self.style, self.local_bounds(), transform);
+        }
+
+        let color = color_with_opacity(self.style.fill.unwrap(), self.style.opacity);
 
         // 中心点（局部坐标系）
         let center = Vec2::ZERO;

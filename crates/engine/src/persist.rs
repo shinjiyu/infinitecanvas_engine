@@ -634,7 +634,7 @@ fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
         }
     }
     if body.is_none() && in_fill {
-        if let Some(color) = rect.style.fill {
+        if let Some(color) = rect.style.sample_fill(local, rect.local_bounds()) {
             body = with_opacity(color, rect.style.opacity);
         }
     }
@@ -680,7 +680,7 @@ fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
         }
     }
     if body.is_none() && in_fill {
-        if let Some(color) = circle.style.fill {
+        if let Some(color) = circle.style.sample_fill(local, circle.local_bounds()) {
             body = with_opacity(color, circle.style.opacity);
         }
     }
@@ -887,8 +887,8 @@ mod tests {
         SCENE_FORMAT_VERSION,
     };
     use crate::element::{
-        Circle, DropShadow, Element, ElementStyle, Image, Line, Path, Polygon, PolygonKind,
-        Rectangle, Text, TextAlign,
+        Circle, DropShadow, Element, ElementStyle, FillKind, GradientStop, Image, Line, Path,
+        Polygon, PolygonKind, Rectangle, Text, TextAlign,
     };
     use crate::snap::GuideAxis;
     use crate::{AnyElement, Scene, Viewport};
@@ -1697,5 +1697,49 @@ mod tests {
             export_viewport_png_with_guides(&scene, &viewport, true).unwrap(),
             plain
         );
+    }
+
+    #[test]
+    fn png_samples_gradient_fill_and_keeps_solid_stroke() {
+        let mut scene = Scene::new();
+        let mut under = Rectangle::new(1, Vec2::ZERO, Vec2::new(40.0, 20.0))
+            .with_style(ElementStyle::fill_only(Color::GREEN));
+        under.props.z_index = 0;
+        scene.add_rect(under);
+
+        let mut over = Rectangle::new(2, Vec2::new(10.0, 0.0), Vec2::new(20.0, 16.0));
+        over.props.z_index = 1;
+        over.style.fill_kind = FillKind::Linear;
+        over.style.fill_angle = 0.0;
+        over.style.opacity = 1.0;
+        over.style.stroke = Some(Color::RED);
+        over.style.stroke_width = 4.0;
+        over.style.fill_stops = vec![
+            GradientStop {
+                offset: 0.0,
+                color: Color::RED,
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::BLUE,
+            },
+        ];
+        scene.add_rect(over);
+
+        assert_pixel(
+            sample_pixel(&scene, Vec2::new(-15.0, 0.0)),
+            [0, 255, 0, 255],
+        );
+        let left = sample_pixel(&scene, Vec2::new(3.0, 0.0));
+        let right = sample_pixel(&scene, Vec2::new(17.0, 0.0));
+        assert!(left[0] > 180 && left[2] < 80 && left[1] < 10, "{left:?}");
+        assert!(
+            right[2] > 180 && right[0] < 80 && right[1] < 10,
+            "{right:?}"
+        );
+        assert_pixel(sample_pixel(&scene, Vec2::new(10.0, 9.0)), [255, 0, 0, 255]);
+
+        scene.set_visible(2, false);
+        assert_pixel(sample_pixel(&scene, Vec2::new(10.0, 0.0)), [0, 255, 0, 255]);
     }
 }

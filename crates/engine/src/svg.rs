@@ -19,8 +19,8 @@
 //! 文本写成 `<text>` / `<tspan>`。锚点与 [`TextAlign`] 相同：左上、上边中点或右上角。
 
 use crate::element::{
-    Circle, DropShadow, ElementId, ElementStyle, Image, Line, Path, Polygon, Rectangle, StrokeCap,
-    StrokeJoin, Text, TextAlign,
+    Circle, DropShadow, Element, ElementId, ElementStyle, FillKind, Image, Line, Path, Polygon,
+    Rectangle, StrokeCap, StrokeJoin, Text, TextAlign,
 };
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
@@ -402,11 +402,13 @@ fn write_rectangle(rect: &Rectangle) -> String {
             fmt_num(radius)
         ));
     }
+    let mut defs = String::new();
     push_fill_stroke(
         &mut shape,
-        rect.style.fill,
-        rect.style.stroke,
-        rect.style.stroke_width,
+        &mut defs,
+        rect.props.id,
+        &rect.style,
+        rect.local_bounds(),
     );
     push_shape_line_style(&mut shape, &rect.style);
     shape.push_str("/>\n");
@@ -415,7 +417,7 @@ fn write_rectangle(rect: &Rectangle) -> String {
         &rect.props.transform,
         rect.style.opacity,
         &rect.style.shadow,
-        &shape,
+        &prepend_defs(&defs, &shape),
     )
 }
 
@@ -424,11 +426,13 @@ fn write_circle(circle: &Circle) -> String {
         "    <circle cx=\"0\" cy=\"0\" r=\"{}\"",
         fmt_num(circle.radius.abs())
     );
+    let mut defs = String::new();
     push_fill_stroke(
         &mut shape,
-        circle.style.fill,
-        circle.style.stroke,
-        circle.style.stroke_width,
+        &mut defs,
+        circle.props.id,
+        &circle.style,
+        circle.local_bounds(),
     );
     push_shape_line_style(&mut shape, &circle.style);
     shape.push_str("/>\n");
@@ -437,7 +441,7 @@ fn write_circle(circle: &Circle) -> String {
         &circle.props.transform,
         circle.style.opacity,
         &circle.style.shadow,
-        &shape,
+        &prepend_defs(&defs, &shape),
     )
 }
 
@@ -450,11 +454,13 @@ fn write_polygon(polygon: &Polygon) -> String {
         points.push_str(&format!("{},{}", fmt_num(point.x), fmt_num(point.y)));
     }
     let mut shape = format!("    <polygon points=\"{points}\"");
+    let mut defs = String::new();
     push_fill_stroke(
         &mut shape,
-        polygon.style.fill,
-        polygon.style.stroke,
-        polygon.style.stroke_width,
+        &mut defs,
+        polygon.props.id,
+        &polygon.style,
+        polygon.local_bounds(),
     );
     push_shape_line_style(&mut shape, &polygon.style);
     shape.push_str("/>\n");
@@ -463,7 +469,7 @@ fn write_polygon(polygon: &Polygon) -> String {
         &polygon.props.transform,
         polygon.style.opacity,
         &polygon.style.shadow,
-        &shape,
+        &prepend_defs(&defs, &shape),
     )
 }
 
@@ -617,33 +623,112 @@ fn shadow_filter(id: u64, transform: &Transform, shadow: &DropShadow) -> Option<
     ))
 }
 
+fn prepend_defs(defs: &str, shape: &str) -> String {
+    if defs.is_empty() {
+        return shape.to_string();
+    }
+    let mut body = String::from("    <defs>\n");
+    body.push_str(defs);
+    body.push_str("    </defs>\n");
+    body.push_str(shape);
+    body
+}
+
 fn push_fill_stroke(
     shape: &mut String,
-    fill: Option<Color>,
-    stroke: Option<Color>,
-    stroke_width: f32,
+    defs: &mut String,
+    id: ElementId,
+    style: &ElementStyle,
+    bounds: Rect,
 ) {
-    match fill {
-        Some(color) => {
-            shape.push_str(" fill=\"");
-            shape.push_str(&rgb_hex(color));
-            shape.push('"');
-            push_alpha_attr(shape, "fill-opacity", color.a);
+    if style.uses_gradient() {
+        let name = format!("fill-e{id}");
+        defs.push_str(&gradient_def(&name, style, bounds));
+        shape.push_str(" fill=\"url(#");
+        shape.push_str(&name);
+        shape.push_str(")\"");
+    } else {
+        match style.fill {
+            Some(color) => {
+                shape.push_str(" fill=\"");
+                shape.push_str(&rgb_hex(color));
+                shape.push('"');
+                push_alpha_attr(shape, "fill-opacity", color.a);
+            }
+            None => shape.push_str(" fill=\"none\""),
         }
-        None => shape.push_str(" fill=\"none\""),
     }
-    if let Some(color) = stroke {
-        if stroke_width > 0.0 {
+    if let Some(color) = style.stroke {
+        if style.stroke_width > 0.0 {
             shape.push_str(" stroke=\"");
             shape.push_str(&rgb_hex(color));
             shape.push_str("\" stroke-width=\"");
-            shape.push_str(&fmt_num(stroke_width));
+            shape.push_str(&fmt_num(style.stroke_width));
             shape.push('"');
             push_alpha_attr(shape, "stroke-opacity", color.a);
             return;
         }
     }
     shape.push_str(" stroke=\"none\"");
+}
+
+/// SVG 渐变。线性用 objectBoundingBox，和采样时把包围盒投到角度上是同一条轴。
+/// 径向用形状局部坐标（userSpaceOnUse），圆心和半径与 [`ElementStyle`] 相同。
+fn gradient_def(name: &str, style: &ElementStyle, bounds: Rect) -> String {
+    let mut body = String::new();
+    match style.fill_kind {
+        FillKind::Radial => {
+            let radius = style.radial_radius(bounds);
+            body.push_str(&format!(
+                "      <radialGradient id=\"{name}\" gradientUnits=\"userSpaceOnUse\" cx=\"{}\" cy=\"{}\" r=\"{}\">\n",
+                fmt_num(style.fill_center.x),
+                fmt_num(style.fill_center.y),
+                fmt_num(radius),
+            ));
+        }
+        FillKind::Linear | FillKind::Solid => {
+            let (x1, y1, x2, y2) = linear_svg_line(style.fill_angle);
+            body.push_str(&format!(
+                "      <linearGradient id=\"{name}\" gradientUnits=\"objectBoundingBox\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">\n",
+                fmt_num(x1),
+                fmt_num(y1),
+                fmt_num(x2),
+                fmt_num(y2),
+            ));
+        }
+    }
+    for stop in style.normalized_stops() {
+        body.push_str("        <stop offset=\"");
+        body.push_str(&fmt_num(stop.offset));
+        body.push_str("\" stop-color=\"");
+        body.push_str(&rgb_hex(stop.color));
+        body.push('"');
+        push_alpha_attr(&mut body, "stop-opacity", stop.color.a);
+        body.push_str("/>\n");
+    }
+    match style.fill_kind {
+        FillKind::Radial => body.push_str("      </radialGradient>\n"),
+        FillKind::Linear | FillKind::Solid => body.push_str("      </linearGradient>\n"),
+    }
+    body
+}
+
+/// 包围盒 `[0,1]²` 上，角度 0 为从左到右，90 为从上到下。
+fn linear_svg_line(angle_deg: f32) -> (f32, f32, f32, f32) {
+    let radians = if angle_deg.is_finite() {
+        angle_deg.to_radians()
+    } else {
+        0.0
+    };
+    let dx = radians.cos();
+    let dy = radians.sin();
+    let half = (dx.abs() + dy.abs()) * 0.5;
+    (
+        0.5 - dx * half,
+        0.5 - dy * half,
+        0.5 + dx * half,
+        0.5 + dy * half,
+    )
 }
 
 fn push_shape_line_style(shape: &mut String, style: &ElementStyle) {
@@ -866,7 +951,7 @@ fn fmt_num(value: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::{Element, ElementStyle};
+    use crate::element::{Element, ElementStyle, GradientStop};
     use crate::snap::GuideAxis;
     use infinitecanvas_math::Color;
     use std::f32::consts::FRAC_PI_2;
@@ -920,6 +1005,61 @@ mod tests {
         let star_svg = export_svg(&starred, false);
         assert!(star_svg.contains("<polygon points=\""));
         assert_ne!(svg, star_svg);
+    }
+
+    #[test]
+    fn svg_writes_linear_and_radial_gradients_and_keeps_solid_stroke() {
+        let mut scene = Scene::new();
+        let mut linear = Rectangle::new(1, Vec2::ZERO, Vec2::new(40.0, 20.0));
+        linear.style.fill_kind = FillKind::Linear;
+        linear.style.fill_angle = 90.0;
+        linear.style.stroke = Some(Color::BLACK);
+        linear.style.stroke_width = 2.0;
+        linear.style.fill_stops = vec![
+            GradientStop {
+                offset: 0.0,
+                color: Color::RED,
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::BLUE,
+            },
+        ];
+        scene.add_rect(linear);
+        let mut radial = Circle::new(2, Vec2::new(30.0, 0.0), 8.0);
+        radial.style.fill_kind = FillKind::Radial;
+        radial.style.fill_center = Vec2::new(1.0, 2.0);
+        radial.style.fill_radius = 6.0;
+        radial.style.fill_stops = vec![
+            GradientStop {
+                offset: 0.0,
+                color: Color::GREEN,
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::WHITE,
+            },
+        ];
+        scene.add_circle(radial);
+
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains("<linearGradient id=\"fill-e1\""));
+        assert!(svg.contains("gradientUnits=\"objectBoundingBox\""));
+        assert!(svg.contains("x1=\"0.5\" y1=\"0\" x2=\"0.5\" y2=\"1\""));
+        assert!(svg.contains("stop-color=\"#ff0000\""));
+        assert!(svg.contains("stop-color=\"#0000ff\""));
+        assert!(svg.contains("fill=\"url(#fill-e1)\""));
+        assert!(svg.contains("stroke=\"#000000\""));
+        assert!(svg.contains("<radialGradient id=\"fill-e2\""));
+        assert!(svg.contains("gradientUnits=\"userSpaceOnUse\""));
+        assert!(svg.contains("cx=\"1\" cy=\"2\" r=\"6\""));
+        assert!(svg.contains("fill=\"url(#fill-e2)\""));
+        assert!(svg.contains("stop-color=\"#00ff00\""));
+
+        scene.set_visible(1, false);
+        let hidden = export_svg(&scene, false);
+        assert!(!hidden.contains("fill-e1"));
+        assert!(hidden.contains("fill-e2"));
     }
 
     #[test]

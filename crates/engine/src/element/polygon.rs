@@ -14,11 +14,12 @@
 //!        └─ 包围盒：顶点的轴对齐盒
 //! ```
 
+use super::gradient::paint_gradient_fill;
 use super::stroke::{
     color_with_opacity, dash_is_solid, distance_to_polyline, stroke_centerline, stroke_styled,
     transform_vertices, StrokePaint,
 };
-use super::{Element, ElementId, ElementProps, ElementStyle};
+use super::{Element, ElementId, ElementProps, ElementStyle, FillKind};
 use infinitecanvas_math::{Color, Rect, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
@@ -297,17 +298,48 @@ impl Polygon {
         points
     }
 
-    /// 生成填充顶点（中心扇形）。没有填充色时返回空。
+    /// 生成填充顶点（中心扇形）。没有可绘制填充时返回空。
+    ///
+    /// 正多边形是凸的，线性渐变按色标切条，径向按射线铺色。星形是凹的：
+    /// 线性仍按每张中心三角形切条；径向保持原来的扇形，顶点色按渐变采样，
+    /// 三角形内部由 GPU 插值，是射线之间的近似。描边不走这条路径。
     pub fn generate_fill_vertices(&self) -> Vec<Vertex> {
-        let Some(fill) = self.style.fill else {
+        if !self.style.has_paintable_fill() {
             return Vec::new();
-        };
+        }
         let points = self.local_points();
         if points.len() < 3 {
             return Vec::new();
         }
-        let color = color_with_opacity(fill, self.style.opacity);
         let transform = &self.props.transform;
+        if self.style.uses_gradient() {
+            let bounds = self.local_bounds();
+            if self.kind == PolygonKind::Polygon {
+                return paint_gradient_fill(&points, &self.style, bounds, transform);
+            }
+            if self.style.fill_kind == FillKind::Linear {
+                let mut vertices = Vec::new();
+                for index in 0..points.len() {
+                    let triangle = [
+                        Vec2::ZERO,
+                        points[index],
+                        points[(index + 1) % points.len()],
+                    ];
+                    vertices.extend(paint_gradient_fill(
+                        &triangle,
+                        &self.style,
+                        bounds,
+                        transform,
+                    ));
+                }
+                return vertices;
+            }
+            return self.gradient_fan(&points, bounds);
+        }
+        let Some(fill) = self.style.fill else {
+            return Vec::new();
+        };
+        let color = color_with_opacity(fill, self.style.opacity);
         let center = transform.transform_point(Vec2::ZERO);
         let mut vertices = Vec::with_capacity(points.len() * 3);
         for index in 0..points.len() {
@@ -316,6 +348,41 @@ impl Polygon {
             vertices.push(Vertex::new(center.x, center.y, color));
             vertices.push(Vertex::new(a.x, a.y, color));
             vertices.push(Vertex::new(b.x, b.y, color));
+        }
+        vertices
+    }
+
+    /// 星形径向渐变：扇形几何不变，三个顶点分别取色。
+    fn gradient_fan(&self, points: &[Vec2], bounds: Rect) -> Vec<Vertex> {
+        let transform = &self.props.transform;
+        let center = transform.transform_point(Vec2::ZERO);
+        let center_color = color_with_opacity(
+            self.style
+                .sample_fill(Vec2::ZERO, bounds)
+                .unwrap_or(Color::BLACK),
+            self.style.opacity,
+        );
+        let mut vertices = Vec::with_capacity(points.len() * 3);
+        for index in 0..points.len() {
+            let local_a = points[index];
+            let local_b = points[(index + 1) % points.len()];
+            let a = transform.transform_point(local_a);
+            let b = transform.transform_point(local_b);
+            let color_a = color_with_opacity(
+                self.style
+                    .sample_fill(local_a, bounds)
+                    .unwrap_or(Color::BLACK),
+                self.style.opacity,
+            );
+            let color_b = color_with_opacity(
+                self.style
+                    .sample_fill(local_b, bounds)
+                    .unwrap_or(Color::BLACK),
+                self.style.opacity,
+            );
+            vertices.push(Vertex::new(center.x, center.y, center_color));
+            vertices.push(Vertex::new(a.x, a.y, color_a));
+            vertices.push(Vertex::new(b.x, b.y, color_b));
         }
         vertices
     }
@@ -418,7 +485,7 @@ impl Polygon {
             }
         }
         if self.contains_local(local) {
-            if let Some(color) = self.style.fill {
+            if let Some(color) = self.style.sample_fill(local, self.local_bounds()) {
                 return with_opacity(color, self.style.opacity);
             }
         }
@@ -509,6 +576,7 @@ fn with_opacity(color: Color, opacity: f32) -> Option<Color> {
 mod tests {
     use super::*;
     use crate::command::{AddElementCommand, CommandHistory, SetStyleCommand};
+    use crate::element::GradientStop;
     use crate::style::{selection_style, StyleField, StylePatch};
     use crate::vertex_cache::VertexCache;
     use crate::{AnyElement, Scene};
@@ -606,6 +674,49 @@ mod tests {
             .all(|vertex| vertex.color == [0.0, 0.0, 1.0, 1.0]));
         assert!(!stroked.stroke_ribbon_vertices().is_empty());
         assert!(stroked.generate_fill_vertices().is_empty());
+    }
+
+    #[test]
+    fn linear_hexagon_is_red_on_the_left_and_keeps_a_solid_stroke() {
+        let mut shape = Polygon::hexagon(1, Vec2::ZERO, 10.0);
+        shape.style.fill_kind = FillKind::Linear;
+        shape.style.stroke = Some(Color::GREEN);
+        shape.style.stroke_width = 2.0;
+        shape.style.fill_stops = vec![
+            GradientStop {
+                offset: 0.0,
+                color: Color::RED,
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::BLUE,
+            },
+        ];
+        let vertices = shape.generate_fill_vertices();
+        assert!(vertices.len() >= 3);
+        assert!(vertices.len().is_multiple_of(3));
+        let left = vertices
+            .iter()
+            .min_by(|a, b| a.position[0].total_cmp(&b.position[0]))
+            .unwrap();
+        let right = vertices
+            .iter()
+            .max_by(|a, b| a.position[0].total_cmp(&b.position[0]))
+            .unwrap();
+        assert!(
+            left.color[0] > 0.9 && left.color[2] < 0.1,
+            "{:?}",
+            left.color
+        );
+        assert!(
+            right.color[2] > 0.9 && right.color[0] < 0.1,
+            "{:?}",
+            right.color
+        );
+        assert!(shape
+            .generate_stroke_vertices()
+            .iter()
+            .all(|vertex| vertex.color == [0.0, 1.0, 0.0, 1.0]));
     }
 
     #[test]

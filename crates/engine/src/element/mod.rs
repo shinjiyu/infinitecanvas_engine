@@ -2,6 +2,7 @@
 //!
 //! 提供无限画布上的各种图形元素
 pub mod circle;
+mod gradient;
 pub mod group;
 pub mod image;
 pub mod line;
@@ -13,6 +14,7 @@ mod stroke;
 pub mod text;
 
 pub use circle::Circle;
+pub use gradient::{FillKind, GradientStop};
 pub use group::Group;
 pub use image::Image;
 pub use line::Line;
@@ -53,6 +55,18 @@ fn cap_is_butt(cap: &StrokeCap) -> bool {
 
 fn join_is_miter(join: &StrokeJoin) -> bool {
     *join == StrokeJoin::Miter
+}
+
+fn fill_kind_is_solid(kind: &FillKind) -> bool {
+    *kind == FillKind::Solid
+}
+
+fn is_zero_f32(value: &f32) -> bool {
+    *value == 0.0
+}
+
+fn is_zero_vec2(value: &Vec2) -> bool {
+    value.x == 0.0 && value.y == 0.0
 }
 
 /// 描边端点。
@@ -267,6 +281,21 @@ pub struct ElementStyle {
     /// 投影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
     #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
     pub shadow: DropShadow,
+    /// 填充种类。缺省纯色。旧文件没有这个字段时仍是纯色。
+    #[serde(default, skip_serializing_if = "fill_kind_is_solid")]
+    pub fill_kind: FillKind,
+    /// 渐变色标。纯色忽略它。线性或径向但色标为空时退回 [`Self::fill`]。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fill_stops: Vec<GradientStop>,
+    /// 线性渐变角度，单位度。0 沿局部 +X（从左到右），90 沿局部 +Y（从上到下）。
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub fill_angle: f32,
+    /// 径向渐变中心，局部坐标。原点是元素自身的中心。
+    #[serde(default, skip_serializing_if = "is_zero_vec2")]
+    pub fill_center: Vec2,
+    /// 径向渐变半径，局部单位。0 表示用局部包围盒对角线的一半。
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub fill_radius: f32,
 }
 
 impl ElementStyle {
@@ -281,6 +310,11 @@ impl ElementStyle {
             stroke_cap: StrokeCap::Butt,
             stroke_join: StrokeJoin::Miter,
             shadow: DropShadow::default(),
+            fill_kind: FillKind::Solid,
+            fill_stops: Vec::new(),
+            fill_angle: 0.0,
+            fill_center: Vec2::ZERO,
+            fill_radius: 0.0,
         }
     }
 

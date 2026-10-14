@@ -2,7 +2,7 @@
  * InfiniteCanvas 首页 Demo。
  *
  * 把选择、直线、画笔、压力测试、纹理和小地图放在同一张画布上。
- * 选中元素后右侧属性面板可改填充、描边、线宽、线型、线帽、线结和不透明度，矩形还可改圆角，文本还可改字号和颜色。文本描边暂不支持线型。
+ * 选中元素后右侧属性面板可改填充（纯色、线性或径向渐变）、描边、线宽、线型、线帽、线结和不透明度，矩形还可改圆角，文本还可改字号和颜色。文本描边暂不支持线型。渐变不另设快捷键。
  * 键盘操作只读 `www/shortcuts.js`：方向键按世界单位微调（Shift 为 10 倍），
  * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。输入框、下拉框内不触发。
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
@@ -47,6 +47,7 @@ import {
 } from './context-menu.js';
 import { rasterizeText } from './text-raster.js';
 import { SVG_IMPORT_DEFAULT_ANCHOR, isRasterImageFile, isSvgFile } from './svg-drop.js';
+import { fillEnabledPatch, fillKindPatch, insertStop, normalizeStops } from './gradient-fill.js';
 import {
   SHORTCUTS,
   escapeAction,
@@ -95,6 +96,8 @@ let textEditorOpening = false;
 let layerPanel = null;
 /** @type {string | null} 正在拖动的属性控件，避免每帧把滑块写回去 */
 let activeStyleControl = null;
+/** 上次写进色标列表的内容。拖动色标时不重建 DOM。 */
+let gradientStopsSignature = '';
 const MINIMAP_W = 200;
 const MINIMAP_H = 150;
 const MINIMAP_PAD = 8;
@@ -1576,6 +1579,7 @@ function syncPropertyPanel(engine) {
   syncCornerRadius(style);
   syncPolygonFields(style);
   syncShadow(style);
+  syncGradient(style);
 
   const textFields = document.getElementById('prop-text-fields');
   if (textFields) textFields.hidden = !style.hasText;
@@ -1769,7 +1773,7 @@ function bindPropertyPanel(engine) {
     if (!(input instanceof HTMLInputElement)) return;
     const color = document.getElementById('prop-fill');
     const hex = color instanceof HTMLInputElement ? color.value : '#000000';
-    engine.set_selection_style(input.checked ? { fill: hex } : { fill: null });
+    engine.set_selection_style(fillEnabledPatch(input.checked, hex));
     scheduleAutosave(engine);
     syncPropertyPanel(engine);
   });
@@ -1810,6 +1814,219 @@ function bindPropertyPanel(engine) {
   });
   bindChoice('prop-stroke-cap', 'strokeCap', (value) => value);
   bindChoice('prop-stroke-join', 'strokeJoin', (value) => value);
+  bindGradient(engine);
+}
+
+/**
+ * 填充类型和色标。滑块松手仍是一条 SetStyle。不新增快捷键。
+ *
+ * @param {Record<string, unknown>} style
+ */
+function syncGradient(style) {
+  const section = document.getElementById('prop-gradient');
+  if (section) section.hidden = !style.hasShape;
+  const kindMixed = document.getElementById('prop-fill-kind-mixed');
+  if (kindMixed) kindMixed.hidden = !style.fillKindMixed;
+  const kind = document.getElementById('prop-fill-kind');
+  if (kind instanceof HTMLSelectElement && activeStyleControl !== 'prop-fill-kind') {
+    kind.value = style.fillKindMixed || typeof style.fillKind !== 'string' ? '' : style.fillKind;
+  }
+  const uniformKind = !style.fillKindMixed && (style.fillKind === 'linear' || style.fillKind === 'radial');
+  const color = document.getElementById('prop-fill');
+  if (color instanceof HTMLInputElement) color.hidden = uniformKind;
+
+  const angleRow = document.getElementById('prop-fill-angle-row');
+  if (angleRow) angleRow.hidden = style.fillKind !== 'linear' || Boolean(style.fillKindMixed);
+  const angleMixed = document.getElementById('prop-fill-angle-mixed');
+  if (angleMixed) angleMixed.hidden = !style.fillAngleMixed;
+  const angle = document.getElementById('prop-fill-angle');
+  if (
+    angle instanceof HTMLInputElement &&
+    activeStyleControl !== 'prop-fill-angle' &&
+    typeof style.fillAngle === 'number'
+  ) {
+    angle.value = String(style.fillAngle);
+    setText('prop-fill-angle-label', `${Math.round(style.fillAngle)}°`);
+  }
+
+  const radiusRow = document.getElementById('prop-fill-radius-row');
+  if (radiusRow) radiusRow.hidden = style.fillKind !== 'radial' || Boolean(style.fillKindMixed);
+  const radiusMixed = document.getElementById('prop-fill-radius-mixed');
+  if (radiusMixed) radiusMixed.hidden = !style.fillRadiusMixed;
+  const radius = document.getElementById('prop-fill-radius');
+  if (
+    radius instanceof HTMLInputElement &&
+    activeStyleControl !== 'prop-fill-radius' &&
+    typeof style.fillRadius === 'number'
+  ) {
+    radius.value = String(style.fillRadius);
+  }
+
+  const centerRow = document.getElementById('prop-fill-center-row');
+  if (centerRow) centerRow.hidden = style.fillKind !== 'radial' || Boolean(style.fillKindMixed);
+  const centerMixed = document.getElementById('prop-fill-center-mixed');
+  if (centerMixed) centerMixed.hidden = !style.fillCenterMixed;
+  const center = style.fillCenter;
+  const editingCenter =
+    activeStyleControl === 'prop-fill-center-x' || activeStyleControl === 'prop-fill-center-y';
+  if (!editingCenter && center && typeof center === 'object') {
+    const point = /** @type {{ x?: unknown, y?: unknown }} */ (center);
+    const x = document.getElementById('prop-fill-center-x');
+    const y = document.getElementById('prop-fill-center-y');
+    if (x instanceof HTMLInputElement && typeof point.x === 'number') x.value = String(point.x);
+    if (y instanceof HTMLInputElement && typeof point.y === 'number') y.value = String(point.y);
+  }
+
+  const stopsMixed = document.getElementById('prop-fill-stops-mixed');
+  if (stopsMixed) stopsMixed.hidden = !style.fillStopsMixed;
+  const stopsSection = document.getElementById('prop-gradient-stops');
+  if (stopsSection) stopsSection.hidden = !uniformKind;
+  syncFillStops(style, uniformKind);
+}
+
+/**
+ * @param {Record<string, unknown>} style
+ * @param {boolean} visible
+ */
+function syncFillStops(style, visible) {
+  const host = document.getElementById('prop-fill-stops');
+  const add = document.getElementById('prop-fill-stop-add');
+  if (!(host instanceof HTMLElement)) return;
+  const editing = typeof activeStyleControl === 'string' && activeStyleControl.startsWith('prop-stop-');
+  if (!visible) {
+    host.replaceChildren();
+    gradientStopsSignature = '';
+    return;
+  }
+  if (editing) return;
+  const stops = normalizeStops(style.fillStops);
+  const signature = JSON.stringify(stops);
+  if (add instanceof HTMLButtonElement) add.disabled = stops.length >= 8;
+  if (signature === gradientStopsSignature && host.childElementCount > 0) return;
+  gradientStopsSignature = signature;
+  host.replaceChildren();
+  stops.forEach((stop, index) => {
+    const row = document.createElement('div');
+    row.className = 'stop-row';
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.id = `prop-stop-${index}-color`;
+    color.value = stop.color;
+    color.setAttribute('aria-label', `色标 ${index + 1} 颜色`);
+    const offset = document.createElement('input');
+    offset.type = 'number';
+    offset.min = '0';
+    offset.max = '1';
+    offset.step = '0.01';
+    offset.id = `prop-stop-${index}-offset`;
+    offset.value = String(stop.offset);
+    offset.setAttribute('aria-label', `色标 ${index + 1} 位置`);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.dataset.removeStop = String(index);
+    remove.textContent = '删';
+    remove.disabled = stops.length <= 2;
+    remove.setAttribute('aria-label', `删除色标 ${index + 1}`);
+    row.append(color, offset, remove);
+    host.append(row);
+  });
+}
+
+/**
+ * @returns {{ offset: number, color: string }[]}
+ */
+function readStopsFromDom() {
+  return [...document.querySelectorAll('#prop-fill-stops .stop-row')].map((row) => {
+    const color = row.querySelector('input[type="color"]');
+    const offset = row.querySelector('input[type="number"]');
+    return {
+      offset: offset instanceof HTMLInputElement ? Number(offset.value) : 0,
+      color: color instanceof HTMLInputElement ? color.value : '#000000',
+    };
+  });
+}
+
+/**
+ * @param {WasmCanvas} engine
+ */
+function bindGradient(engine) {
+  const kind = document.getElementById('prop-fill-kind');
+  if (kind instanceof HTMLSelectElement) {
+    kind.addEventListener('change', () => {
+      if (!kind.value || typeof engine.get_selection_style !== 'function') return;
+      const patch = fillKindPatch(kind.value, engine.get_selection_style());
+      if (!patch) return;
+      engine.set_selection_style(patch);
+      scheduleAutosave(engine);
+      syncPropertyPanel(engine);
+    });
+  }
+
+  const angle = document.getElementById('prop-fill-angle');
+  if (angle instanceof HTMLInputElement) {
+    angle.addEventListener('input', () => {
+      activeStyleControl = 'prop-fill-angle';
+      setText('prop-fill-angle-label', `${Math.round(Number(angle.value))}°`);
+      engine.preview_selection_style({ fillAngle: Number(angle.value) });
+    });
+    angle.addEventListener('change', () => finishStyleEdit(engine));
+  }
+
+  const radius = document.getElementById('prop-fill-radius');
+  if (radius instanceof HTMLInputElement) {
+    radius.addEventListener('input', () => {
+      activeStyleControl = 'prop-fill-radius';
+      engine.preview_selection_style({ fillRadius: Number(radius.value) });
+    });
+    radius.addEventListener('change', () => finishStyleEdit(engine));
+  }
+
+  const previewCenter = (source) => {
+    const x = document.getElementById('prop-fill-center-x');
+    const y = document.getElementById('prop-fill-center-y');
+    if (!(x instanceof HTMLInputElement) || !(y instanceof HTMLInputElement)) return;
+    activeStyleControl = source;
+    engine.preview_selection_style({
+      fillCenter: { x: Number(x.value), y: Number(y.value) },
+    });
+  };
+  for (const id of ['prop-fill-center-x', 'prop-fill-center-y']) {
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement)) continue;
+    input.addEventListener('input', () => previewCenter(id));
+    input.addEventListener('change', () => finishStyleEdit(engine));
+  }
+
+  const host = document.getElementById('prop-fill-stops');
+  if (host) {
+    host.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.id) return;
+      activeStyleControl = target.id;
+      engine.preview_selection_style({ fillStops: readStopsFromDom() });
+    });
+    host.addEventListener('change', () => finishStyleEdit(engine));
+    host.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const button = target.closest('[data-remove-stop]');
+      if (!(button instanceof HTMLButtonElement)) return;
+      const index = Number(button.dataset.removeStop);
+      const stops = readStopsFromDom().filter((_, stopIndex) => stopIndex !== index);
+      if (stops.length < 2) return;
+      engine.set_selection_style({ fillStops: stops });
+      scheduleAutosave(engine);
+      syncPropertyPanel(engine);
+    });
+  }
+
+  document.getElementById('prop-fill-stop-add')?.addEventListener('click', () => {
+    const stops = insertStop(readStopsFromDom());
+    if (stops.length < 2) return;
+    engine.set_selection_style({ fillStops: stops });
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+  });
 }
 
 /**
