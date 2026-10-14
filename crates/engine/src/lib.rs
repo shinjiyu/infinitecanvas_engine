@@ -19,6 +19,7 @@
 
 pub mod align;
 pub mod asset;
+pub mod boolean;
 pub mod camera_fit;
 pub mod command;
 pub mod element;
@@ -50,6 +51,7 @@ pub use align::{
     DistributeElementsCommand,
 };
 pub use asset::{fitted_size, AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
+pub use boolean::{apply_boolean, boolean_targets, BooleanElementsCommand, BooleanOp};
 pub use camera_fit::{
     camera_for_bounds, selection_content_bounds, zoom_viewport_to_scene,
     zoom_viewport_to_selection, CameraPose, DEFAULT_FIT_PADDING,
@@ -64,7 +66,7 @@ pub use command::{
     StackOrderAction, TransformElementsCommand, UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{
-    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, Frame,
+    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, FillShape, Frame,
     GradientStop, Group, Image, Line, Path, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin,
     Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };

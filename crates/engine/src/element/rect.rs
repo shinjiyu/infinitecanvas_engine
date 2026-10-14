@@ -118,6 +118,50 @@ impl Rectangle {
         Self::clamp_radius(self.size, self.corner_radius)
     }
 
+    /// 局部闭合轮廓，不重复首点。
+    ///
+    /// 直角是四个角，顺序为左上、右上、右下、左下（屏幕 Y 向下时看起来是顺时针）。
+    /// 圆角沿同一方向采样。宽或高不是有限正数时返回空，布尔运算会跳过这个矩形。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::Rectangle;
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let rect = Rectangle::new(1, Vec2::ZERO, Vec2::new(20.0, 10.0));
+    /// assert_eq!(rect.local_outline().len(), 4);
+    /// ```
+    pub fn local_outline(&self) -> Vec<Vec2> {
+        let width = self.size.x.abs();
+        let height = self.size.y.abs();
+        if !width.is_finite()
+            || !height.is_finite()
+            || width <= f32::EPSILON
+            || height <= f32::EPSILON
+        {
+            return Vec::new();
+        }
+        let radius = self.effective_corner_radius();
+        if radius > 0.0 {
+            let mut points = self.rounded_outline(radius);
+            if let (Some(first), Some(last)) = (points.first().copied(), points.last().copied()) {
+                if points.len() >= 2 && (first - last).length() <= 1.0e-4 {
+                    points.pop();
+                }
+            }
+            points
+        } else {
+            let half_w = width * 0.5;
+            let half_h = height * 0.5;
+            vec![
+                Vec2::new(-half_w, -half_h),
+                Vec2::new(half_w, -half_h),
+                Vec2::new(half_w, half_h),
+                Vec2::new(-half_w, half_h),
+            ]
+        }
+    }
+
     /// 获取中心点（局部坐标系）
     pub fn center(&self) -> Vec2 {
         Vec2::ZERO

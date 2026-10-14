@@ -19,6 +19,8 @@ web-time = "1.1.0"
 font8x8 = "0.3.1"
 roxmltree = "0.21.1"
 svgtypes = "0.16.1"
+i_overlay = "9"
+earcutr = "0.4"
 
 [dev-dependencies]
 jpeg-encoder = "0.6"

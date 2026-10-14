@@ -150,10 +150,17 @@
 
     .align-grid button,
     .row.align-distribute button,
-    .orient-grid button {
+    .orient-grid button,
+    .boolean-grid button {
       padding: 0.35rem 0.2rem;
       font-size: 0.72rem;
       text-align: center;
+    }
+
+    .boolean-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.35rem;
     }
 
     .orient-grid {
@@ -793,6 +800,15 @@
           </div>
         </div>
         <div class="group">
+          <p class="group-label">布尔</p>
+          <div class="boolean-grid">
+            <button type="button" data-boolean="union" disabled title="并集：合并选中的闭合形状">并集</button>
+            <button type="button" data-boolean="subtract" disabled title="相减：最上层减去下层（前 − 后）">相减</button>
+            <button type="button" data-boolean="intersect" disabled title="交集：只保留重叠区域">交集</button>
+            <button type="button" data-boolean="xor" disabled title="异或：去掉重叠区域">异或</button>
+          </div>
+        </div>
+        <div class="group">
           <p class="group-label">翻转 / 旋转</p>
           <div class="orient-grid">
             <button type="button" data-flip="horizontal" disabled title="水平翻转（Shift+H）">水平翻转</button>
@@ -838,7 +854,7 @@
           <button type="button" id="rulers-btn" class="active">标尺参考线 <kbd>G</kbd></button>
         </div>
         <button type="button" id="shortcuts-btn">快捷键 <kbd>?</kbd></button>
-        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后画布右侧可改填充（纯色、线性或径向渐变）、描边、线宽、线型、线帽、线结、不透明度、矩形圆角和投影（偏移、模糊、颜色、浓度），文本还可以改字号和颜色（文本描边暂不支持线型），图片只改不透明度和投影；滑块松手只记一条撤销。选中至少两个元素后，工具栏或属性面板的对齐和分布按钮可用，只改位置，Ctrl+Z 回退。拖动手柄缩放（Shift 等比例；图片默认保持宽高比，Shift 自由缩放）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。选中后 Shift+H / Shift+V 水平或垂直翻转，Shift+R 顺时针转 90°，Shift+Alt+R 逆时针转 90°；工具栏和属性面板有同样的按钮，每次一条撤销，图片翻转不改显示宽高比。把 PNG/JPG 拖进画布。Ctrl+V：剪贴板里有图片时粘贴图片，否则粘贴元素 JSON（指针在画布内时以指针为中心，否则每次 +10）。Ctrl+C 复制，Ctrl+D 原地克隆，三者都可撤销。滚轮以指针为中心缩放。Ctrl+= 或 Ctrl++ 放大，Ctrl+- 缩小，Ctrl+0 回到 100%，视口中心不动，页脚显示百分比；焦点在输入框或按钮上时这三组键留给浏览器。按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。N 拖拽放置正多边形（默认六边形），K 放置五角星。F 拖拽放置画板；双击画板空白处或在属性面板改名称。子元素优先选中，按住 Alt 选中画板。画布上不裁剪子元素，导出画板时裁到画板边界。选中后可改边数或角数，星形还可改内径比；创建和边数修改都能 Ctrl+Z 撤销。I 是吸管：单击最上层可见元素，把它的填充和描边写到当前选区，Ctrl+Z 撤销。不带 Shift、Ctrl 或 Alt，因此不占用 V/R/O/L/P/T/H/N/K/F/G。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。方向键微调选中元素，Shift 为 10 倍。] 前移，[ 后移，Ctrl+] 置顶，Ctrl+[ 置底。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件，有像素的图片会嵌成 data URL。「导入 SVG」或把 .svg 拖进画布，viewBox 原点落在指针的世界坐标；指针还没进入画布时落在 (24, 24)。一次导入是一条撤销。PNG/JPG 拖放和粘贴不变。SVG 里的 polygon 变成自由路径，不是正多边形或星形。右侧图层面板可点选、拖拽排序或拖进分组，眼睛和锁控制显隐与锁定，置顶 / 置底 / 前移 / 后移可改层级。在画布上右键：空白处可粘贴、全选、缩放到适合；选中元素上可复制、粘贴、克隆、删除、成组和调整层级。Esc 或点击菜单外关闭，这一下不会开始平移或框选。M 显示或隐藏右下角小地图；点击小地图跳转，拖拽视口框平移，滚轮不缩放画布。从顶边或左边标尺拖出参考线，拖动改位置，拖回标尺、双击或 Delete 删除。拖拽和缩放时在吸附阈值内贴齐参考线。G 显示或隐藏标尺和参考线。导出 PNG / SVG 默认不含参考线。Ctrl+' 显示或隐藏背景网格，选择记在本地。Shift+1 适应全部，Shift+2 缩放到选中，只移动相机。Ctrl+L 切换锁定，Ctrl+Shift+H 切换隐藏。按 ? 查看全部快捷键。</p>
+        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后画布右侧可改填充（纯色、线性或径向渐变）、描边、线宽、线型、线帽、线结、不透明度、矩形圆角和投影（偏移、模糊、颜色、浓度），文本还可以改字号和颜色（文本描边暂不支持线型），图片只改不透明度和投影；滑块松手只记一条撤销。选中至少两个元素后，工具栏或属性面板的对齐和分布按钮可用，只改位置，Ctrl+Z 回退。拖动手柄缩放（Shift 等比例；图片默认保持宽高比，Shift 自由缩放）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。选中后 Shift+H / Shift+V 水平或垂直翻转，Shift+R 顺时针转 90°，Shift+Alt+R 逆时针转 90°；工具栏和属性面板有同样的按钮，每次一条撤销，图片翻转不改显示宽高比。把 PNG/JPG 拖进画布。Ctrl+V：剪贴板里有图片时粘贴图片，否则粘贴元素 JSON（指针在画布内时以指针为中心，否则每次 +10）。Ctrl+C 复制，Ctrl+D 原地克隆，三者都可撤销。滚轮以指针为中心缩放。Ctrl+= 或 Ctrl++ 放大，Ctrl+- 缩小，Ctrl+0 回到 100%，视口中心不动，页脚显示百分比；焦点在输入框或按钮上时这三组键留给浏览器。按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。N 拖拽放置正多边形（默认六边形），K 放置五角星。F 拖拽放置画板；双击画板空白处或在属性面板改名称。子元素优先选中，按住 Alt 选中画板。画布上不裁剪子元素，导出画板时裁到画板边界。选中后可改边数或角数，星形还可改内径比；创建和边数修改都能 Ctrl+Z 撤销。I 是吸管：单击最上层可见元素，把它的填充和描边写到当前选区，Ctrl+Z 撤销。不带 Shift、Ctrl 或 Alt，因此不占用 V/R/O/L/P/T/H/N/K/F/G。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。方向键微调选中元素，Shift 为 10 倍。] 前移，[ 后移，Ctrl+] 置顶，Ctrl+[ 置底。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件，有像素的图片会嵌成 data URL。「导入 SVG」或把 .svg 拖进画布，viewBox 原点落在指针的世界坐标；指针还没进入画布时落在 (24, 24)。一次导入是一条撤销。PNG/JPG 拖放和粘贴不变。SVG 里的 polygon 变成自由路径，不是正多边形或星形。右侧图层面板可点选、拖拽排序或拖进分组，眼睛和锁控制显隐与锁定，置顶 / 置底 / 前移 / 后移可改层级。在画布上右键：空白处可粘贴、全选、缩放到适合；选中元素上可复制、粘贴、克隆、删除、成组和调整层级。Esc 或点击菜单外关闭，这一下不会开始平移或框选。M 显示或隐藏右下角小地图；点击小地图跳转，拖拽视口框平移，滚轮不缩放画布。从顶边或左边标尺拖出参考线，拖动改位置，拖回标尺、双击或 Delete 删除。拖拽和缩放时在吸附阈值内贴齐参考线。G 显示或隐藏标尺和参考线。导出 PNG / SVG 默认不含参考线。Ctrl+' 显示或隐藏背景网格，选择记在本地。Shift+1 适应全部，Shift+2 缩放到选中，只移动相机。Ctrl+L 切换锁定，Ctrl+Shift+H 切换隐藏。选中至少两个未锁定的矩形、圆、多边形或闭合路径时，工具栏和属性面板的并集、相减、交集、异或可用。相减是最上层减去下层。结果是一条路径，替换这些形状，Ctrl+Z 一次还原。画板里的结果仍是叶子路径，不改变画板尺寸。没有新的快捷键。按 ? 查看全部快捷键。</p>
       </aside>
       <div id="stage">
         <canvas id="canvas" width="960" height="640"></canvas>
@@ -863,6 +879,12 @@
           <div class="row align-distribute">
             <button type="button" data-distribute="horizontal" disabled title="水平均匀分布">水平分布</button>
             <button type="button" data-distribute="vertical" disabled title="垂直均匀分布">垂直分布</button>
+          </div>
+          <div class="boolean-grid">
+            <button type="button" data-boolean="union" disabled title="并集：合并选中的闭合形状">并集</button>
+            <button type="button" data-boolean="subtract" disabled title="相减：最上层减去下层（前 − 后）">相减</button>
+            <button type="button" data-boolean="intersect" disabled title="交集：只保留重叠区域">交集</button>
+            <button type="button" data-boolean="xor" disabled title="异或：去掉重叠区域">异或</button>
           </div>
           <div class="orient-grid">
             <button type="button" data-flip="horizontal" disabled title="水平翻转（Shift+H）">水平翻转</button>

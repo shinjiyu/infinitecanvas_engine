@@ -21,6 +21,24 @@ StylePatch ── SetStyleCommand ── 一条历史
         └─ 描边仍是纯色
 ```
 
+## Issue #79: 布尔运算 Union / Subtract / Intersect / XOR
+
+- [x] `BooleanOp`：并集、相减（最上层 − 其余）、交集、异或。可运算叶子少于 2 个不入栈
+- [x] 矩形、圆、多边形、已有填充路径，以及首尾闭合的自由路径。锁定、隐藏、组、画板、直线、文本、图片跳过
+- [x] 结果是一条叶子 `Path`（`shapes`：外轮廓 + 孔），替换操作数。样式（含投影，以及 `serde(default)` 的渐变字段）和 `z_index` 取最上层。`shapes` 为 `serde(default)`，旧文档仍有效
+- [x] 一条 `BooleanElementsCommand`。`mark_dirty`。组或画板里的结果留在原父节点，不改画板尺寸，不重写其他元素的 `z_index`。Ctrl+Z 一次还原
+- [x] WASM：`boolean_selection` / `boolean_selection_ready`。Demo 工具栏和属性面板四个按钮，无新快捷键
+
+```text
+选中 ≥2 个闭合叶子
+        │  跳过锁定 / 隐藏 / 画板 / 不支持
+        ▼
+i_overlay ── Union / Subtract(前−后) / Intersect / XOR
+        │
+        ▼
+一条叶子 Path.shapes ── 替换操作数 ── 一条历史
+```
+
 ## Issue #74: 画板 / Frame
 
 - [x] `Frame`：名称、尺寸、样式、子元素。JSON `type: frame`，字段 `serde(default)`。旧文档仍有效
