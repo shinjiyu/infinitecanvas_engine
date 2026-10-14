@@ -27,6 +27,16 @@
                                     └─ 文本：字号/颜色/描边 → 重新光栅
 ```
 
+## Issue #33: 复制 / 粘贴 / 克隆
+
+- [x] `Scene::duplicate`：新 ID、样式和变换保留、z 整块高于现有元素
+- [x] 组子树一起复制，`parent` / `children` 按新 ID 重映射；子元素克隆仍挂在原组下
+- [x] 剪贴板复用 version 1 JSON；`paste_json` 可把包围盒中心对准焦点
+- [x] `DuplicateElementsCommand` / `PasteElementsCommand`：撤销删除，重做按原 ID 恢复
+- [x] 新元素进入 `Scene::mark_dirty`
+- [x] Demo：Ctrl+C / Ctrl+V / Ctrl+D；系统剪贴板失败退回内存，不抛错
+- [x] #26 快捷键表尚未合并，三个快捷键写在 `www/main.js`
+
 ---
 
 ## Issue #4: 文本元素

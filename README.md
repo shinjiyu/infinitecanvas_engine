@@ -39,7 +39,7 @@ Only behavior that exists in this repository is listed here.
 - Hit testing walks the flat scene from the highest z-index and inverse-transforms rotation and scale. It does not consult the QuadTree.
 - Command history for add, remove, move, transform, and text content edits, exposed as `undo` and `redo`.
 - Tools: Select, Line, Pen, Rectangle, Circle, Text, Pan, and a temporary Hand tool (`push_hand_tool` / `pop_temporary_tool`).
-- `www/index.html` binds V / L / P / R / O / H / T / M, Space, and Ctrl+Z / Ctrl+Y / Ctrl+S / Ctrl+O. Those shortcuts live in the page script. The WASM dispatcher applies pointer events; keyboard and wheel events are queued and otherwise ignored.
+- `www/index.html` binds V / L / P / R / O / H / T / M, Space, Ctrl+C / Ctrl+V / Ctrl+D, and Ctrl+Z / Ctrl+Y / Ctrl+S / Ctrl+O. Those shortcuts live in the page script. The WASM dispatcher applies pointer events; keyboard and wheel events are queued and otherwise ignored. Copy writes the version-1 element JSON to `navigator.clipboard` and falls back to an in-memory clipboard if that permission fails.
 - The landing page draws a 200×150 minimap in the bottom-right (`M` toggles it). `scene_bounds` unions visible leaves; `minimap_element_rects` maps those boxes into the thumbnail and caches them on `minimap_epoch` (`Scene::geometry_epoch`). Click calls `minimap_to_world` then `set_camera_center`. Dragging the viewport box pans live. Pan and zoom of the main canvas only refresh `minimap_viewport_rect`. A wheel event over the minimap does not zoom the canvas.
 
 ### Scene and math

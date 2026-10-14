@@ -401,6 +401,19 @@ impl Text {
         self.editing = false;
     }
 
+    /// 丢掉纹理和编辑状态，保留文案、字号和对齐。
+    ///
+    /// 克隆出来的文本必须重新光栅化。纹理 ID 含着原来的元素 ID，
+    /// 继续共用会在原文本删除或改字时把副本的字形一起释放。
+    pub(crate) fn detach_raster_for_clone(&mut self) {
+        self.texture_id = None;
+        self.raster_lod = None;
+        self.raster_revision = 0;
+        self.pending_lod = None;
+        self.pending_revision = 0;
+        self.editing = false;
+    }
+
     /// 世界坐标处的 PNG 颜色。
     ///
     /// 屏幕上的字形在 Canvas2D 纹理里，不进场景文件。这里用 `font8x8` 的 8×8 点阵

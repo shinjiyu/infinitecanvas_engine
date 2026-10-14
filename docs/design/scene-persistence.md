@@ -46,3 +46,18 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 | group | 不画几何。子孙已是世界变换，矩阵不再乘组变换。绘制顺序里连成一段时写成不带 `transform` 的 `<g id="eN">`。隐藏组藏住子孙 |
 
 变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。Y 轴向下。
+
+## 剪贴板
+
+复制和粘贴复用上面的 version 1 文档，不另起格式。
+
+```text
+选中根 ── Scene::copy_elements_json ──▶ { version, next_id, elements[] }
+                                              │
+                                              ▼
+                                    Scene::paste_json（新 ID）
+```
+
+`copy_elements_json` 只写入选中根和子孙。指向文档外的 `parent` 变成 `null`，组的 `children` 只留文档内的 ID。`paste_json` 为每个元素分配新 ID，并按原来的 z 顺序把整块放到当前最大 z 之上。`focus` 有值时，叶子包围盒中心先对准该世界坐标，再加上 `offset`。
+
+`Scene::duplicate` 在同一场景里克隆。父组不在副本里时，新根仍挂在那个组下。Ctrl+C / Ctrl+V / Ctrl+D 分别走 `PasteElementsCommand` 和 `DuplicateElementsCommand`，撤销删掉新元素，重做按原 ID 插回。新元素调用 `Scene::mark_dirty`。

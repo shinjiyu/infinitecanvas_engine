@@ -182,6 +182,19 @@ export class InfiniteCanvas {
      */
     commit_text_raster(id: bigint, revision: number, lod: number, texture_id: string, world_width: number, world_height: number): boolean;
     /**
+     * 把当前选中元素写成剪贴板 JSON。
+     *
+     * 格式与 [`export_json`](Self::export_json) 相同，只含选中根和它们的子孙。
+     * 组会带上整棵子树，父子 ID 仍指向这份文档里的元素。没有选中元素时返回空字符串。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const json = canvas.copy_selection_json();
+     * await navigator.clipboard.writeText(json);
+     * ```
+     */
+    copy_selection_json(): string;
+    /**
      * 指针下的光标。选择工具命中缩放/旋转手柄时返回对应光标。
      *
      * # 参数
@@ -191,6 +204,19 @@ export class InfiniteCanvas {
     debug_clear_events(): void;
     debug_pending_event_count(): number;
     deselect_element(element_id: bigint): boolean;
+    /**
+     * 原地克隆当前选中元素，并让新元素成为选中。
+     *
+     * 走 [`DuplicateElementsCommand`]，Ctrl+Z 会删掉副本，Ctrl+Y 按原 ID 恢复。
+     * 新元素标脏，下一帧顶点缓存会写上它们。组会克隆整棵子树。
+     *
+     * # 参数
+     * - `dx`, `dy`: 世界位移。Demo 的 Ctrl+D 使用 `(10, 10)`
+     *
+     * # 返回
+     * 新根元素的 ID。没有选中元素时为空数组。
+     */
+    duplicate_selection(dx: number, dy: number): Array<any>;
     /**
      * 把元素放进组，世界坐标不变。
      */
@@ -524,6 +550,25 @@ export class InfiniteCanvas {
      */
     pan(dx: number, dy: number): void;
     /**
+     * 把剪贴板 JSON 粘贴进场景，并选中新根。
+     *
+     * `focus_x` / `focus_y` 都给出时，叶子包围盒中心对准该世界坐标，再加 `(dx, dy)`。
+     * 缺一个焦点时只应用位移（鼠标不在画布上时 Demo 传 `(10, 10)` 的倍数）。
+     * 非法 JSON 不修改场景。
+     *
+     * # 参数
+     * - `json`: [`copy_selection_json`](Self::copy_selection_json) 的文本
+     * - `dx`, `dy`: 额外世界位移，连续粘贴用来错开
+     * - `focus_x`, `focus_y`: 可选的粘贴中心
+     *
+     * # 返回
+     * 新根元素 ID
+     *
+     * # 错误
+     * JSON 无法解析、版本不受支持或元素种类未知
+     */
+    paste_elements(json: string, dx: number, dy: number, focus_x?: number | null, focus_y?: number | null): Array<any>;
+    /**
      * 恢复到之前的工具
      */
     pop_temporary_tool(): void;
@@ -750,10 +795,12 @@ export interface InitOutput {
     readonly infinitecanvas_commit_style_preview: (a: number) => number;
     readonly infinitecanvas_commit_text_content: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_commit_text_raster: (a: number, b: bigint, c: number, d: number, e: number, f: number, g: number, h: number) => number;
+    readonly infinitecanvas_copy_selection_json: (a: number) => [number, number, number, number];
     readonly infinitecanvas_cursor_at: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
+    readonly infinitecanvas_duplicate_selection: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_enter_group: (a: number, b: bigint, c: bigint) => number;
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
     readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
@@ -802,6 +849,7 @@ export interface InitOutput {
     readonly infinitecanvas_move_selection: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_new: () => [number, number, number];
     readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
+    readonly infinitecanvas_paste_elements: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly infinitecanvas_pop_temporary_tool: (a: number) => void;
     readonly infinitecanvas_preview_selection_style: (a: number, b: any) => number;
     readonly infinitecanvas_push_hand_tool: (a: number) => void;

@@ -316,6 +316,37 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 把当前选中元素写成剪贴板 JSON。
+     *
+     * 格式与 [`export_json`](Self::export_json) 相同，只含选中根和它们的子孙。
+     * 组会带上整棵子树，父子 ID 仍指向这份文档里的元素。没有选中元素时返回空字符串。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const json = canvas.copy_selection_json();
+     * await navigator.clipboard.writeText(json);
+     * ```
+     * @returns {string}
+     */
+    copy_selection_json() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.infinitecanvas_copy_selection_json(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * 指针下的光标。选择工具命中缩放/旋转手柄时返回对应光标。
      *
      * # 参数
@@ -353,6 +384,25 @@ export class InfiniteCanvas {
     deselect_element(element_id) {
         const ret = wasm.infinitecanvas_deselect_element(this.__wbg_ptr, element_id);
         return ret !== 0;
+    }
+    /**
+     * 原地克隆当前选中元素，并让新元素成为选中。
+     *
+     * 走 [`DuplicateElementsCommand`]，Ctrl+Z 会删掉副本，Ctrl+Y 按原 ID 恢复。
+     * 新元素标脏，下一帧顶点缓存会写上它们。组会克隆整棵子树。
+     *
+     * # 参数
+     * - `dx`, `dy`: 世界位移。Demo 的 Ctrl+D 使用 `(10, 10)`
+     *
+     * # 返回
+     * 新根元素的 ID。没有选中元素时为空数组。
+     * @param {number} dx
+     * @param {number} dy
+     * @returns {Array<any>}
+     */
+    duplicate_selection(dx, dy) {
+        const ret = wasm.infinitecanvas_duplicate_selection(this.__wbg_ptr, dx, dy);
+        return ret;
     }
     /**
      * 把元素放进组，世界坐标不变。
@@ -996,6 +1046,39 @@ export class InfiniteCanvas {
      */
     pan(dx, dy) {
         wasm.infinitecanvas_pan(this.__wbg_ptr, dx, dy);
+    }
+    /**
+     * 把剪贴板 JSON 粘贴进场景，并选中新根。
+     *
+     * `focus_x` / `focus_y` 都给出时，叶子包围盒中心对准该世界坐标，再加 `(dx, dy)`。
+     * 缺一个焦点时只应用位移（鼠标不在画布上时 Demo 传 `(10, 10)` 的倍数）。
+     * 非法 JSON 不修改场景。
+     *
+     * # 参数
+     * - `json`: [`copy_selection_json`](Self::copy_selection_json) 的文本
+     * - `dx`, `dy`: 额外世界位移，连续粘贴用来错开
+     * - `focus_x`, `focus_y`: 可选的粘贴中心
+     *
+     * # 返回
+     * 新根元素 ID
+     *
+     * # 错误
+     * JSON 无法解析、版本不受支持或元素种类未知
+     * @param {string} json
+     * @param {number} dx
+     * @param {number} dy
+     * @param {number | null} [focus_x]
+     * @param {number | null} [focus_y]
+     * @returns {Array<any>}
+     */
+    paste_elements(json, dx, dy, focus_x, focus_y) {
+        const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_paste_elements(this.__wbg_ptr, ptr0, len0, dx, dy, isLikeNone(focus_x) ? Number.MAX_SAFE_INTEGER : Math.fround(focus_x), isLikeNone(focus_y) ? Number.MAX_SAFE_INTEGER : Math.fround(focus_y));
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * 恢复到之前的工具
@@ -3092,12 +3175,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2537, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2552, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 409, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 423, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

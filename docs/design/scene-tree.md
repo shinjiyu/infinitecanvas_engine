@@ -24,6 +24,7 @@ Scene
 
 ## API
 
+- `Scene::duplicate`：克隆选中根和整棵子树。新 ID 下 `parent` / `children` 一一对应。副本挂在原来的父节点下，z 整块高于场景中已有元素
 - `Scene::group` / `ungroup`：成组至少两个同一父节点下的元素；解散后子元素仍在场景中
 - `Scene::enter_group` / `leave_group`：进组、出组，世界坐标不变
 - `Scene::move_in_outline`：改兄弟顺序，或移入 / 移出组。下标 `0` 是最底层。世界坐标不变
