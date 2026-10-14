@@ -79,6 +79,7 @@ npm run dev --workspace=@infinitecanvas/server
 
 ## 📚 文档
 
+- [CRDT 骨架](./docs/design/crdt.md)（`crates/collab`，未接入 Demo）
 - [技术方案](./docs/design/技术方案.md)
 - [详细开发计划](./docs/design/详细开发计划.md)
 - [接口设计指南](./docs/design/接口设计指南.md)

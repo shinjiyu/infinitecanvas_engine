@@ -43,14 +43,14 @@ Only behavior that exists in this repository is listed here.
 
 ### Scene and math
 
-- Flat scene of `Rectangle`, `Circle`, `Image`, `Line`, `Path`, and `Text`. No groups or inherited transforms. Rotation (radians) and scale live on each element's `Transform` (`ElementProps::rotation`).
+- Scene of `Rectangle`, `Circle`, `Image`, `Line`, `Path`, `Text`, and `Group`. Elements live in a map. A group stores child ids; each element stores `parent` and `locked`. A child's `transform` stays in world space, and moving a group writes that delta onto its descendants. Rotation (radians) and scale live on each element's `Transform` (`ElementProps::rotation`).
 - `infinitecanvas-math` provides `Vec2`, glam matrices, `Rect`, `Transform`, `Color`, and `Vertex`.
 - `QuadTree` supports insert, point query, and range query, and has unit tests. Rendering and hit testing do not call it.
 
 ### Persistence
 
-- `Scene::to_json` / `Scene::from_json` write version 1 JSON (`version`, `next_id`, `elements`). Rectangle, circle, image, line (including `arrow`), path, and text round-trip, including `props.transform.rotation` and `scale`. Text stores `content`, `font_size`, `color`, `align`, `font_family`, and `size`. Raster bookkeeping (`texture_id`, LOD, revision, `editing`) is `#[serde(skip)]` and is rebuilt after import.
-- Missing optional fields use serde defaults (rotation 0, scale 1, arrow off, visible, opacity 1, color alpha 1, text align left, text size estimated from the content). Unknown fields are ignored, so later optional fields can be added without a version bump. An unknown `version`, malformed JSON, a duplicate id, or an unknown element type such as `group` is an error.
+- `Scene::to_json` / `Scene::from_json` write version 1 JSON (`version`, `next_id`, `elements`). Rectangle, circle, image, line (including `arrow`), path, text, and group round-trip, including `props.transform.rotation` and `scale`. Text stores `content`, `font_size`, `color`, `align`, `font_family`, and `size`. A group stores `children`. `parent` and `locked` round-trip (defaults: root and unlocked). Raster bookkeeping (`texture_id`, LOD, revision, `editing`) is `#[serde(skip)]` and is rebuilt after import.
+- Missing optional fields use serde defaults (rotation 0, scale 1, arrow off, visible, opacity 1, color alpha 1, text align left, text size estimated from the content, `parent` absent, `locked` false). Unknown fields are ignored, so later optional fields can be added without a version bump. An unknown `version`, malformed JSON, a duplicate id, or an unknown element type is an error.
 - WASM exposes the same document as `export_json` and `import_json`. Import replaces the scene, rebuilds selection from the `selected` flags, and clears the undo stack.
 - `export_png(selectionOnly)` encodes an RGBA PNG of the current viewport, or of the selected elements' bounds when `selectionOnly` is true. Lines, arrows, and paths are rasterized at their stroke width. Text is drawn with the public-domain `font8x8` bitmap (Latin, Greek, hiragana, and the other blocks that crate ships). Characters it does not cover, including CJK, are a box outline — the Canvas2D texture used on screen is not stored in the scene file. Image elements use a flat placeholder for the same reason.
 - `export_svg(selectedOnly)` writes an SVG document. The default viewBox is the bounds of every effectively visible leaf; an empty scene uses a 1×1 viewBox. `selectedOnly` keeps leaves whose own `selected` flag is set, and every visible descendant of a selected group. Rect, circle, line/arrow, freehand path, and text keep translation, scale, rotation, fill, stroke, and opacity. Text is a `<text>` element (`font-size`, `font-family`, alignment). Groups are not drawn; children keep the world transforms the scene already stored, and a contiguous group is a `<g id="eN">` without a second transform. A hidden group hides its descendants and leaves them out of the viewBox. Image elements are skipped with a comment in the file (pixels stay on the GPU).
@@ -58,12 +58,40 @@ Only behavior that exists in this repository is listed here.
 
 ### Collaboration
 
-This path is partial.
+Two paths. They do not talk to each other.
+
+Presence is partial:
 
 - `@infinitecanvas/server` is a Node.js WebSocket server with rooms and user sessions.
 - The collaboration client in `@infinitecanvas/core` connects, reconnects, and sends cursor, selection, and operation messages.
 - `www/test-collab-canvas.html` broadcasts a newly created element and applies a remote add (rectangle or circle) or remove. A remote move is logged and not applied.
-- Message types for move and update exist. There is no CRDT, permission check, conflict UI, or history replay.
+- Message types for move and update exist. There is no permission check, conflict UI, or history replay.
+
+Scene CRDT is a host-side skeleton in `infinitecanvas-collab` ([yrs](https://docs.rs/yrs), the Rust port of Yjs). It is not linked into the WASM crate, and the browser demo does not load it. Edits go through `CollabSession::insert`, `update`, and `delete`. Grouping goes through `group`, `ungroup`, `set_locked`, and `set_world_transform`, which write the group's `children`, each element's `parent` and `locked`, and descendant world transforms into the same document. Two sessions catch up with `MemoryProvider::sync` (in-memory y-sync, no room server). `encode_state_v1` / `apply_update` are Yjs v1 bytes, so a later JavaScript provider can carry the same payload. Give each peer its own `client_id` and `peer_slot`. `peer_slot` must fit in 21 bits (`<= 2_097_151`); `allocate_id` is `(slot << 32) | seq` and stays within the JavaScript safe integer `2^53 - 1`. The group id uses that allocator, not `Scene::next_id`. Text round-trips with the scene JSON (`content`, `font_size`, `color`, and the other layout fields). Raster bookkeeping such as `texture_id` is not stored, so the remote peer materializes it empty. Conflict rules and limits: [docs/design/crdt.md](./docs/design/crdt.md).
+
+```bash
+cargo test -p infinitecanvas-collab
+```
+
+```rust
+use infinitecanvas_collab::{CollabSession, MemoryProvider};
+use infinitecanvas_engine::math::Vec2;
+use infinitecanvas_engine::{AnyElement, Rectangle};
+
+fn enable() -> Result<(), infinitecanvas_collab::CollabError> {
+    let mut local = CollabSession::with_client_id(1, 1);
+    let mut remote = CollabSession::with_client_id(2, 2);
+    let id = local.allocate_id();
+    local.insert(AnyElement::Rectangle(Rectangle::new(
+        id,
+        Vec2::new(1.0, 2.0),
+        Vec2::new(3.0, 4.0),
+    )))?;
+    MemoryProvider::sync(&mut local, &mut remote)?;
+    assert_eq!(local.scene(), remote.scene());
+    Ok(())
+}
+```
 
 `@infinitecanvas/core` also has a thin canvas wrapper (`init`, `render`, `startRenderLoop`, `destroy`). The demos talk to the WASM `InfiniteCanvas` directly.
 
@@ -82,6 +110,7 @@ flowchart TB
     wasm["infinitecanvas-wasm<br/>InfiniteCanvas and WebGPURenderer"]
     engine["infinitecanvas-engine<br/>scene, viewport, tools, commands"]
     math["infinitecanvas-math"]
+    collab["infinitecanvas-collab<br/>yrs scene document"]
   end
   gpu[WebGPU]
 
@@ -90,6 +119,7 @@ flowchart TB
   www -. "cursor, selection, operations" .-> server
   wasm --> engine
   engine --> math
+  collab --> engine
   wasm --> gpu
 ```
 
@@ -121,7 +151,7 @@ The binary size is from `wasm-pack build --target web --out-dir ../../packages/c
 | M1 Core rendering | Done: WebGPU rectangles, circles, lines, freehand paths, images, viewport |
 | M2 Interaction | Done: hit test, selection, marquee, drag, undo/redo, tools |
 | M3 Scene management | Viewport culling, batched solid draws, a persistent vertex cache with per-element dirty flags, performance counters, and a QuadTree module. No scene graph |
-| M4 Collaboration | Rooms, cursors, selection sync, and create-element broadcast. No CRDT, permissions, conflict handling, or replay |
+| M4 Collaboration | Rooms, cursors, selection sync, create-element broadcast, and a yrs CRDT skeleton (`infinitecanvas-collab`) for scene elements. The CRDT is not wired to the WebSocket server, WASM, or the browser demo. No permissions, conflict UI, or history replay |
 
 ## Quick start
 
@@ -167,6 +197,7 @@ npm run dev --workspace=@infinitecanvas/server
 ```
 crates/math/          Vec2, color, rect, transform, vertex
 crates/engine/        scene, viewport, hit test, tools, commands, QuadTree
+crates/collab/        Yjs/yrs scene document (not linked into WASM)
 crates/wasm/          WebGPU renderer and the JS API
 packages/core/        TypeScript wrapper and collaboration client
 packages/server/      WebSocket room server

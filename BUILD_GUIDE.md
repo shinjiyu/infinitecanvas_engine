@@ -43,11 +43,23 @@ npm run dev --workspace=@infinitecanvas/www
 
 `./build-wasm.sh` 执行的是同一条 `wasm-pack` 命令。脚本会在 `$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin` 存在时把它加到 `PATH` 前面；该目录不存在时使用当前 `PATH` 里的 `rustc`。Linux 和 Windows 上直接跑上面的 `wasm-pack` 即可。
 
-可选协同服务（端口 8080）：
+可选协同服务（端口 8080，光标 / 选区 / 操作广播，不是 CRDT）：
 
 ```bash
 npm run dev --workspace=@infinitecanvas/server
 ```
+
+## CRDT 骨架（Yjs / yrs）
+
+场景元素的 CRDT 在 `crates/collab`（`infinitecanvas-collab`），用 Rust 的 [yrs](https://docs.rs/yrs)。它没有链进 WASM，首页 Demo 也不会加载它。和上面的 WebSocket 房间是两条线。
+
+启用方式：在宿主进程里依赖这个 crate，每个对等端建一个 `CollabSession`（`client_id` 和 `peer_slot` 都要不同），用 `insert` / `update` / `delete` 改元素，用 `group` / `ungroup` / `set_locked` / `set_world_transform` 同步组的 `children`、元素的 `parent` / `locked` 和世界变换。用 `MemoryProvider::sync` 做内存里的 y-sync，或用 `encode_state_v1` / `apply_update` 交换 Yjs v1 字节。元素 id（包括组 id）用 `allocate_id`，不要让两端共用 `Scene::next_id`。`peer_slot` 必须落在 21 位以内（`<= 2_097_151`），否则 id 会超过 JavaScript 安全整数 `2^53 - 1`。Text 走场景 JSON（内容、字号、颜色）；光栅用的 `texture_id` 不同步，对端物化后为空。
+
+```bash
+cargo test -p infinitecanvas-collab
+```
+
+冲突策略、文档形状和已知限制写在 [docs/design/crdt.md](./docs/design/crdt.md)。光标和选区不在这份文档里。
 
 ## 与 CI 相同的检查
 

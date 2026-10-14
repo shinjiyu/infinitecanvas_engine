@@ -143,6 +143,26 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 
 **依赖**: #6 的元素遍历。#4 已合并，文本一并导出。#13 的可见性复用 `Scene::is_effectively_visible`。选区导出会展开选中组，这一点和 PNG 只看元素自身 `selected` 不同。
 
+---
+
+## CRDT 骨架 (#15)
+
+- [x] `infinitecanvas-collab`：yrs 文档，元素进根 `Y.Map` `elements`（键是 id，值是场景 JSON 的单个元素）
+- [x] 本地 `insert` / `update` / `delete` 写成 Yjs 事务，远端 v1 更新物化回 `Scene`
+- [x] `MemoryProvider` 做双连接 y-sync；`encode_state_v1` 可回放
+- [x] 冲突策略见 `docs/design/crdt.md`（整元素 LWW；选区 / 光标 / 房间服务不在这次）
+- [x] Text 经 `MemoryProvider` 同步（内容、字号、颜色），对端 `texture_id` 为空
+- [x] `peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`
+- [x] Group 经 `MemoryProvider` 同步：`children` / `parent` / `locked`，场景树一致；组的世界变换写到子孙；`ungroup` 后组消失、子元素世界坐标保留
+
+```text
+Scene ── 事务 ──▶ Y.Doc elements ── SyncStep1/2 ──▶ 另一份 Y.Doc ──▶ Scene
+```
+
+未接到 WASM、`www` 和 `packages/server`。Text 随场景 JSON v1 同步（内容、字号、颜色）；`texture_id` 不进文档，对端物化后为空。`CollabSession::group` / `ungroup` / `set_locked` / `set_world_transform` 把组的 `children`、元素的 `parent` / `locked` 和世界变换写进同一条整段 JSON。组 id 用 `allocate_id`。`peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`。未知种类仍会使物化失败。整场景重物化是 O(n)。
+
+---
+
 ## M3: 场景管理 (9/9) - ✅ 已完成
 
 - [x] M3.1: 场景图树结构（#13：Group + 场景树；世界变换由组增量传播）
@@ -181,7 +201,7 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 
 - [x] M4.1: 服务端基础（Node.js + ws，房间管理，用户会话）
 - [x] M4.2: 客户端 WebSocket（连接管理器，自动重连，状态UI）
-- [ ] M4.3: CRDT 集成 - Yjs（可选，当前使用简单广播）
+- [ ] M4.3: CRDT 集成 - Yjs（#15 骨架在 `crates/collab`；y-websocket / 房间服务仍未接）
 - [x] M4.4: 操作同步（创建元素广播，远程操作应用）
 - [x] M4.5: 光标同步（位置广播，远程光标渲染，用户标签）
 - [x] M4.6: 选择同步（状态广播，远程选择显示）
@@ -205,10 +225,10 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 - M4.2.4: 实现消息队列和缓冲
 
 **M4.3 CRDT 集成 - Yjs**
-- M4.3.1: 集成 y-websocket 或 y-webrtc
-- M4.3.2: 设计 Y.Doc 结构映射 Scene
-- M4.3.3: 实现元素增删的 CRDT 同步
-- M4.3.4: 实现元素属性的 CRDT 同步
+- [ ] M4.3.1: 集成 y-websocket 或 y-webrtc
+- [x] M4.3.2: 设计 Y.Doc 结构映射 Scene（`elements` 地图 + 场景 JSON 字符串）
+- [x] M4.3.3: 实现元素增删的 CRDT 同步（`MemoryProvider`，本地双连接）
+- [x] M4.3.4: 实现元素属性的 CRDT 同步（整份元素 JSON 替换，不是字段级合并）
 
 **M4.4 操作同步**
 - M4.4.1: 定义操作消息格式（JSON Schema）

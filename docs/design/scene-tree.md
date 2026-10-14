@@ -31,6 +31,10 @@ Scene
 
 隐藏组时，子孙的命中和绘制会被跳过，但不会改写它们自己的 `visible`。锁定会沿着祖先链生效。
 
+## 和 CRDT
+
+`CollabSession::group` / `ungroup` / `set_locked` / `set_world_transform` 把这些字段写进 Y.Doc：组的 `children`，每个元素的 `parent` 和 `locked`，以及组移动后子孙的世界 `transform`。对端用同一份场景 JSON 物化，`scene_tree()` 和 `parent_of` 一致。详见 [crdt.md](./crdt.md)。
+
 ## 和场景 JSON
 
 `Scene::to_json` 把组写成 `{"type":"group","data":{...}}`。`data.children` 是直接子元素 ID，`data.props.parent` 是父元素。缺省的 `parent` 表示根，缺省的 `locked` 表示未锁定。解散前的世界坐标会随元素自己的 `transform` 一起往返。`dirty` 不写入 JSON。
