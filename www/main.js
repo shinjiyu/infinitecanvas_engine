@@ -1,7 +1,7 @@
 /**
  * InfiniteCanvas 首页 Demo。
  *
- * 把选择、直线、画笔、压力测试和纹理上传放在同一张画布上。
+ * 把选择、直线、画笔、压力测试、纹理和小地图放在同一张画布上。
  * 选中元素后右侧属性面板可改填充、描边、线宽和不透明度，文本还可改字号和颜色。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
@@ -40,6 +40,20 @@ let textEditorOpening = false;
 let layerPanel = null;
 /** @type {string | null} 正在拖动的属性控件，避免每帧把滑块写回去 */
 let activeStyleControl = null;
+const MINIMAP_W = 200;
+const MINIMAP_H = 150;
+const MINIMAP_PAD = 8;
+const MINIMAP_REBUILD_MS = 150;
+let minimapVisible = true;
+let minimapEpoch = null;
+let minimapBuiltAt = 0;
+let minimapForce = false;
+/** @type {HTMLCanvasElement | null} */
+let minimapElements = null;
+/** @type {ArrayLike<number> | null} */
+let minimapViewport = null;
+/** @type {{ offsetX: number, offsetY: number } | null} */
+let minimapDrag = null;
 
 /**
  * 浏览器没有可用的 WebGPU 时抛出，用来展示友好提示而不是原始异常。
@@ -391,6 +405,175 @@ function setTool(toolName) {
 }
 
 /**
+ * 元素外框的离屏层。相机变化时不重画。
+ *
+ * @returns {HTMLCanvasElement}
+ */
+function minimapElementLayer() {
+  if (!minimapElements) {
+    minimapElements = document.createElement('canvas');
+    minimapElements.width = MINIMAP_W;
+    minimapElements.height = MINIMAP_H;
+  }
+  return minimapElements;
+}
+
+/**
+ * 视口框是否盖住这个小地图像素。框太小时扩大命中，方便拖拽。
+ *
+ * @param {number} x
+ * @param {number} y
+ * @param {ArrayLike<number> | null} viewport
+ * @returns {boolean}
+ */
+function hitsMinimapViewport(x, y, viewport) {
+  if (!viewport || viewport.length < 4) return false;
+  const min = 12;
+  let left = viewport[0];
+  let top = viewport[1];
+  let width = viewport[2];
+  let height = viewport[3];
+  if (width < min) {
+    left -= (min - width) / 2;
+    width = min;
+  }
+  if (height < min) {
+    top -= (min - height) / 2;
+    height = min;
+  }
+  return x >= left && x <= left + width && y >= top && y <= top + height;
+}
+
+/**
+ * @param {boolean} visible
+ */
+function setMinimapVisible(visible) {
+  minimapVisible = visible;
+  const node = document.getElementById('minimap');
+  if (node) node.hidden = !visible;
+  document.getElementById('minimap-btn')?.classList.toggle('active', visible);
+  if (visible) minimapForce = true;
+}
+
+/**
+ * 几何版本变化时重画元素外框。拖动中最多约每 150ms 一次。
+ *
+ * @param {WasmCanvas} engine
+ */
+function rebuildMinimapElements(engine) {
+  const layer = minimapElementLayer();
+  const ctx = layer.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, MINIMAP_W, MINIMAP_H);
+  const rects = engine.minimap_element_rects(MINIMAP_W, MINIMAP_H, MINIMAP_PAD);
+  ctx.fillStyle = 'rgba(126, 182, 255, 0.92)';
+  for (let i = 0; i < rects.length; i += 4) {
+    ctx.fillRect(rects[i], rects[i + 1], rects[i + 2], rects[i + 3]);
+  }
+}
+
+/**
+ * 贴上元素外框，并画出当前视口。主画布平移/缩放只走这一条。
+ *
+ * @param {WasmCanvas} engine
+ */
+function paintMinimap(engine) {
+  const canvas = document.getElementById('minimap');
+  if (!(canvas instanceof HTMLCanvasElement) || !minimapVisible) return;
+  const epoch = engine.minimap_epoch();
+  const now = performance.now();
+  if (epoch !== minimapEpoch && (minimapForce || minimapEpoch == null || now - minimapBuiltAt >= MINIMAP_REBUILD_MS)) {
+    rebuildMinimapElements(engine);
+    minimapEpoch = epoch;
+    minimapBuiltAt = now;
+    minimapForce = false;
+  } else if (epoch === minimapEpoch) {
+    minimapForce = false;
+  }
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, MINIMAP_W, MINIMAP_H);
+  ctx.drawImage(minimapElementLayer(), 0, 0);
+  const viewport = engine.minimap_viewport_rect(MINIMAP_W, MINIMAP_H, MINIMAP_PAD);
+  minimapViewport = viewport;
+  const x = viewport[0];
+  const y = viewport[1];
+  const width = Math.max(viewport[2], 1);
+  const height = Math.max(viewport[3], 1);
+  ctx.fillStyle = 'rgba(242, 201, 76, 0.16)';
+  ctx.fillRect(x, y, width, height);
+  ctx.strokeStyle = '#f2c94c';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x + 0.5, y + 0.5, width, height);
+}
+
+/**
+ * 点击把相机中心移到指针下的世界点；按在视口框上则记下相对中心的偏移。
+ *
+ * @param {WasmCanvas} engine
+ * @param {{ x: number, y: number }} local
+ */
+function beginMinimapPointer(engine, local) {
+  if (hitsMinimapViewport(local.x, local.y, minimapViewport)) {
+    const viewport = minimapViewport;
+    minimapDrag = {
+      offsetX: local.x - (viewport[0] + viewport[2] / 2),
+      offsetY: local.y - (viewport[1] + viewport[3] / 2),
+    };
+    return;
+  }
+  const world = engine.minimap_to_world(local.x, local.y, MINIMAP_W, MINIMAP_H, MINIMAP_PAD);
+  engine.set_camera_center(world[0], world[1]);
+  minimapDrag = { offsetX: 0, offsetY: 0 };
+  paintMinimap(engine);
+}
+
+/**
+ * @param {HTMLCanvasElement} canvas
+ * @param {WasmCanvas} engine
+ */
+function bindMinimap(canvas, engine) {
+  canvas.addEventListener('pointerdown', (event) => {
+    if (!minimapVisible) return;
+    event.preventDefault();
+    event.stopPropagation();
+    beginMinimapPointer(engine, canvasPoint(event, canvas));
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (!minimapDrag) return;
+    event.preventDefault();
+    const local = canvasPoint(event, canvas);
+    const world = engine.minimap_to_world(
+      local.x - minimapDrag.offsetX,
+      local.y - minimapDrag.offsetY,
+      MINIMAP_W,
+      MINIMAP_H,
+      MINIMAP_PAD,
+    );
+    engine.set_camera_center(world[0], world[1]);
+    paintMinimap(engine);
+  });
+  const endDrag = (event) => {
+    if (!minimapDrag) return;
+    minimapDrag = null;
+    minimapForce = true;
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, { passive: false });
+  document.getElementById('minimap-btn')?.addEventListener('click', () => {
+    setMinimapVisible(!minimapVisible);
+  });
+}
+
+/**
  * @param {HTMLCanvasElement} canvas
  * @param {WasmCanvas} engine
  */
@@ -658,6 +841,7 @@ function bindInput(canvas, engine) {
       canvas.releasePointerCapture(event.pointerId);
     }
     scheduleAutosave(engine);
+    minimapForce = true;
   });
 
   canvas.addEventListener('dblclick', (event) => {
@@ -832,6 +1016,9 @@ function bindInput(canvas, engine) {
       case 't':
         setTool('text');
         break;
+      case 'm':
+        setMinimapVisible(!minimapVisible);
+        break;
       default:
         break;
     }
@@ -884,6 +1071,7 @@ function updateHud(engine) {
   syncSnapControls(engine);
   drawAlignmentGuides(engine);
   layerPanel?.sync();
+  paintMinimap(engine);
 }
 
 /**
@@ -1135,6 +1323,8 @@ async function main() {
       setStatus,
     });
     bindInput(canvasEl, wasm);
+    const minimap = document.getElementById('minimap');
+    if (minimap instanceof HTMLCanvasElement) bindMinimap(minimap, wasm);
     try {
       if (restoreLocal(wasm)) {
         setStatus('已从本地恢复场景');

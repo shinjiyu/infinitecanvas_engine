@@ -893,6 +893,72 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_load_stress_scene(this.__wbg_ptr, count);
     }
     /**
+     * 元素在小地图上的简化外框。
+     *
+     * 同一几何版本和尺寸会复用缓存，避免 10 万元素时每帧重扫。
+     * 返回 `Float32Array`，每 4 个数是一个像素矩形 `x, y, width, height`。
+     *
+     * # 参数
+     * - `width`, `height`: 小地图像素尺寸，例如 200×150
+     * - `padding`: 四周留白（像素）
+     * @param {number} width
+     * @param {number} height
+     * @param {number} padding
+     * @returns {Float32Array}
+     */
+    minimap_element_rects(width, height, padding) {
+        const ret = wasm.infinitecanvas_minimap_element_rects(this.__wbg_ptr, width, height, padding);
+        return ret;
+    }
+    /**
+     * 小地图几何版本。
+     *
+     * 与 [`infinitecanvas_engine::Scene::geometry_epoch`] 相同。
+     * 元素增删或几何变化时递增，平移/缩放相机不变。
+     * 页面应在版本变化时才调用 [`Self::minimap_element_rects`]，
+     * 相机变化只调用 [`Self::minimap_viewport_rect`]。
+     * @returns {bigint}
+     */
+    minimap_epoch() {
+        const ret = wasm.infinitecanvas_minimap_epoch(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * 小地图像素坐标反算世界坐标。
+     *
+     * 点击处要成为相机中心时，把返回值交给 [`Self::set_camera_center`]。
+     * 留白和内容区用的是同一个线性映射。
+     *
+     * # 返回
+     * `Float32Array` `[x, y]`。
+     * @param {number} x
+     * @param {number} y
+     * @param {number} width
+     * @param {number} height
+     * @param {number} padding
+     * @returns {Float32Array}
+     */
+    minimap_to_world(x, y, width, height, padding) {
+        const ret = wasm.infinitecanvas_minimap_to_world(this.__wbg_ptr, x, y, width, height, padding);
+        return ret;
+    }
+    /**
+     * 当前视口在小地图上的像素矩形。
+     *
+     * 映射跟元素外框共用缓存，本身不扫描场景。
+     *
+     * # 返回
+     * `Float32Array` `[x, y, width, height]`。
+     * @param {number} width
+     * @param {number} height
+     * @param {number} padding
+     * @returns {Float32Array}
+     */
+    minimap_viewport_rect(width, height, padding) {
+        const ret = wasm.infinitecanvas_minimap_viewport_rect(this.__wbg_ptr, width, height, padding);
+        return ret;
+    }
+    /**
      * 移动选中的元素
      *
      * # 参数
@@ -1017,6 +1083,19 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 可见叶子的世界包围盒。
+     *
+     * 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
+     *
+     * # 返回
+     * `{ x, y, width, height }`，或 `null`。
+     * @returns {any}
+     */
+    scene_bounds() {
+        const ret = wasm.infinitecanvas_scene_bounds(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * @param {bigint} element_id
      * @param {boolean} additive
      * @returns {boolean}
@@ -1024,6 +1103,26 @@ export class InfiniteCanvas {
     select_element(element_id, additive) {
         const ret = wasm.infinitecanvas_select_element(this.__wbg_ptr, element_id, additive);
         return ret !== 0;
+    }
+    /**
+     * 把相机中心移到世界坐标。
+     *
+     * 点击小地图时，把这里传入 [`Self::minimap_to_world`] 的结果。
+     * 非有限值会被忽略。
+     *
+     * # 参数
+     * - `x`, `y`: 世界坐标
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const world = canvas.minimap_to_world(px, py, 200, 150, 8);
+     * canvas.set_camera_center(world[0], world[1]);
+     * ```
+     * @param {number} x
+     * @param {number} y
+     */
+    set_camera_center(x, y) {
+        wasm.infinitecanvas_set_camera_center(this.__wbg_ptr, x, y);
     }
     /**
      * 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
@@ -2015,6 +2114,10 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
+        __wbg_length_58572db4c38f3c3e: function(arg0) {
+            const ret = arg0.length;
+            return ret;
+        },
         __wbg_length_d4bdea10311bd9cf: function(arg0) {
             const ret = arg0.length;
             return ret;
@@ -2076,6 +2179,10 @@ function __wbg_get_imports() {
         },
         __wbg_new_with_byte_offset_and_length_2f5d7fc2a828b74d: function(arg0, arg1, arg2) {
             const ret = new Uint8Array(arg0, arg1 >>> 0, arg2 >>> 0);
+            return ret;
+        },
+        __wbg_new_with_length_cc0362bfe8499e5a: function(arg0) {
+            const ret = new Float32Array(arg0 >>> 0);
             return ret;
         },
         __wbg_now_aa4ccb83129e9e55: function() {
@@ -2195,6 +2302,9 @@ function __wbg_get_imports() {
         },
         __wbg_setVertexBuffer_7aa508f017477005: function(arg0, arg1, arg2, arg3, arg4) {
             arg0.setVertexBuffer(arg1 >>> 0, arg2, arg3, arg4);
+        },
+        __wbg_set_070bd465f1c195a4: function(arg0, arg1, arg2) {
+            arg0.set(getArrayF32FromWasm0(arg1, arg2));
         },
         __wbg_set_145a351398b48c65: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = Reflect.set(arg0, arg1, arg2);
@@ -2982,7 +3092,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2536, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2537, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },

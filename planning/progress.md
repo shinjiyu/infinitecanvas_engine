@@ -2,6 +2,15 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #29: 小地图
+
+- [x] 场景包围盒 → 小地图像素，以及像素反算世界坐标（空场景、单元素、极端宽高比）
+- [x] 缩略图只画可见叶子的矩形外框；组不重复绘制
+- [x] 点击跳转相机中心，拖拽视口框按像素偏移平移
+- [x] `geometry_epoch` 变化才重算外框；平移/缩放只更新视口框
+- [x] WASM：`scene_bounds`、`set_camera_center`、`minimap_epoch`、`minimap_element_rects`、`minimap_viewport_rect`、`minimap_to_world`
+- [x] Demo 右下角小地图，`M` 显示/隐藏。滚轮停在小地图上，不缩放主画布
+
 ## 属性面板 (#35)
 
 - [x] `SetStyle`：填充、描边、线宽、不透明度；文本额外字号和颜色

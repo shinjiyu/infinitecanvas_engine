@@ -462,6 +462,45 @@ export class InfiniteCanvas {
      */
     load_stress_scene(count: number): void;
     /**
+     * 元素在小地图上的简化外框。
+     *
+     * 同一几何版本和尺寸会复用缓存，避免 10 万元素时每帧重扫。
+     * 返回 `Float32Array`，每 4 个数是一个像素矩形 `x, y, width, height`。
+     *
+     * # 参数
+     * - `width`, `height`: 小地图像素尺寸，例如 200×150
+     * - `padding`: 四周留白（像素）
+     */
+    minimap_element_rects(width: number, height: number, padding: number): Float32Array;
+    /**
+     * 小地图几何版本。
+     *
+     * 与 [`infinitecanvas_engine::Scene::geometry_epoch`] 相同。
+     * 元素增删或几何变化时递增，平移/缩放相机不变。
+     * 页面应在版本变化时才调用 [`Self::minimap_element_rects`]，
+     * 相机变化只调用 [`Self::minimap_viewport_rect`]。
+     */
+    minimap_epoch(): bigint;
+    /**
+     * 小地图像素坐标反算世界坐标。
+     *
+     * 点击处要成为相机中心时，把返回值交给 [`Self::set_camera_center`]。
+     * 留白和内容区用的是同一个线性映射。
+     *
+     * # 返回
+     * `Float32Array` `[x, y]`。
+     */
+    minimap_to_world(x: number, y: number, width: number, height: number, padding: number): Float32Array;
+    /**
+     * 当前视口在小地图上的像素矩形。
+     *
+     * 映射跟元素外框共用缓存，本身不扫描场景。
+     *
+     * # 返回
+     * `Float32Array` `[x, y, width, height]`。
+     */
+    minimap_viewport_rect(width: number, height: number, padding: number): Float32Array;
+    /**
      * 移动选中的元素
      *
      * # 参数
@@ -539,7 +578,32 @@ export class InfiniteCanvas {
      * ```
      */
     reorder_element(id: bigint, parent_id: bigint, index: number): boolean;
+    /**
+     * 可见叶子的世界包围盒。
+     *
+     * 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
+     *
+     * # 返回
+     * `{ x, y, width, height }`，或 `null`。
+     */
+    scene_bounds(): any;
     select_element(element_id: bigint, additive: boolean): boolean;
+    /**
+     * 把相机中心移到世界坐标。
+     *
+     * 点击小地图时，把这里传入 [`Self::minimap_to_world`] 的结果。
+     * 非有限值会被忽略。
+     *
+     * # 参数
+     * - `x`, `y`: 世界坐标
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const world = canvas.minimap_to_world(px, py, 200, 150, 8);
+     * canvas.set_camera_center(world[0], world[1]);
+     * ```
+     */
+    set_camera_center(x: number, y: number): void;
     /**
      * 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
      *
@@ -731,6 +795,10 @@ export interface InitOutput {
     readonly infinitecanvas_is_snap_enabled: (a: number) => number;
     readonly infinitecanvas_leave_group: (a: number, b: bigint) => number;
     readonly infinitecanvas_load_stress_scene: (a: number, b: number) => void;
+    readonly infinitecanvas_minimap_element_rects: (a: number, b: number, c: number, d: number) => any;
+    readonly infinitecanvas_minimap_epoch: (a: number) => bigint;
+    readonly infinitecanvas_minimap_to_world: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
+    readonly infinitecanvas_minimap_viewport_rect: (a: number, b: number, c: number, d: number) => any;
     readonly infinitecanvas_move_selection: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_new: () => [number, number, number];
     readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
@@ -741,7 +809,9 @@ export interface InitOutput {
     readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_render: (a: number) => [number, number];
     readonly infinitecanvas_reorder_element: (a: number, b: bigint, c: bigint, d: number) => number;
+    readonly infinitecanvas_scene_bounds: (a: number) => any;
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
+    readonly infinitecanvas_set_camera_center: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_element_visible: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
