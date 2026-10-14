@@ -10,6 +10,7 @@
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
+ * 右键空白处可粘贴、全选、缩放到适合；右键元素可复制、粘贴、克隆、删除、成组和调整层级。菜单项调用 `dispatchShortcut`。
  * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
  * @example
@@ -20,14 +21,23 @@
 
 import init, { InfiniteCanvas as WasmCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
 import wasmUrl from '../packages/core/wasm/infinitecanvas_wasm_bg.wasm?url';
-import { attachLayerPanel } from './layer-panel.js';
+import { attachLayerPanel, idKey, wasmId } from './layer-panel.js';
 import {
   PASTE_STEP,
   createPasteSession,
+  hasClipboardText,
+  peekMemoryClipboard,
   readTextClipboard,
   screenToWorld,
   writeTextClipboard,
 } from './clipboard.js';
+import {
+  canvasPointerReachesEngine,
+  clampMenuPosition,
+  contextMenuItems,
+  mountContextMenu,
+  resolveContextTarget,
+} from './context-menu.js';
 import { rasterizeText } from './text-raster.js';
 import {
   SHORTCUTS,
@@ -88,6 +98,13 @@ let minimapElements = null;
 let minimapViewport = null;
 /** @type {{ offsetX: number, offsetY: number } | null} */
 let minimapDrag = null;
+/** 右键菜单是否开着。开着时这一下指针不进入引擎。 */
+let contextMenuOpen = false;
+/** 打开菜单的世代。异步读剪贴板回来时，旧的一代不再改菜单。 */
+let contextMenuToken = 0;
+/** 右键时的画布像素。菜单上的粘贴对准这里，而不是菜单按钮上的指针。 */
+/** @type {{ x: number, y: number } | null} */
+let contextPastePoint = null;
 
 /**
  * 浏览器没有可用的 WebGPU 时抛出，用来展示友好提示而不是原始异常。
@@ -1073,6 +1090,133 @@ function duplicateSelection(engine) {
 }
 
 /**
+ * 菜单项 id 对应 `dispatchShortcut` 的 handler。层级项带上 `order`。
+ *
+ * @type {Record<string, { handler: string, order?: string }>}
+ */
+const CONTEXT_ACTIONS = {
+  copy: { handler: 'copy' },
+  paste: { handler: 'paste' },
+  duplicate: { handler: 'duplicate' },
+  delete: { handler: 'delete' },
+  group: { handler: 'group' },
+  ungroup: { handler: 'ungroup' },
+  front: { handler: 'reorder', order: 'front' },
+  back: { handler: 'reorder', order: 'back' },
+  forward: { handler: 'reorder', order: 'forward' },
+  backward: { handler: 'reorder', order: 'backward' },
+  'select-all': { handler: 'selectAll' },
+  'zoom-fit': { handler: 'zoomFit' },
+};
+
+/**
+ * 关掉右键菜单。世代号前进，迟到的剪贴板读取不会把它再打开。
+ */
+function closeContextMenu() {
+  contextMenuOpen = false;
+  contextMenuToken += 1;
+  contextPastePoint = null;
+  const menu = document.getElementById('context-menu');
+  if (menu) {
+    menu.hidden = true;
+    menu.replaceChildren();
+  }
+}
+
+/**
+ * 执行菜单项。每一项都调用 `dispatchShortcut`，和对应快捷键同一条路径。
+ *
+ * @param {WasmCanvas} engine
+ * @param {string} action
+ * @param {{ x: number, y: number } | null} pastePoint
+ */
+function runContextAction(engine, action, pastePoint) {
+  const shortcut = CONTEXT_ACTIONS[action];
+  closeContextMenu();
+  if (!shortcut) return;
+  if (shortcut.handler === 'paste' && pastePoint) {
+    lastPointer = pastePoint;
+    pointerInsideCanvas = true;
+  }
+  if (shortcut.handler === 'delete' && textEditor) {
+    closeTextEditor(engine, false);
+  }
+  dispatchShortcut(shortcut, engine);
+}
+
+/**
+ * 在右键落点弹出菜单。命中未选中元素时先单选它。
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {WasmCanvas} engine
+ * @param {MouseEvent} event
+ */
+function openContextMenu(canvas, engine, event) {
+  const menu = document.getElementById('context-menu');
+  if (!menu) return;
+  const point = canvasPoint(event, canvas);
+  contextPastePoint = point;
+  lastPointer = point;
+  pointerInsideCanvas = true;
+
+  const hits = engine.hit_test_screen_point(point.x, point.y, 1);
+  const hit = hits && hits.length ? hits[0] : null;
+  const selectedIds = Array.from(engine.get_selected_ids?.() || []).map((id) => idKey(id));
+  const parentOf = (id) => {
+    const info = engine.get_element_info(wasmId(id));
+    if (!info || info.parentId == null) return null;
+    return idKey(info.parentId);
+  };
+  let target = resolveContextTarget(hit ? idKey(hit.id) : null, selectedIds, parentOf);
+  if (target.selectHit && hit && !engine.select_element(wasmId(hit.id), false)) {
+    target = { kind: 'canvas', selectHit: false };
+  } else if (target.selectHit && hit) {
+    scheduleAutosave(engine);
+  }
+
+  const ids = Array.from(engine.get_selected_ids?.() || []);
+  const canGroup = target.kind === 'selection' && ids.length >= 2;
+  let canUngroup = false;
+  if (target.kind === 'selection' && ids.length === 1) {
+    const info = engine.get_element_info(wasmId(ids[0]));
+    canUngroup = info?.type === 'Group';
+  }
+
+  const token = ++contextMenuToken;
+  const anchor = { x: event.clientX, y: event.clientY };
+  const pastePoint = point;
+  const paint = (clipboardHasContent) => {
+    if (token !== contextMenuToken) return;
+    const items = contextMenuItems({
+      kind: target.kind,
+      clipboardHasContent,
+      canGroup,
+      canUngroup,
+    });
+    mountContextMenu(menu, items, (action) => runContextAction(engine, action, pastePoint));
+    menu.hidden = false;
+    menu.style.left = '0px';
+    menu.style.top = '0px';
+    const rect = menu.getBoundingClientRect();
+    const pos = clampMenuPosition(
+      anchor.x,
+      anchor.y,
+      rect.width,
+      rect.height,
+      window.innerWidth,
+      window.innerHeight,
+    );
+    menu.style.left = `${pos.x}px`;
+    menu.style.top = `${pos.y}px`;
+    contextMenuOpen = true;
+  };
+  paint(hasClipboardText(peekMemoryClipboard()));
+  readTextClipboard().then((text) => {
+    paint(hasClipboardText(text));
+  }).catch(() => {});
+}
+
+/**
  * @param {HTMLCanvasElement} canvas
  * @param {WasmCanvas} engine
  */
@@ -1528,7 +1672,25 @@ function bindInput(canvas, engine) {
   bindPropertyPanel(engine);
   bindAlignControls(engine);
   bindOrientControls(engine);
+  document.addEventListener('pointerdown', (event) => {
+    if (!contextMenuOpen) return;
+    const menu = document.getElementById('context-menu');
+    if (menu && event.target instanceof Node && menu.contains(event.target)) return;
+    const onCanvas = event.target === canvas;
+    closeContextMenu();
+    // 关掉菜单的这一下已经发生在菜单打开期间，不能再拿去平移或框选。
+    if (onCanvas && !canvasPointerReachesEngine(true)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
   canvas.addEventListener('pointerdown', (event) => {
+    if (!canvasPointerReachesEngine(contextMenuOpen)) {
+      closeContextMenu();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const point = canvasPoint(event, canvas);
     engine.handle_pointer_event(
       'down',
@@ -1603,7 +1765,13 @@ function bindInput(canvas, engine) {
     if (info) openTextEditor(engine, info);
   });
 
-  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+  canvas.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    openContextMenu(canvas, engine, event);
+  });
+  document.getElementById('context-menu')?.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+  });
   bindImageDrop(canvas, engine);
 
   const editor = document.getElementById('text-editor');
@@ -1762,7 +1930,13 @@ function bindInput(canvas, engine) {
   });
 
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && contextMenuOpen && !isEditableTarget(event.target)) {
+      event.preventDefault();
+      closeContextMenu();
+      return;
+    }
     if (isEditableTarget(event.target)) return;
+    if (contextMenuOpen) closeContextMenu();
     const shortcut = matchShortcut(SHORTCUTS, event, 'down');
     if (shortcut) {
       // Ctrl/Cmd+V 不拦截默认动作：paste 事件要先看到剪贴板里的图片。

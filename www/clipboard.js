@@ -20,6 +20,25 @@ export const PASTE_STEP = 10;
 let memoryClipboard = '';
 
 /**
+ * 文本去掉空白后是否还能粘贴。
+ *
+ * @param {unknown} text 剪贴板读到的字符串
+ * @returns {boolean}
+ */
+export function hasClipboardText(text) {
+  return typeof text === 'string' && text.trim().length > 0;
+}
+
+/**
+ * 当前内存剪贴板。打开菜单时先用它决定要不要显示粘贴，再异步读系统剪贴板。
+ *
+ * @returns {string}
+ */
+export function peekMemoryClipboard() {
+  return memoryClipboard;
+}
+
+/**
  * 计算这一次粘贴相对文档坐标的额外位移。
  *
  * 指针在画布内时，第 0 次是 0（中心对准指针），之后每次 +10。

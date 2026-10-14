@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { dropIndex, flattenTree, idKey, indexTree, visibleRange } from './layer-panel.js';
+import {
+  dropIndex,
+  flattenTree,
+  groupSelected,
+  idKey,
+  indexTree,
+  ungroupSelected,
+  visibleRange,
+} from './layer-panel.js';
 
 function sampleTree() {
   return [
@@ -68,6 +76,53 @@ test('drop rejects a locked ancestor and dropping a group into itself', () => {
   const roots = sampleTree();
   const rows = flattenTree(roots, new Set());
   assert.equal(dropIndex(rows, 0, 'into', '3', indexTree(roots)), null);
+});
+
+test('group and ungroup go through the engine selection', () => {
+  const calls = [];
+  const grouped = {
+    get_selected_ids: () => [1n, 2n],
+    group_elements(ids) {
+      calls.push(['group', ids]);
+      return 9n;
+    },
+    select_element(id, additive) {
+      calls.push(['select', id, additive]);
+      return true;
+    },
+  };
+  assert.equal(groupSelected(grouped, { setStatus() {} }), true);
+  assert.deepEqual(calls, [['group', [1n, 2n]], ['select', 9n, false]]);
+
+  const rejected = {
+    get_selected_ids: () => [1n, 2n],
+    group_elements: () => 0n,
+    select_element() {
+      throw new Error('should not select');
+    },
+  };
+  assert.equal(groupSelected(rejected, { setStatus() {} }), false);
+
+  const ungrouped = {
+    get_selected_ids: () => [9n],
+    get_element_info: () => ({ type: 'Group' }),
+    ungroup(id) {
+      calls.push(['ungroup', id]);
+      return true;
+    },
+  };
+  assert.equal(ungroupSelected(ungrouped, { setStatus() {} }), true);
+  assert.deepEqual(calls[2], ['ungroup', 9n]);
+  assert.equal(
+    ungroupSelected({
+      get_selected_ids: () => [1n],
+      get_element_info: () => ({ type: 'Rectangle' }),
+      ungroup() {
+        throw new Error('should not ungroup');
+      },
+    }, { setStatus() {} }),
+    false,
+  );
 });
 
 test('virtual window stays small for ten thousand rows', () => {

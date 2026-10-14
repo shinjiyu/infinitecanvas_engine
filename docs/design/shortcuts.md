@@ -1,6 +1,6 @@
 # 快捷键
 
-首页 Demo 的键盘操作只有一张表：`www/shortcuts.js` 里的 `SHORTCUTS`。按键分发和 `?` 帮助面板都读它。
+首页 Demo 的键盘操作只有一张表：`www/shortcuts.js` 里的 `SHORTCUTS`。按键分发、`?` 帮助面板，以及右键菜单上的键帽都读它。菜单动作仍进同一套 `dispatchShortcut`。
 
 ```text
 keydown / keyup
