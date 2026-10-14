@@ -44,6 +44,7 @@ impl Command for MoveCommand {
                     .transform
                     .translate(self.delta);
             }
+            scene.mark_dirty(*id);
         }
     }
 
@@ -56,6 +57,7 @@ impl Command for MoveCommand {
                     .transform
                     .translate(-self.delta);
             }
+            scene.mark_dirty(*id);
         }
     }
 
@@ -163,6 +165,8 @@ impl TransformElementsCommand {
             if let Some(element) = scene.get_mut(*id) {
                 element.as_element_mut().props_mut().transform = *transform;
             }
+            // 撤销和重做都要重生成顶点。多选时列表里的每个元素各记一次。
+            scene.mark_dirty(*id);
         }
     }
 }
