@@ -9,7 +9,7 @@
  * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，按钮在工具栏和属性面板，进撤销栈。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
- * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，面板上有同样的四个按钮。
+ * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
  * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
  * @example
@@ -29,7 +29,6 @@ import {
   writeTextClipboard,
 } from './clipboard.js';
 import { orientAction } from './flip-keys.js';
-import { stackOrderAction } from './stack-order-keys.js';
 import { rasterizeText } from './text-raster.js';
 import {
   SHORTCUTS,
@@ -760,6 +759,9 @@ function dispatchShortcut(shortcut, engine) {
     case 'nudge':
       nudgeSelection(engine, shortcut);
       break;
+    case 'reorder':
+      reorderSelection(engine, shortcut.order);
+      break;
     case 'escape':
       if (escapeAction(isHelpOpen()) === 'closeHelp') {
         setHelpOpen(false);
@@ -797,6 +799,22 @@ function nudgeSelection(engine, shortcut) {
   if (engine.nudge_selection(direction, shortcut.shift === true)) {
     scheduleAutosave(engine);
     syncPropertyPanel(engine);
+  }
+}
+
+/**
+ * 把当前选中按同一层的兄弟顺序重排。动作名交给引擎。
+ *
+ * @param {WasmCanvas} engine
+ * @param {string | undefined} order `front`、`back`、`forward` 或 `backward`
+ */
+function reorderSelection(engine, order) {
+  if (order !== 'front' && order !== 'back' && order !== 'forward' && order !== 'backward') {
+    return;
+  }
+  if (engine.reorder_selection(order)) {
+    scheduleAutosave(engine);
+    layerPanel?.sync();
   }
 }
 
@@ -1663,15 +1681,6 @@ function bindInput(canvas, engine) {
       if (shortcut.handler !== 'paste') event.preventDefault();
       if (event.repeat && shortcut.allowRepeat === false) return;
       dispatchShortcut(shortcut, engine);
-      return;
-    }
-    const stackAction = stackOrderAction(event);
-    if (stackAction) {
-      event.preventDefault();
-      if (engine.reorder_selection(stackAction)) {
-        scheduleAutosave(engine);
-        layerPanel?.sync();
-      }
       return;
     }
     const orient = orientAction(event);

@@ -18,6 +18,8 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 复制、粘贴、克隆走同一张表：`Ctrl/Cmd+C`、`Ctrl/Cmd+V`、`Ctrl/Cmd+D`（不带 Shift）。方向键微调也在表里，普通步长 1 个世界单位，Shift 为 10 倍；带 Ctrl、Alt 或 ⌘ 的方向键不触发。粘贴和复制仍由 `www/clipboard.js` 读写系统剪贴板，失败时退回内存。
 
+层级也在这张表里：`]` 前移，`[` 后移，`Ctrl/Cmd+]` 置顶，`Ctrl/Cmd+[` 置底。Shift 或 Alt 不触发。图层面板上的四个按钮调用同一个 `reorder_selection`。
+
 ## 引擎补充
 
 删除、全选和缩放在页面里没有现成的一次调用，所以 WASM 增加了四个入口，场景逻辑仍在 engine 里：

@@ -151,6 +151,34 @@ test('arrow keys nudge, and Shift is the 10x step', () => {
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'ArrowRight', ctrlKey: true, shiftKey: true }), 'down'), null);
 });
 
+test('bracket keys reorder the selection, and Shift or Alt do not', () => {
+  assert.equal(assertHandler('reorder', { key: ']', code: 'BracketRight' }).order, 'forward');
+  assert.equal(assertHandler('reorder', { key: '[', code: 'BracketLeft' }).order, 'backward');
+  assert.equal(assertHandler('reorder', { key: 'ü', code: 'BracketLeft' }).order, 'backward');
+  const front = assertHandler('reorder', { key: ']', code: 'BracketRight', ctrlKey: true });
+  assert.equal(front.order, 'front');
+  assert.equal(front.id, 'stack-front');
+  const back = assertHandler('reorder', { key: '[', code: 'BracketLeft', metaKey: true });
+  assert.equal(back.order, 'back');
+  assert.equal(back.id, 'stack-back');
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: '}', code: 'BracketRight', shiftKey: true }), 'down'),
+    null,
+  );
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: ']', code: 'BracketRight', altKey: true }), 'down'),
+    null,
+  );
+  assert.equal(
+    matchShortcut(
+      SHORTCUTS,
+      keyEvent({ key: ']', code: 'BracketRight', ctrlKey: true, shiftKey: true }),
+      'down',
+    ),
+    null,
+  );
+});
+
 test('space pushes the hand tool on keydown and pops it on keyup', () => {
   assert.equal(assertHandler('pushHand', { key: ' ', code: 'Space' }, 'down').id, 'temp-pan');
   assert.equal(assertHandler('popHand', { key: ' ', code: 'Space' }, 'up').id, 'temp-pan-up');
@@ -193,6 +221,12 @@ test('help rows are generated from the table and show both chords', () => {
     'Shift+↑',
     'Shift+↓',
   ]);
+  assert.equal(other.find((row) => row.id === 'stack-forward')?.chords[0], ']');
+  assert.equal(other.find((row) => row.id === 'stack-backward')?.chords[0], '[');
+  assert.equal(other.find((row) => row.id === 'stack-front')?.chords[0], 'Ctrl+]');
+  assert.equal(mac.find((row) => row.id === 'stack-front')?.chords[0], '⌘]');
+  assert.equal(other.find((row) => row.id === 'stack-back')?.chords[0], 'Ctrl+[');
+  assert.equal(mac.find((row) => row.id === 'stack-back')?.chords[0], '⌘[');
   assert.equal(other.find((row) => row.id === 'help')?.chords[0], 'Shift+/');
   assert.equal(mac.find((row) => row.id === 'help')?.chords[0], '⇧/');
 

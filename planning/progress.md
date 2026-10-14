@@ -28,7 +28,7 @@ nudge_targets ──► OrientSelectionCommand ──► set_world_transform
 - [x] `structure_epoch` 前进，顶点缓存整表重排；不把元素标成几何脏
 - [x] WASM：`reorder_selection(action)`，`front` / `back` / `forward` / `backward`
 - [x] Demo：图层面板四个按钮，以及 `]` / `[` / Ctrl+] / Ctrl+[（或 Cmd）
-- [ ] #26 快捷键帮助面板尚未合并，未登记进 `SHORTCUTS`
+- [x] `]` / `[` / Ctrl+] / Ctrl+[ 已登记到 `www/shortcuts.js`，帮助面板列出前移、后移、置顶、置底
 
 ```text
 ] / [ / Ctrl+] / Ctrl+[
@@ -217,6 +217,7 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] 输入框、textarea、select、contenteditable 聚焦时不触发；Mac 显示 ⌘，其他平台显示 Ctrl
 - [x] Ctrl/Cmd+C / V / D 复制、粘贴、原地克隆，走同一张表
 - [x] 方向键微调选中元素（1 世界单位），Shift+方向键为 10 倍；带 Ctrl / Alt / ⌘ 不触发
+- [x] `]` / `[` 前移 / 后移，Ctrl/Cmd+] / Ctrl/Cmd+[ 置顶 / 置底
 - [x] WASM 只新增 `delete_selection`、`select_all`、`zoom_to_fit`、`set_zoom`
 - [x] #4 文本已合并：`T` 切换文本工具，编辑框里 Enter 确认、Esc 取消
 - [x] #13 已合并：`Ctrl+G` 成组（`group_elements`），`Ctrl+Shift+G` 取消分组（`ungroup`）

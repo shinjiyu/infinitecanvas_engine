@@ -30,6 +30,7 @@
  * @property {ShortcutPhase} [phase] 监听阶段，默认 `down`
  * @property {string} [scope] 作用域。缺省 `canvas`。文本编辑框里的快捷键是 `text-editor`
  * @property {'left' | 'right' | 'up' | 'down'} [direction] 方向键微调的方向。`handler` 为 `nudge` 时使用
+ * @property {'front' | 'back' | 'forward' | 'backward'} [order] 层级重排动作。`handler` 为 `reorder` 时使用
  * @property {string} [helpGroup] 合并到同一行帮助的组名。缺省用 `id`
  * @property {boolean} [help] 为 false 时不单独成行，但仍可并进 `helpGroup` 的键帽
  * @property {boolean} [allowRepeat] 按住不放时是否重复触发。默认允许
@@ -363,6 +364,52 @@ export const SHORTCUTS = [
     keys: ['ArrowDown'],
     shift: true,
     helpGroup: 'nudge-fast',
+  },
+  {
+    id: 'stack-forward',
+    action: '前移一层',
+    tool: 'canvas',
+    handler: 'reorder',
+    order: 'forward',
+    label: ']',
+    keys: [']'],
+    code: 'BracketRight',
+    shift: false,
+  },
+  {
+    id: 'stack-backward',
+    action: '后移一层',
+    tool: 'canvas',
+    handler: 'reorder',
+    order: 'backward',
+    label: '[',
+    keys: ['['],
+    code: 'BracketLeft',
+    shift: false,
+  },
+  {
+    id: 'stack-front',
+    action: '置顶',
+    tool: 'canvas',
+    handler: 'reorder',
+    order: 'front',
+    label: ']',
+    keys: [']'],
+    code: 'BracketRight',
+    ctrl: true,
+    shift: false,
+  },
+  {
+    id: 'stack-back',
+    action: '置底',
+    tool: 'canvas',
+    handler: 'reorder',
+    order: 'back',
+    label: '[',
+    keys: ['['],
+    code: 'BracketLeft',
+    ctrl: true,
+    shift: false,
   },
   {
     id: 'escape',

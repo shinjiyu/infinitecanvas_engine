@@ -44,4 +44,4 @@ ReorderSelectionCommand ── Scene::arrange_siblings
 
 世界坐标不改。撤销写回父指针、子列表和 `z_index`。
 
-#26 的快捷键帮助面板还没进 master。Demo 在图层面板顶上放了四个按钮，按键判断在 `www/stack-order-keys.js`，由 `www/main.js` 调用 `reorder_selection`。帮助表面板合入后，这四条应登记进 `SHORTCUTS`。
+`SHORTCUTS` 登记了 `]`、`[`、`Ctrl/Cmd+]`、`Ctrl/Cmd+[`，`?` 帮助面板列出这四条。图层面板顶上的四个按钮调用同一个 `reorder_selection`。Shift 或 Alt 不触发。输入框、下拉框和 contenteditable 里这些键留给文本。
