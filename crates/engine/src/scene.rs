@@ -20,7 +20,9 @@
 //! 手动参考线在 `guides` 里，和元素一起进出 JSON，不参与绘制。
 //! 复制、粘贴和克隆在 [`self::clipboard`]：新 ID、子树重映射，图片引用一起带走，并走命令栈。
 use crate::asset::{AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
-use crate::element::{Circle, Element, ElementId, Group, Image, Line, Path, Rectangle, Text};
+use crate::element::{
+    Circle, Element, ElementId, Group, Image, Line, Path, Polygon, Rectangle, Text,
+};
 use crate::guides::{GuideSnapshot, GuideStore, ManualGuide};
 use crate::scene_tree::{SceneTree, SceneTreeNode};
 use crate::snap::GuideAxis;
@@ -71,13 +73,16 @@ impl std::error::Error for GroupError {}
 /// 元素枚举（支持不同类型元素）
 ///
 /// JSON 使用 `{"type":"text","data":{...}}` 这种相邻标签。
-/// `type` 为小写的 `rectangle`、`circle`、`image`、`line`、`path`、`text`、`group`。
+/// `type` 为小写的 `rectangle`、`circle`、`polygon`、`image`、`line`、`path`、`text`、`group`。
+/// 正多边形和星形都是 `polygon`，用 `data.kind`（`polygon` / `star`）区分。
 /// 反序列化时未知字段会被忽略；缺省的可选字段使用各结构体的 serde 默认值。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "lowercase")]
 pub enum AnyElement {
     Rectangle(Rectangle),
     Circle(Circle),
+    /// 正多边形或星形。JSON 类型名是 `polygon`，`kind` 区分星形。
+    Polygon(Polygon),
     Image(Image),
     Line(Line),
     Path(Path),
@@ -91,6 +96,7 @@ impl AnyElement {
         match self {
             AnyElement::Rectangle(r) => r.props().id,
             AnyElement::Circle(c) => c.props().id,
+            AnyElement::Polygon(polygon) => polygon.props().id,
             AnyElement::Image(i) => i.props().id,
             AnyElement::Line(line) => line.props().id,
             AnyElement::Path(path) => path.props().id,
@@ -120,6 +126,7 @@ impl AnyElement {
         match self {
             AnyElement::Rectangle(r) => r,
             AnyElement::Circle(c) => c,
+            AnyElement::Polygon(polygon) => polygon,
             AnyElement::Image(i) => i,
             AnyElement::Line(line) => line,
             AnyElement::Path(path) => path,
@@ -133,6 +140,7 @@ impl AnyElement {
         match self {
             AnyElement::Rectangle(r) => r,
             AnyElement::Circle(c) => c,
+            AnyElement::Polygon(polygon) => polygon,
             AnyElement::Image(i) => i,
             AnyElement::Line(line) => line,
             AnyElement::Path(path) => path,
@@ -434,6 +442,15 @@ impl Scene {
     /// 添加圆形元素
     pub fn add_circle(&mut self, circle: Circle) -> ElementId {
         self.insert_element(AnyElement::Circle(circle))
+    }
+
+    /// 添加正多边形或星形，并 [`Scene::mark_dirty`]。
+    ///
+    /// 新建元素已经标了脏，这里再入队，顶点缓存和选择框都会看到这次创建。
+    pub fn add_polygon(&mut self, polygon: Polygon) -> ElementId {
+        let id = self.insert_element(AnyElement::Polygon(polygon));
+        self.mark_dirty(id);
+        id
     }
 
     /// 添加图片元素

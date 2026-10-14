@@ -16,6 +16,7 @@ SetStyleCommand ── apply / undo ──► Scene::mark_dirty
 | --- | --- |
 | 矩形 / 圆 / 直线 / 路径 | `ElementStyle` 的填充、描边、线宽、虚线、线帽、线结、不透明度 |
 | 矩形 | 另有 `corner_radius`（四角相同，默认 0，不超过短边一半）。圆、直线、路径没有这一项 |
+| 正多边形 / 星形 | 另有 `sides`（边数或角数，3–64，默认六边形 6、五角星 5）。星形另有 `inner_radius`（内径比 0.05–0.95，默认 0.5）。圆和矩形没有这两项 |
 | 文本 | 字号、文字颜色、不透明度、描边色、描边宽度。暂不支持虚线、线帽、线结 |
 | 图片 | 不透明度（`Image::alpha`）。填充、描边、线宽不写到图片上 |
 | 组 | 没有自己的样式，读写都落到子孙 |
@@ -27,3 +28,5 @@ SetStyleCommand ── apply / undo ──► Scene::mark_dirty
 圆角写在矩形上，经 `SetStyle` 的 `corner_radius` 补丁和填充、描边一起撤销。半径 0 仍是原来的两个三角形和四条边。大于 0 时 WebGPU 用同一半径的圆弧轮廓铺填充，描边（含虚线）沿这条轮廓走。命中测试保持轴对齐外接矩形（切掉的角仍能点中）；包围盒不随圆角缩小。面板在 `cornerRadiusSupported` 为 false（未选中，或选择里没有矩形）时隐藏圆角滑条和数字框。多选半径不一致时为 mixed。
 
 吸管不走面板上的滑块预览。它采样一个叶子的填充和描边，再经同一条 `SetStyle` 写到当前选择。圆角、线宽、不透明度不动。
+
+边数和星形内径走同一条 `SetStyle`。`sides` 只写到多边形和星形，`inner_radius` 只写到星形。面板在 `sidesSupported` 为 false 时隐藏边数控件；`innerRadiusSupported` 为 false 时隐藏内径。只选中星形时标签写成「角数」。多选不一致为 mixed。拖动松手仍是一条撤销。

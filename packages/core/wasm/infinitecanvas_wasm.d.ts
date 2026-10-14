@@ -121,6 +121,25 @@ export class InfiniteCanvas {
      */
     add_path(points: Float32Array, color: string | null | undefined, stroke_width: number): bigint;
     /**
+     * 添加正多边形，并记入撤销栈。
+     *
+     * # 参数
+     * - `x, y`: 中心点
+     * - `radius`: 外接圆半径
+     * - `sides`: 边数，钳到 3–64。缺省调用方应传 6
+     * - `fill_color` / `stroke_color` / `stroke_width`: 与 [`Self::add_rectangle`] 相同
+     *
+     * # 返回
+     * 元素 ID
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const id = canvas.add_polygon(0, 0, 40, 6, "#f59e0b", null, 1);
+     * canvas.undo();
+     * ```
+     */
+    add_polygon(x: number, y: number, radius: number, sides: number, fill_color: string | null | undefined, stroke_color: string | null | undefined, stroke_width: number): bigint;
+    /**
      * 添加矩形
      *
      * # 参数
@@ -134,6 +153,22 @@ export class InfiniteCanvas {
      * 元素 ID
      */
     add_rectangle(x: number, y: number, width: number, height: number, fill_color: string | null | undefined, stroke_color: string | null | undefined, stroke_width: number): bigint;
+    /**
+     * 添加星形，并记入撤销栈。
+     *
+     * # 参数
+     * - `points`: 角数，钳到 3–64。五角星传 5
+     * - `inner_radius`: 内点半径相对外接圆的比例，钳到 0.05–0.95
+     *
+     * # 返回
+     * 元素 ID
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const id = canvas.add_star(0, 0, 40, 5, 0.5, "#a855f7", null, 1);
+     * ```
+     */
+    add_star(x: number, y: number, radius: number, points: number, inner_radius: number, fill_color: string | null | undefined, stroke_color: string | null | undefined, stroke_width: number): bigint;
     /**
      * 添加文本元素。
      *
@@ -534,6 +569,7 @@ export class InfiniteCanvas {
      * - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
      *   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
      * - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
+     * - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
      *
      * # 示例（JavaScript）
      * ```js
@@ -993,7 +1029,9 @@ export class InfiniteCanvas {
      * 把补丁写进当前选择并记一条撤销记录。
      *
      * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
-     * `strokeWidth`、`opacity`、`fontSize`、`cornerRadius` 是数字。`cornerRadius` 也可以写成 `corner_radius`。
+     * `strokeWidth`、`opacity`、`fontSize`、`cornerRadius`、`sides`、`innerRadius` 是数字。
+     * `cornerRadius` 也可以写成 `corner_radius`。`sides` 也可以写成 `points`，并钳到 3–64。
+     * `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
      * `textColor` 是十六进制颜色。圆角只写到矩形上。
      * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
      * 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
@@ -1027,7 +1065,7 @@ export class InfiniteCanvas {
      * 设置当前工具
      *
      * # 参数
-     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen", "eyedropper")
+     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "polygon", "star", "text", "pan", "line", "pen", "eyedropper")
      *
      * 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`，吸管快捷键 `i`。
      * 吸管不带 Shift、Ctrl 或 Alt，避免和 V / L / P / R / O / T / H 以及翻转键抢键。
@@ -1221,7 +1259,9 @@ export interface InitOutput {
     readonly infinitecanvas_add_image_bytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [bigint, number, number];
     readonly infinitecanvas_add_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
     readonly infinitecanvas_add_path: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
+    readonly infinitecanvas_add_polygon: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
     readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
+    readonly infinitecanvas_add_star: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => bigint;
     readonly infinitecanvas_add_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
     readonly infinitecanvas_align_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_apply_sampled_style_at: (a: number, b: number, c: number) => number;

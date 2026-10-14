@@ -6,6 +6,7 @@ pub mod group;
 pub mod image;
 pub mod line;
 pub mod path;
+pub mod polygon;
 pub mod rect;
 mod stroke;
 pub mod text;
@@ -15,6 +16,7 @@ pub use group::Group;
 pub use image::Image;
 pub use line::Line;
 pub use path::Path;
+pub use polygon::{Polygon, PolygonKind};
 pub use rect::Rectangle;
 pub use text::{
     estimate_size, lod_bucket, lod_scale, padding_world, raster_params, raster_texture_id,

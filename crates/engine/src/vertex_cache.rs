@@ -33,7 +33,7 @@ pub struct GpuVertexWrite {
 pub enum VertexBufferKind {
     /// 三角形列表：矩形/圆形填充，以及直线、箭头、画笔的三角形带
     Fill,
-    /// 线段列表：矩形/圆形的细描边
+    /// 线段列表：矩形/圆形/多边形的细描边
     Stroke,
     /// 三角形列表：图片
     Textured,
@@ -461,6 +461,17 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             Mesh {
                 fill,
                 stroke: circle.generate_stroke_vertices(),
+                textured: Vec::new(),
+                texture_id: None,
+                underlay: false,
+            }
+        }
+        AnyElement::Polygon(polygon) => {
+            let mut fill = polygon.generate_fill_vertices();
+            fill.extend(polygon.stroke_ribbon_vertices());
+            Mesh {
+                fill,
+                stroke: polygon.generate_stroke_vertices(),
                 textured: Vec::new(),
                 texture_id: None,
                 underlay: false,

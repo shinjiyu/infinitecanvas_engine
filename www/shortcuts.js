@@ -48,6 +48,8 @@ export const TOOL_LABELS = {
   select: '选择',
   rectangle: '矩形',
   circle: '圆形',
+  polygon: '多边形',
+  star: '星形',
   line: '直线',
   pen: '画笔',
   pan: '平移',
@@ -67,8 +69,9 @@ export const TOOL_LABELS = {
  * Shift+1 缩放到适合，Shift+2 缩放到选中，Shift+0 为 100%。数字键用 `code`，避开 Shift 改写 `key`。
  * Ctrl/Cmd+L 切换锁定，Ctrl/Cmd+Shift+H 切换隐藏。不带修饰键的 L / H 仍是直线和平移。
  * Ctrl/Cmd+= 或 Ctrl/Cmd++ 放大，Ctrl/Cmd+- 缩小，Ctrl/Cmd+0 回到 100%。倍数来自引擎的 `zoom_step`。
- * `I` 是吸管，而且必须不带 Shift、Ctrl 和 Alt。V / L / P / R / O / T / H / M / G 都不是 I，互不占用。
+ * `I` 是吸管，而且必须不带 Shift、Ctrl 和 Alt。V / L / P / R / O / T / H / M / G / N / K 都不是 I，互不占用。
  * Shift+I、Ctrl/Cmd+I、Alt+I 不触发，避免以后的组合键和浏览器快捷键被吸管吃掉。
+ * N 是多边形，K 是星形。不占用 V/L/P/R/O/T/H/I。
  *
  * @type {Shortcut[]}
  */
@@ -112,6 +115,22 @@ export const SHORTCUTS = [
     handler: 'tool',
     label: 'O',
     keys: ['o'],
+  },
+  {
+    id: 'tool-polygon',
+    action: '切换到多边形工具',
+    tool: 'polygon',
+    handler: 'tool',
+    label: 'N',
+    keys: ['n'],
+  },
+  {
+    id: 'tool-star',
+    action: '切换到星形工具',
+    tool: 'star',
+    handler: 'tool',
+    label: 'K',
+    keys: ['k'],
   },
   {
     id: 'tool-text',

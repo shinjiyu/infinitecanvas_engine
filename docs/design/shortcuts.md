@@ -28,6 +28,8 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 `Ctrl/Cmd` 的放大、缩小和 100% 会挡住浏览器缩放，所以只在焦点位于画布、舞台，或还没有落到具体控件（`body`）时 `preventDefault`。输入框、下拉框和按钮不接管。`Shift+0` 不跟浏览器抢键，仍按原来的范围生效。
 
+多边形和星形（#65）也在这张表里：不带修饰键的 `N` 切换多边形工具，`K` 切换星形工具。`?` 帮助面板列出这两行。工具栏按钮调用同一个 `set_tool`。
+
 标尺和手动参考线（#56）也在这张表里：不带修饰键的 `G` 显示或隐藏标尺和参考线，按住不重复。`Ctrl/Cmd+G` 仍是成组，`Ctrl/Cmd+Shift+G` 仍是取消分组。吸附一组里的按钮调用同一个 `set_rulers_visible`。选中参考线时，键盘 Delete / Backspace 先删参考线，否则仍删除选中元素。右键菜单里的「删除」只删元素。
 
 吸管（#60）是不带修饰键的 `I`。`Shift+I`、`Ctrl/Cmd+I`、`Alt+I` 都不触发，因此不会占用 V / L / P / R / O / T / H / G，也不会和 Shift+H / Shift+V / Shift+R 撞车。工具栏有同样的按钮。按住不重复。
