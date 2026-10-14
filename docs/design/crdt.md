@@ -23,7 +23,7 @@ Scene ◀── from_json ── Y.Doc
 
 元素放在根 `Y.Map` `elements` 里，键是 id 的十进制字符串，值是一条场景 JSON 元素（`{"type","data"}`）。不同 id 的增删不用抢数组下标。根 `Y.Map` `meta` 只有 `version: "1"`。
 
-值是整段 JSON，而不是每个坐标一个 CRDT 字段。这样载荷和场景文件（#6，`text` 已进入 version 1）是同一份解码路径。分组字段以后变了，也不必再维护一套字段树。
+值是整段 JSON，而不是每个坐标一个 CRDT 字段。这样载荷和场景文件是同一份解码路径。`text` 和 `group` 都已经在 version 1 里，不必再为它们维护一套字段树。
 
 ## 冲突策略
 
@@ -43,6 +43,6 @@ Scene ◀── from_json ── Y.Doc
 - 直接改 `Scene` 不会写进 Y.Doc。要走 `CollabSession`。
 - `allocate_id` 的形式是 `(peer_slot << 32) | seq`。`seq` 占低 32 位，所以 `peer_slot` 只能用剩下的 21 位（`0..=2_097_151`，常量 `MAX_PEER_SLOT`）。`with_client_id` 会断言这个上限。这样元素 id 始终 `<= 2^53 - 1`，放进 JavaScript `Number` 不会丢精度。两端 slot 相同就可能撞 id。不要用引擎的 `Scene::next_id` 给并发的两端发号。`CollabSession::new` 从 client id 推导 slot 时也会掩到这 21 位。
 - 图片像素不在场景 JSON 里，因此也不在 CRDT 里。Text 的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 会同步。`texture_id`、LOD、`revision`、`editing` 是 `#[serde(skip)]`，对端物化后 `texture_id` 为空，按自己的缩放重新光栅化。
-- 未知元素种类（例如以后的 `group`）会让物化失败，和 JSON 导入一样。失败时文档已经吃进更新，`scene()` 仍留着上一份成功快照。
+- 未知元素种类会让物化失败，和 JSON 导入一样。失败时文档已经吃进更新，`scene()` 仍留着上一份成功快照。`text` 和 `group` 是场景 JSON v1 的种类，整段 JSON 会一起同步。
 - 每次本地事务或远端更新成功后，都会把整份 `elements` 地图解码成 `Scene`，代价是 O(n)。按元素增量 observe 可以以后再做。
 - 这个 crate 用 yrs 的 `Awareness` 做 y-sync。`Awareness::new` 不覆盖 `wasm32-unknown-unknown`，所以骨架只在宿主进程里编译。
