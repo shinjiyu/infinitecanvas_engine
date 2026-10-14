@@ -1,5 +1,8 @@
 //! 圆形元素
-use super::stroke::{color_with_opacity, stroke_triangles, transform_vertices};
+use super::stroke::{
+    color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled, transform_vertices,
+    StrokePaint,
+};
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Rect, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -121,6 +124,21 @@ impl Circle {
 
         let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
         let transform = &self.props.transform;
+        if !dash_is_solid(&self.style.stroke_dash) {
+            let mut local = Vec::with_capacity(segments + 1);
+            let step = 2.0 * PI / segments as f32;
+            for index in 0..=segments {
+                let angle = index as f32 * step;
+                local.push(Vec2::new(
+                    angle.cos() * self.radius,
+                    angle.sin() * self.radius,
+                ));
+            }
+            return transform_vertices(
+                stroke_centerline(&local, color, &self.style.stroke_dash),
+                transform,
+            );
+        }
 
         let mut vertices = Vec::new();
         let angle_step = 2.0 * PI / segments as f32;
@@ -165,7 +183,16 @@ impl Circle {
             ));
         }
         transform_vertices(
-            stroke_triangles(&points, self.style.stroke_width, color),
+            stroke_styled(
+                &points,
+                StrokePaint {
+                    width: self.style.stroke_width,
+                    color,
+                    dash: &self.style.stroke_dash,
+                    cap: self.style.stroke_cap,
+                    join: self.style.stroke_join,
+                },
+            ),
             &self.props.transform,
         )
     }

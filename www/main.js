@@ -2,7 +2,7 @@
  * InfiniteCanvas 首页 Demo。
  *
  * 把选择、直线、画笔、压力测试、纹理和小地图放在同一张画布上。
- * 选中元素后右侧属性面板可改填充、描边、线宽和不透明度，文本还可改字号和颜色。
+ * 选中元素后右侧属性面板可改填充、描边、线宽、线型、线帽、线结和不透明度，文本还可改字号和颜色。文本描边暂不支持线型。
  * 方向键按世界单位微调选中元素（Shift 为 10 倍）；输入框内不触发。
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
@@ -906,6 +906,53 @@ function syncPropertyPanel(engine) {
     false,
     style.textColorSupported,
   );
+
+  const lineStyle = document.getElementById('prop-line-style');
+  if (lineStyle) lineStyle.hidden = !style.hasShape;
+  syncDash(style);
+  syncChoice('prop-stroke-cap', style.strokeCap, style.strokeCapMixed);
+  syncChoice('prop-stroke-join', style.strokeJoin, style.strokeJoinMixed);
+}
+
+/**
+ * 把虚线数组收成属性面板的预设。不认识的图案标成自定义。
+ *
+ * @param {unknown} dash
+ * @returns {'solid' | 'dashed' | 'dotted' | 'custom'}
+ */
+function dashPreset(dash) {
+  if (!Array.isArray(dash) || dash.length === 0) return 'solid';
+  if (dash.length === 2 && Number(dash[0]) === 8 && Number(dash[1]) === 4) return 'dashed';
+  if (dash.length === 2 && Number(dash[0]) === 2 && Number(dash[1]) === 4) return 'dotted';
+  return 'custom';
+}
+
+/**
+ * @param {Record<string, unknown>} style
+ */
+function syncDash(style) {
+  const mixedEl = document.getElementById('prop-stroke-dash-mixed');
+  if (mixedEl) mixedEl.hidden = !style.strokeDashMixed;
+  const input = document.getElementById('prop-stroke-dash');
+  if (!(input instanceof HTMLSelectElement)) return;
+  if (style.strokeDashMixed || !Array.isArray(style.strokeDash)) {
+    input.value = '';
+    return;
+  }
+  input.value = dashPreset(style.strokeDash);
+}
+
+/**
+ * @param {string} id
+ * @param {unknown} value
+ * @param {unknown} mixed
+ */
+function syncChoice(id, value, mixed) {
+  const mixedEl = document.getElementById(`${id}-mixed`);
+  if (mixedEl) mixedEl.hidden = !mixed;
+  const input = document.getElementById(id);
+  if (!(input instanceof HTMLSelectElement)) return;
+  input.value = mixed || typeof value !== 'string' ? '' : value;
 }
 
 /**
@@ -1010,6 +1057,24 @@ function bindPropertyPanel(engine) {
     scheduleAutosave(engine);
     syncPropertyPanel(engine);
   });
+
+  const bindChoice = (id, key, mapValue) => {
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLSelectElement)) return;
+    input.addEventListener('change', () => {
+      if (!input.value || input.value === 'custom') return;
+      engine.set_selection_style({ [key]: mapValue(input.value) });
+      scheduleAutosave(engine);
+      syncPropertyPanel(engine);
+    });
+  };
+  bindChoice('prop-stroke-dash', 'strokeDash', (value) => {
+    if (value === 'dashed') return [8, 4];
+    if (value === 'dotted') return [2, 4];
+    return [];
+  });
+  bindChoice('prop-stroke-cap', 'strokeCap', (value) => value);
+  bindChoice('prop-stroke-join', 'strokeJoin', (value) => value);
 }
 
 function bindInput(canvas, engine) {

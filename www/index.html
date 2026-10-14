@@ -331,6 +331,24 @@
 
     #prop-text-fields[hidden] { display: none; }
 
+    #prop-line-style {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    #prop-line-style[hidden] { display: none; }
+
+    .prop-row select {
+      width: 100%;
+      height: 1.7rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #12151c;
+      color: var(--text);
+      font: inherit;
+    }
+
     .fallback {
       position: absolute;
       inset: 0;
@@ -595,7 +613,7 @@
             <input id="snap-threshold" type="range" min="0" max="32" step="1" value="6">
           </label>
         </div>
-        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后画布右侧可改填充、描边、线宽和不透明度，文本还可以改字号和颜色，图片只改不透明度；滑块松手只记一条撤销。选中至少两个元素后，工具栏或属性面板的对齐和分布按钮可用，只改位置，Ctrl+Z 回退。拖动手柄缩放（Shift 等比例；图片默认保持宽高比，Shift 自由缩放）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。把 PNG/JPG 拖进画布。Ctrl+V：剪贴板里有图片时粘贴图片，否则粘贴元素 JSON（指针在画布内时以指针为中心，否则每次 +10）。Ctrl+C 复制，Ctrl+D 原地克隆，三者都可撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件，有像素的图片会嵌成 data URL。右侧图层面板可点选、拖拽排序或拖进分组，眼睛和锁控制显隐与锁定，置顶 / 置底 / 前移 / 后移可改层级。M 显示或隐藏右下角小地图；点击小地图跳转，拖拽视口框平移，滚轮不缩放画布。</p>
+        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后画布右侧可改填充、描边、线宽、线型、线帽、线结和不透明度，文本还可以改字号和颜色（文本描边暂不支持线型），图片只改不透明度；滑块松手只记一条撤销。选中至少两个元素后，工具栏或属性面板的对齐和分布按钮可用，只改位置，Ctrl+Z 回退。拖动手柄缩放（Shift 等比例；图片默认保持宽高比，Shift 自由缩放）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。把 PNG/JPG 拖进画布。Ctrl+V：剪贴板里有图片时粘贴图片，否则粘贴元素 JSON（指针在画布内时以指针为中心，否则每次 +10）。Ctrl+C 复制，Ctrl+D 原地克隆，三者都可撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件，有像素的图片会嵌成 data URL。右侧图层面板可点选、拖拽排序或拖进分组，眼睛和锁控制显隐与锁定，置顶 / 置底 / 前移 / 后移可改层级。M 显示或隐藏右下角小地图；点击小地图跳转，拖拽视口框平移，滚轮不缩放画布。</p>
       </aside>
 
       <div id="stage">
@@ -636,6 +654,42 @@
             <span id="prop-stroke-width-label" class="prop-value">1</span>
           </label>
           <p id="prop-stroke-width-mixed" class="mixed-tag" hidden>线宽：多种</p>
+          <div id="prop-line-style" hidden>
+            <label class="prop-row" for="prop-stroke-dash">
+              <span>线型</span>
+              <select id="prop-stroke-dash" aria-label="线型">
+                <option value="" hidden>多种</option>
+                <option value="solid">实线</option>
+                <option value="dashed">虚线</option>
+                <option value="dotted">点线</option>
+                <option value="custom" hidden>自定义</option>
+              </select>
+              <span></span>
+            </label>
+            <p id="prop-stroke-dash-mixed" class="mixed-tag" hidden>线型：多种</p>
+            <label class="prop-row" for="prop-stroke-cap">
+              <span>线帽</span>
+              <select id="prop-stroke-cap" aria-label="线帽">
+                <option value="" hidden>多种</option>
+                <option value="butt">平头</option>
+                <option value="round">圆头</option>
+                <option value="square">方头</option>
+              </select>
+              <span></span>
+            </label>
+            <p id="prop-stroke-cap-mixed" class="mixed-tag" hidden>线帽：多种</p>
+            <label class="prop-row" for="prop-stroke-join">
+              <span>线结</span>
+              <select id="prop-stroke-join" aria-label="线结">
+                <option value="" hidden>多种</option>
+                <option value="miter">尖角</option>
+                <option value="round">圆角</option>
+                <option value="bevel">斜角</option>
+              </select>
+              <span></span>
+            </label>
+            <p id="prop-stroke-join-mixed" class="mixed-tag" hidden>线结：多种</p>
+          </div>
           <label class="prop-row" for="prop-opacity">
             <span>不透明度</span>
             <input id="prop-opacity" type="range" min="0" max="1" step="0.01" value="1">

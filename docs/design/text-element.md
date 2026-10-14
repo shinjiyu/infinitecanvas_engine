@@ -24,7 +24,7 @@ T 单击 / add_text
 | font_size | 世界单位字号 |
 | color | 填充色 |
 | opacity | 元素不透明度，乘在纹理 tint 上。缺省 1 |
-| stroke / stroke_width | 可选描边。线宽缺省 0；大于 0 时用描边色，没有描边色就用填充色 |
+| stroke / stroke_width | 可选描边。线宽缺省 0；大于 0 时用描边色，没有描边色就用填充色。形状上的虚线、线帽、线结还不作用在文本光栅上 |
 | align | 左 / 中 / 右，同时是锚点 |
 | texture | 当前 LOD 的光栅结果 |
 

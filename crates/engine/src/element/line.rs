@@ -4,8 +4,8 @@
 
 use super::stroke::{
     arrow_length_for, arrow_points, arrow_width_for, bounds_containing, effective_width,
-    paint_color, point_in_triangle, point_to_segment_distance, shorten_end, stroke_triangles,
-    transform_vertices, HIT_SLOP, MITER_LIMIT,
+    paint_color, point_in_triangle, point_to_segment_distance, shorten_end, stroke_styled,
+    transform_vertices, StrokePaint, HIT_SLOP, MITER_LIMIT,
 };
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
@@ -34,7 +34,7 @@ pub struct Line {
     pub start: Vec2,
     /// 终点（局部坐标）
     pub end: Vec2,
-    /// 样式（描边色和线宽）。JSON 中可省略。
+    /// 样式（描边色、线宽、虚线、线帽、线结）。JSON 中可省略。
     #[serde(default)]
     pub style: ElementStyle,
     /// 是否在终点绘制箭头。JSON 中缺省为 false。
@@ -153,7 +153,16 @@ impl Line {
         let color = paint_color(&self.style);
         let width = self.stroke_width();
         let (shaft, arrow) = self.shaft_and_arrow();
-        let mut vertices = stroke_triangles(&shaft, width, color);
+        let mut vertices = stroke_styled(
+            &shaft,
+            StrokePaint {
+                width,
+                color,
+                dash: &self.style.stroke_dash,
+                cap: self.style.stroke_cap,
+                join: self.style.stroke_join,
+            },
+        );
         if let Some(tri) = arrow {
             for point in tri {
                 vertices.push(Vertex::new(point.x, point.y, color));

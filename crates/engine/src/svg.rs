@@ -19,7 +19,8 @@
 //! 文本写成 `<text>` / `<tspan>`。锚点与 [`TextAlign`] 相同：左上、上边中点或右上角。
 
 use crate::element::{
-    Circle, ElementId, ElementStyle, Image, Line, Path, Rectangle, Text, TextAlign,
+    Circle, ElementId, ElementStyle, Image, Line, Path, Rectangle, StrokeCap, StrokeJoin, Text,
+    TextAlign,
 };
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
@@ -358,6 +359,7 @@ fn write_rectangle(rect: &Rectangle) -> String {
         rect.style.stroke,
         rect.style.stroke_width,
     );
+    push_shape_line_style(&mut shape, &rect.style);
     shape.push_str("/>\n");
     wrap_group(
         rect.props.id,
@@ -378,6 +380,7 @@ fn write_circle(circle: &Circle) -> String {
         circle.style.stroke,
         circle.style.stroke_width,
     );
+    push_shape_line_style(&mut shape, &circle.style);
     shape.push_str("/>\n");
     wrap_group(
         circle.props.id,
@@ -389,7 +392,7 @@ fn write_circle(circle: &Circle) -> String {
 
 fn write_line(line: &Line) -> String {
     let (start, end, arrow) = line.local_shaft_and_arrow();
-    let (color, width) = stroke_paint(&line.style);
+    let (color, _) = stroke_paint(&line.style);
     let mut body = String::new();
     body.push_str(&format!(
         "    <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"",
@@ -398,7 +401,7 @@ fn write_line(line: &Line) -> String {
         fmt_num(end.x),
         fmt_num(end.y),
     ));
-    push_stroke_only(&mut body, color, width);
+    push_stroke_only(&mut body, &line.style);
     body.push_str("/>\n");
     if let Some(tri) = arrow {
         body.push_str("    <polygon points=\"");
@@ -471,9 +474,8 @@ fn write_path(path: &Path) -> Option<String> {
     if path.points().len() < 2 {
         return None;
     }
-    let (color, width) = stroke_paint(&path.style);
     let mut body = format!("    <polyline points=\"{}\"", points_attr(path.points()));
-    push_stroke_only(&mut body, color, width);
+    push_stroke_only(&mut body, &path.style);
     body.push_str("/>\n");
     Some(wrap_group(
         path.props.id,
@@ -530,14 +532,51 @@ fn push_fill_stroke(
     shape.push_str(" stroke=\"none\"");
 }
 
-fn push_stroke_only(shape: &mut String, color: Color, width: f32) {
+fn push_shape_line_style(shape: &mut String, style: &ElementStyle) {
+    if style.stroke.is_none() || style.stroke_width <= 0.0 {
+        return;
+    }
+    if style.stroke_cap != StrokeCap::Butt {
+        shape.push_str(" stroke-linecap=\"");
+        shape.push_str(style.stroke_cap.as_str());
+        shape.push('"');
+    }
+    if style.stroke_join != StrokeJoin::Miter {
+        shape.push_str(" stroke-linejoin=\"");
+        shape.push_str(style.stroke_join.as_str());
+        shape.push('"');
+    }
+    push_dasharray(shape, &style.stroke_dash);
+}
+
+fn push_dasharray(shape: &mut String, dash: &[f32]) {
+    if dash.is_empty() {
+        return;
+    }
+    shape.push_str(" stroke-dasharray=\"");
+    for (index, value) in dash.iter().enumerate() {
+        if index > 0 {
+            shape.push(' ');
+        }
+        shape.push_str(&fmt_num(*value));
+    }
+    shape.push('"');
+}
+
+fn push_stroke_only(shape: &mut String, style: &ElementStyle) {
+    let (color, width) = stroke_paint(style);
     shape.push_str(" fill=\"none\" stroke=\"");
     shape.push_str(&rgb_hex(color));
     shape.push_str("\" stroke-width=\"");
     shape.push_str(&fmt_num(width));
     shape.push('"');
     push_alpha_attr(shape, "stroke-opacity", color.a);
-    shape.push_str(" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\"");
+    shape.push_str(" stroke-linecap=\"");
+    shape.push_str(style.stroke_cap.as_str());
+    shape.push_str("\" stroke-linejoin=\"");
+    shape.push_str(style.stroke_join.as_str());
+    shape.push_str("\" stroke-miterlimit=\"4\"");
+    push_dasharray(shape, &style.stroke_dash);
 }
 
 fn push_alpha_attr(shape: &mut String, name: &str, alpha: f32) {
@@ -728,6 +767,7 @@ mod tests {
                 stroke: Some(Color::rgb(0.0, 0.0, 1.0)),
                 stroke_width: 4.0,
                 opacity: 0.25,
+                ..ElementStyle::new()
             },
         );
         scene.add_rect(shape);

@@ -27,7 +27,7 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 
 `data.props.transform` 含 `translation`、`rotation`（弧度，即 `ElementProps::rotation`）、`scale`。直线的 `arrow` 缺省为 `false`。路径的 `points` 缺省为空。文本的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 可省略；对齐缺省为 `left`，字号缺省为 32，尺寸缺省时按内容估算。`texture_id`、LOD、`revision`、`editing` 用 `#[serde(skip)]`，不进文件。PNG 采样先把世界点逆变换回局部空间，所以旋转和非均匀缩放与命中测试一致。
 
-省略的可选字段使用 serde 默认值（旋转 0、缩放 1、可见、不透明度 1、颜色 alpha 1）。形状的 `style.fill` / `stroke` / `stroke_width` / `opacity` 可省略，缺省与 `ElementStyle::new` 相同。文本的 `opacity` 缺省 1，`stroke` 缺省无，`stroke_width` 缺省 0。`props.parent` 和 `props.locked` 也可省略，缺省为根节点和未锁定，文本与其它元素相同。文档或元素上的未知字段会被忽略，因此以后增加可选字段不必升版本。未知元素种类会报错，避免静默丢掉数据。
+省略的可选字段使用 serde 默认值（旋转 0、缩放 1、可见、不透明度 1、颜色 alpha 1）。形状的 `style.fill` / `stroke` / `stroke_width` / `opacity` 可省略，缺省与 `ElementStyle::new` 相同。`style.stroke_dash` 缺省为空数组（实线），`style.stroke_cap` 缺省 `butt`，`style.stroke_join` 缺省 `miter`；三者与缺省值相同时不写入文件。文本的 `opacity` 缺省 1，`stroke` 缺省无，`stroke_width` 缺省 0。文本描边没有虚线、线帽和线结。`props.parent` 和 `props.locked` 也可省略，缺省为根节点和未锁定，文本与其它元素相同。文档或元素上的未知字段会被忽略，因此以后增加可选字段不必升版本。未知元素种类会报错，避免静默丢掉数据。
 
 ## PNG
 
@@ -47,7 +47,7 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 | text | `<text>` + `<tspan>`。锚点与 `TextAlign` 一致，`font-size` 是世界单位字号 |
 | group | 不画几何。子孙已是世界变换，矩阵不再乘组变换。绘制顺序里连成一段时写成不带 `transform` 的 `<g id="eN">`。隐藏组藏住子孙 |
 
-变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。图片的 `opacity` 来自 `Image::alpha`。Y 轴向下。
+变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。直线和路径的缺省线帽线结仍是 `butt` / `miter`。非默认线帽、线结，以及非空虚线，额外写成 `stroke-linecap`、`stroke-linejoin`、`stroke-dasharray`。图片的 `opacity` 来自 `Image::alpha`。Y 轴向下。文本描边不写虚线、线帽和线结。
 
 ## 剪贴板
 

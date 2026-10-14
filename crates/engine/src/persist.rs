@@ -646,6 +646,7 @@ mod tests {
             stroke: Some(Color::RED),
             stroke_width: 2.0,
             opacity: 0.9,
+            ..ElementStyle::new()
         };
         scene.add_rect(rect);
 

@@ -4,8 +4,8 @@
 //! 命中测试使用点到各线段的距离，而不是包围盒。
 
 use super::stroke::{
-    bounds_containing, distance_to_polyline, effective_width, paint_color, stroke_triangles,
-    transform_vertices, HIT_SLOP, MITER_LIMIT,
+    bounds_containing, distance_to_polyline, effective_width, paint_color, stroke_styled,
+    transform_vertices, StrokePaint, HIT_SLOP, MITER_LIMIT,
 };
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
@@ -117,8 +117,16 @@ impl Path {
 
     /// 生成描边三角形带（展开为三角形列表），坐标在世界空间。
     pub fn generate_vertices(&self) -> Vec<Vertex> {
-        let vertices =
-            stroke_triangles(&self.points, self.stroke_width(), paint_color(&self.style));
+        let vertices = stroke_styled(
+            &self.points,
+            StrokePaint {
+                width: self.stroke_width(),
+                color: paint_color(&self.style),
+                dash: &self.style.stroke_dash,
+                cap: self.style.stroke_cap,
+                join: self.style.stroke_join,
+            },
+        );
         transform_vertices(vertices, &self.props.transform)
     }
 

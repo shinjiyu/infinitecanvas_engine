@@ -1,5 +1,8 @@
 //! 矩形元素
-use super::stroke::{color_with_opacity, stroke_triangles, transform_vertices};
+use super::stroke::{
+    color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled, transform_vertices,
+    StrokePaint,
+};
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Rect, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -116,6 +119,19 @@ impl Rectangle {
         let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
         let half_w = self.size.x / 2.0;
         let half_h = self.size.y / 2.0;
+        if !dash_is_solid(&self.style.stroke_dash) {
+            let local = [
+                Vec2::new(-half_w, -half_h),
+                Vec2::new(half_w, -half_h),
+                Vec2::new(half_w, half_h),
+                Vec2::new(-half_w, half_h),
+                Vec2::new(-half_w, -half_h),
+            ];
+            return transform_vertices(
+                stroke_centerline(&local, color, &self.style.stroke_dash),
+                &self.props.transform,
+            );
+        }
 
         // 局部坐标系
         let corners = [
@@ -171,7 +187,16 @@ impl Rectangle {
             Vec2::new(-half_w, -half_h),
         ];
         transform_vertices(
-            stroke_triangles(&points, self.style.stroke_width, color),
+            stroke_styled(
+                &points,
+                StrokePaint {
+                    width: self.style.stroke_width,
+                    color,
+                    dash: &self.style.stroke_dash,
+                    cap: self.style.stroke_cap,
+                    join: self.style.stroke_join,
+                },
+            ),
             &self.props.transform,
         )
     }
