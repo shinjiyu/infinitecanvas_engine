@@ -136,6 +136,24 @@ test('delete, select all, escape, zoom, and help', () => {
   assert.equal(assertHandler('toggleRulers', { key: 'G' }).id, 'rulers');
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'g', ctrlKey: true, altKey: true }), 'down'), null);
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'g', shiftKey: true }), 'down'), null);
+  const grid = assertHandler('toggleGrid', { key: "'", code: 'Quote', ctrlKey: true });
+  assert.equal(grid.id, 'toggle-grid');
+  assert.equal(grid.allowRepeat, false);
+  assert.equal(assertHandler('toggleGrid', { key: "'", code: 'Quote', metaKey: true }).id, 'toggle-grid');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: "'", code: 'Quote' }), 'down'), null);
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: '"', code: 'Quote', ctrlKey: true, shiftKey: true }), 'down'),
+    null,
+  );
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: "'", code: 'Quote', ctrlKey: true, altKey: true }), 'down'),
+    null,
+  );
+  assert.notEqual(matchShortcut(SHORTCUTS, keyEvent({ key: 'g' }), 'down')?.handler, 'toggleGrid');
+  assert.notEqual(
+    matchShortcut(SHORTCUTS, keyEvent({ key: "'", code: 'Quote', ctrlKey: true }), 'down')?.handler,
+    'toggleRulers',
+  );
   assert.equal(assertHandler('escape', { key: 'Escape' }).id, 'escape');
   assert.equal(assertHandler('zoomFit', { key: '!', code: 'Digit1', shiftKey: true }).id, 'zoom-fit');
   assert.equal(assertHandler('zoomFit', { key: '1', code: 'Digit1', shiftKey: true }).id, 'zoom-fit');
@@ -331,6 +349,10 @@ test('help rows are generated from the table and show both chords', () => {
   assert.equal(other.find((row) => row.id === 'rulers')?.chords[0], 'G');
   assert.equal(other.find((row) => row.id === 'rulers')?.action, '显示或隐藏标尺和参考线');
   assert.equal(other.find((row) => row.id === 'rulers')?.toolLabel, '画布');
+  assert.equal(other.find((row) => row.id === 'toggle-grid')?.chords[0], "Ctrl+'");
+  assert.equal(mac.find((row) => row.id === 'toggle-grid')?.chords[0], "⌘'");
+  assert.equal(other.find((row) => row.id === 'toggle-grid')?.action, '显示或隐藏背景网格');
+  assert.equal(mac.find((row) => row.id === 'toggle-grid')?.toolLabel, '画布');
   assert.equal(other.find((row) => row.id === 'group')?.chords[0], 'Ctrl+G');
   assert.equal(mac.find((row) => row.id === 'group')?.chords[0], '⌘G');
   assert.equal(other.find((row) => row.id === 'ungroup')?.chords[0], 'Ctrl+Shift+G');

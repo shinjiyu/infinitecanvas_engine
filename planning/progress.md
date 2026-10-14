@@ -2,6 +2,23 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #64: 背景网格开关
+
+- [x] 世界坐标网格，间距 20；缩小到不足 8px 时间距 ×5，仍落在 20 的倍数上
+- [x] WASM：`set_grid_visible` / `grid_visible`，默认可见，不进撤销栈
+- [x] 视口不变时不重传网格顶点；平移缩放后线的世界位置不变
+- [x] Demo：工具栏「网格」。`Ctrl/Cmd+'` 登记在 `www/shortcuts.js`，`?` 帮助列出。`G` 仍是标尺，`I` 仍是吸管，`Ctrl/Cmd+=` / `-` / `0` 仍是缩放
+- [x] `localStorage` 键 `infinitecanvas.gridVisible`，只有 `"false"` 才在下次打开时隐藏
+
+```text
+Ctrl/Cmd+'  /  工具栏
+        │
+        ▼
+set_grid_visible ──► 下一帧画或不画网格
+        │
+        └─ localStorage infinitecanvas.gridVisible
+```
+
 ## Issue #60: 吸管取色
 
 - [x] `sample_paint_at`：最上层可见叶子的填充/描边；空白、隐藏为无命中；图片两个通道都是空

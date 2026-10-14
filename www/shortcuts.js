@@ -61,6 +61,7 @@ export const TOOL_LABELS = {
  *
  * 已有的 V/L/P/R/O/H、空格临时平移、撤销重做、保存打开、复制粘贴克隆和方向键微调都留在这里。
  * 不带修饰键的 G 显示或隐藏标尺和参考线。Ctrl+G 成组，Ctrl+Shift+G 取消分组，按修饰键区分。
+ * Ctrl/Cmd+' 显示或隐藏背景网格，不占用 G。
  * 字母工具不要求 Shift 的状态。Shift+H / Shift+V / Shift+R 比工具键更具体，分别翻转或顺时针转 90°；
  * Shift+Alt+R 逆时针转 90°。不带 Shift 的 H / V / R 仍是平移、选择、矩形。
  * Shift+1 缩放到适合，Shift+2 缩放到选中，Shift+0 为 100%。数字键用 `code`，避开 Shift 改写 `key`。
@@ -154,6 +155,18 @@ export const SHORTCUTS = [
     handler: 'toggleRulers',
     label: 'G',
     keys: ['g'],
+    shift: false,
+    allowRepeat: false,
+  },
+  {
+    id: 'toggle-grid',
+    action: '显示或隐藏背景网格',
+    tool: 'canvas',
+    handler: 'toggleGrid',
+    label: "'",
+    keys: ["'"],
+    code: 'Quote',
+    ctrl: true,
     shift: false,
     allowRepeat: false,
   },

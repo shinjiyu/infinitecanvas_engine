@@ -9,6 +9,7 @@
  * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，和工具栏、属性面板的按钮一样，进撤销栈。
  * 顶边和左边标尺可拖出参考线。G 显示或隐藏标尺和参考线。参考线进场景 JSON，导出默认不画。
  * I 切换吸管（不带 Shift、Ctrl、Alt）。单击采样最上层可见元素的填充和描边，经 SetStyle 写到当前选区。
+ * Ctrl+' 显示或隐藏背景网格。选择写入 localStorage，下次打开保持上次的结果。第一次打开默认显示。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
@@ -56,6 +57,7 @@ import {
   prefersMacModifier,
   shouldApplyShortcut,
 } from './shortcuts.js';
+import { readGridVisible, writeGridVisible } from './grid-pref.js';
 
 const TEXTURE_ID = 'landing-badge';
 const STORAGE_KEY = 'infinitecanvas.scene.v1';
@@ -97,6 +99,8 @@ const MINIMAP_H = 150;
 const MINIMAP_PAD = 8;
 const MINIMAP_REBUILD_MS = 150;
 let minimapVisible = true;
+/** 背景网格是否显示。第一次打开为 true，之后跟 localStorage。 */
+let gridVisible = true;
 let minimapEpoch = null;
 let minimapBuiltAt = 0;
 let minimapForce = false;
@@ -605,6 +609,9 @@ function syncShortcutLabels() {
   const help = SHORTCUTS.find((shortcut) => shortcut.handler === 'toggleHelp');
   const helpKbd = document.querySelector('#shortcuts-btn kbd');
   if (help && helpKbd) helpKbd.textContent = formatChord(help, mac);
+  const grid = SHORTCUTS.find((shortcut) => shortcut.handler === 'toggleGrid');
+  const gridKbd = document.querySelector('#grid-btn kbd');
+  if (grid && gridKbd) gridKbd.textContent = formatChord(grid, mac);
 }
 
 /**
@@ -729,6 +736,9 @@ function dispatchShortcut(shortcut, engine) {
       engine.set_rulers_visible(!engine.are_rulers_visible());
       syncRulerControls(engine);
       drawAlignmentGuides(engine);
+      break;
+    case 'toggleGrid':
+      setGridVisible(engine, !currentGridVisible(engine), { persist: true });
       break;
     case 'save':
       saveSceneFile(engine);
@@ -999,6 +1009,40 @@ function hitsMinimapViewport(x, y, viewport) {
 /**
  * @param {boolean} visible
  */
+/**
+ * 当前网格是否显示。引擎还没有这个方法时用页面上记住的值。
+ *
+ * @param {WasmCanvas} engine
+ * @returns {boolean}
+ */
+function currentGridVisible(engine) {
+  if (engine && typeof engine.grid_visible === 'function') {
+    return engine.grid_visible();
+  }
+  return gridVisible;
+}
+
+/**
+ * 显示或隐藏背景网格，并同步工具栏按钮。
+ *
+ * `persist` 为 true 时写入 localStorage。加载页面时不写，避免把第一次访问记成显式选择。
+ *
+ * @param {WasmCanvas} engine
+ * @param {boolean} visible
+ * @param {{ persist?: boolean }} [options]
+ */
+function setGridVisible(engine, visible, options = {}) {
+  gridVisible = visible;
+  if (engine && typeof engine.set_grid_visible === 'function') {
+    engine.set_grid_visible(visible);
+  }
+  document.getElementById('grid-btn')?.classList.toggle('active', visible);
+  if (options.persist) {
+    writeGridVisible(globalThis.localStorage, visible);
+    setStatus(visible ? '已显示网格' : '已隐藏网格');
+  }
+}
+
 function setMinimapVisible(visible) {
   minimapVisible = visible;
   const node = document.getElementById('minimap');
@@ -1988,6 +2032,9 @@ function bindInput(canvas, engine) {
     syncRulerControls(engine);
     drawAlignmentGuides(engine);
   });
+  document.getElementById('grid-btn')?.addEventListener('click', () => {
+    setGridVisible(engine, !currentGridVisible(engine), { persist: true });
+  });
   document.getElementById('snap-threshold')?.addEventListener('input', (event) => {
     const input = event.currentTarget;
     if (!(input instanceof HTMLInputElement)) return;
@@ -2542,6 +2589,7 @@ async function main() {
       if (document.visibilityState === 'hidden') persistLocal(wasm);
     });
     window.addEventListener('beforeunload', () => persistLocal(wasm));
+    setGridVisible(wasm, readGridVisible(globalThis.localStorage));
     startLoop(wasm);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
