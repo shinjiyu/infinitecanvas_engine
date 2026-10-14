@@ -10,7 +10,7 @@
 - [x] 图片翻转不改 `size`，绝对缩放比不变
 - [x] WASM：`flip_selection(axis)`、`rotate_selection_quarter(dir)`
 - [x] Demo：工具栏和属性面板按钮；`Shift+H` / `Shift+V` / `Shift+R` / `Shift+Alt+R`
-- [ ] #26 快捷键帮助面板尚未合并，未登记进 `SHORTCUTS`
+- [x] `Shift+H` / `Shift+V` / `Shift+R` / `Shift+Alt+R` 已登记到 `www/shortcuts.js`，帮助面板列出水平翻转、垂直翻转、顺时针 90°、逆时针 90°
 
 ```text
 Shift+H / Shift+V / Shift+R / Shift+Alt+R
@@ -28,7 +28,7 @@ nudge_targets ──► OrientSelectionCommand ──► set_world_transform
 - [x] `structure_epoch` 前进，顶点缓存整表重排；不把元素标成几何脏
 - [x] WASM：`reorder_selection(action)`，`front` / `back` / `forward` / `backward`
 - [x] Demo：图层面板四个按钮，以及 `]` / `[` / Ctrl+] / Ctrl+[（或 Cmd）
-- [ ] #26 快捷键帮助面板尚未合并，未登记进 `SHORTCUTS`
+- [x] `]` / `[` / Ctrl+] / Ctrl+[ 已登记到 `www/shortcuts.js`，帮助面板列出前移、后移、置顶、置底
 
 ```text
 ] / [ / Ctrl+] / Ctrl+[
@@ -62,7 +62,7 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] 步长 1 世界单位，与缩放无关；Shift ×10。多选一条历史
 - [x] 单选 / 多选 / 组、Shift、撤销重做、锁定或空选 no-op
 - [x] Demo：非输入框方向键调用 `nudge_selection`；不抢空格平移、撤销、复制粘贴和工具键
-- [ ] #26 快捷键帮助面板尚未合并，未登记「方向键微调 / Shift 加速」
+- [x] 方向键和 Shift+方向键已登记到 `www/shortcuts.js`，帮助面板列出 1 倍和 10 倍
 
 ```text
 方向键 ──► nudge_targets ──► NudgeElementsCommand ──► translate_ids
@@ -118,7 +118,7 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] `DuplicateElementsCommand` / `PasteElementsCommand`：撤销删除，重做按原 ID 恢复
 - [x] 新元素进入 `Scene::mark_dirty`
 - [x] Demo：Ctrl+C / Ctrl+V / Ctrl+D；系统剪贴板失败退回内存，不抛错
-- [x] #26 快捷键表尚未合并，三个快捷键写在 `www/main.js`
+- [x] Ctrl+C / Ctrl+V / Ctrl+D 已登记到 `www/shortcuts.js`，和帮助面板共用这一张表
 
 ---
 
@@ -209,6 +209,27 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 
 **依赖**: M1 完成
 
+## 快捷键 (#26)
+
+- [x] `www/shortcuts.js` 一张表同时驱动按键分发和 `?` 帮助面板
+- [x] 保留 V/L/P/R/O/T/H、空格临时平移、Ctrl/Cmd+Z/Y/Shift+Z、Ctrl/Cmd+S/O
+- [x] 补齐删除（Delete/Backspace）、全选（Ctrl/Cmd+A）、Esc 取消选择、Shift+1 缩放到适合、Shift+0 为 100%
+- [x] 输入框、textarea、select、contenteditable 聚焦时不触发；Mac 显示 ⌘，其他平台显示 Ctrl
+- [x] Ctrl/Cmd+C / V / D 复制、粘贴、原地克隆，走同一张表
+- [x] Ctrl/Cmd+V 与图片粘贴共用：剪贴板有 PNG/JPEG 时粘贴图片，否则粘贴元素 JSON
+- [x] 方向键微调选中元素（1 世界单位），Shift+方向键为 10 倍；带 Ctrl / Alt / ⌘ 不触发
+- [x] `]` / `[` 前移 / 后移，Ctrl/Cmd+] / Ctrl/Cmd+[ 置顶 / 置底
+- [x] Shift+H / Shift+V 水平或垂直翻转，Shift+R 顺时针 90°，Shift+Alt+R 逆时针 90°；不带 Shift 的 H / V / R 仍是工具键
+- [x] WASM 只新增 `delete_selection`、`select_all`、`zoom_to_fit`、`set_zoom`
+- [x] #4 文本已合并：`T` 切换文本工具，编辑框里 Enter 确认、Esc 取消
+- [x] #13 已合并：`Ctrl+G` 成组（`group_elements`），`Ctrl+Shift+G` 取消分组（`ungroup`）
+- [x] 删除组会快照整棵子树，撤销后子孙还在；全选只选顶层可见元素，并跳过锁定元素；`content_bounds` 跳过组节点和隐藏元素
+
+```text
+SHORTCUTS ──► matchShortcut ──► 画布动作
+     └──────► helpEntries ──► ? 帮助面板
+```
+
 ## 对齐与吸附 (#14)
 
 - [x] 拖拽时用选区包围盒对齐其他可见元素的左/右/上/下边缘和水平/垂直中心
@@ -287,7 +308,7 @@ Scene ── 事务 ──▶ Y.Doc elements ── SyncStep1/2 ──▶ 另一
 
 - [x] `Scene::move_in_outline`：兄弟换序或移入/移出组，重写 `z_index` 并推进 `structure_epoch`
 - [x] `ReorderOutlineCommand` 撤销/重做父指针、子列表和绘制顺序
-- [x] 锁定沿祖先生效：命中、点选、框选和拖动都会跳过
+- [x] 锁定沿祖先生效：命中、点选、框选、全选和拖动都会跳过
 - [x] WASM：`reorder_element`、`get_structure_epoch`；`set_element_locked` 取消选中子树
 - [x] Demo 图层面板：树列表、选中双向同步、拖拽、显隐/锁定、虚拟滚动
 - [x] Rust 单测覆盖显隐、锁定、重排和重入组

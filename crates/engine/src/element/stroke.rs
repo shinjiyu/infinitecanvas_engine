@@ -869,7 +869,7 @@ mod tests {
     }
 
     fn covers(vertices: &[Vertex], point: Vec2) -> bool {
-        vertices.chunks_exact(3).any(|tri| {
+        vertices.as_chunks::<3>().0.iter().any(|tri| {
             point_in_triangle(
                 point,
                 [

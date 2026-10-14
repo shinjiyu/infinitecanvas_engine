@@ -23,4 +23,4 @@
 
 图片（#32）默认缩放锁宽高比。翻转不改 `size`，只否定一个缩放分量，`|scale.x| / |scale.y|` 保持不变，显示宽高比仍是锁定后的比例。
 
-#26 的快捷键表面板还没进 master。Demo 在工具栏和属性面板放四个按钮，并在页面脚本里登记 `Shift+H`、`Shift+V`、`Shift+R`、`Shift+Alt+R`。不带 Shift 的 H / V / R 仍是工具键。
+这四条键在 `www/shortcuts.js` 的 `SHORTCUTS` 里，`?` 帮助面板和按键分发读同一张表：`Shift+H`、`Shift+V`、`Shift+R`、`Shift+Alt+R`。不带 Shift 的 H / V / R 仍是工具键。带 Ctrl 或 ⌘ 不翻转、不旋转。Demo 工具栏和属性面板另有同样的四个按钮。

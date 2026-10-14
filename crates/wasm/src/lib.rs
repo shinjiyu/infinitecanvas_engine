@@ -45,9 +45,9 @@ use infinitecanvas_engine::{
     AddElementCommand, AlignMode, AnyElement, Circle, CommandHistory, DistributeAxis,
     DuplicateElementsCommand, Element, ElementId, ElementStyle, Event, EventQueue, FlipAxis, Image,
     Line, MoveCommand, NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton,
-    PointerEvent, QuarterTurn, Rectangle, RemoveElementCommand, ReorderOutlineCommand, Scene,
-    SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign,
-    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
+    PointerEvent, QuarterTurn, Rectangle, RemoveElementCommand, RemoveElementsCommand,
+    ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction,
+    Text, TextAlign, TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
     UpdateTextCommand, Viewport,
 };
 
@@ -55,6 +55,8 @@ use infinitecanvas_engine::{
 const MIN_STROKE_LENGTH: f32 = 2.0;
 /// 粘贴图片时显示尺寸的长边上限（世界单位）。像素尺寸仍记在资源上。
 const MAX_PASTED_DISPLAY_EDGE: f32 = 512.0;
+/// 缩放到适合时，内容与画布边缘之间的留白（屏幕像素）
+const ZOOM_FIT_PADDING: f32 = 48.0;
 /// 画笔采样的最小间距，避免点过密
 const PEN_SAMPLE_SPACING: f32 = 1.5;
 use input::{
@@ -449,6 +451,68 @@ impl InfiniteCanvas {
         self.cancel_handle_gesture();
         self.selection_box.cancel();
         self.selection.clear(&mut self.scene);
+    }
+
+    /// 选中顶层的可见元素。
+    ///
+    /// 组只选中组本身，不选中组内元素。隐藏元素不选。锁定的元素，以及被锁定祖先挡住的组，也不选。
+    ///
+    /// # 返回
+    /// 选中数量。空场景返回 0。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.select_all();
+    /// ```
+    #[wasm_bindgen]
+    pub fn select_all(&mut self) -> u32 {
+        self.commit_handle_gesture();
+        self.selection_box.cancel();
+        self.selection.select_all(&mut self.scene) as u32
+    }
+
+    /// 删除当前选中的元素。
+    ///
+    /// 多个元素合成一条撤销记录。选中的是组时，整棵子树一起删除。
+    /// 没有选中时什么也不做。快照里的选中标记会随撤销恢复。
+    /// 删除后会像 [`Self::remove_element`] 一样，把这些 id（含子孙）从选择集里去掉，
+    /// 并释放不再被场景使用的文本纹理。
+    ///
+    /// # 返回
+    /// 从场景中删除的元素数量，含组的子孙
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.delete_selection();
+    /// ```
+    #[wasm_bindgen]
+    pub fn delete_selection(&mut self) -> u32 {
+        self.commit_handle_gesture();
+        self.cancel_drawing();
+        self.selection_box.cancel();
+        self.drag_state.guides.clear();
+        let ids = self.selection.selected_ids();
+        if ids.is_empty() {
+            return 0;
+        }
+        let mut affected = Vec::new();
+        for id in &ids {
+            for element_id in self.scene.subtree_ids(*id) {
+                if !affected.contains(&element_id) {
+                    affected.push(element_id);
+                }
+            }
+        }
+        let textures = self.snapshot_text_textures();
+        let before = self.scene.count();
+        self.command_history
+            .execute(Box::new(RemoveElementsCommand::new(ids)), &mut self.scene);
+        for id in affected {
+            let _ = self.selection.deselect(&mut self.scene, id);
+            self.selection.remove_id(id);
+        }
+        self.release_text_textures_except(textures);
+        before.saturating_sub(self.scene.count()) as u32
     }
 
     #[wasm_bindgen]
@@ -2304,6 +2368,44 @@ impl InfiniteCanvas {
         vec![world.x, world.y]
     }
 
+    /// 把缩放设为给定倍数，视口中心保持不变。
+    ///
+    /// 结果会被限制在 0.1 到 10 之间。非有限值会被忽略。
+    ///
+    /// # 参数
+    /// - `zoom`: 缩放倍数，`1` 表示 100%
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.set_zoom(1);
+    /// ```
+    #[wasm_bindgen]
+    pub fn set_zoom(&mut self, zoom: f32) {
+        if zoom.is_finite() {
+            self.viewport.set_zoom(zoom);
+        }
+    }
+
+    /// 缩放并平移，使全部元素落入画布，四周留出 48 像素。
+    ///
+    /// 场景为空时不改变视口。
+    ///
+    /// # 返回
+    /// 场景里有元素并且已经调整视口时为 true
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.zoom_to_fit();
+    /// ```
+    #[wasm_bindgen]
+    pub fn zoom_to_fit(&mut self) -> bool {
+        let Some(bounds) = self.scene.content_bounds() else {
+            return false;
+        };
+        self.viewport.fit_rect(bounds, ZOOM_FIT_PADDING);
+        true
+    }
+
     /// 获取视口中心 X
     #[wasm_bindgen]
     pub fn get_viewport_center_x(&self) -> f32 {
@@ -3932,5 +4034,89 @@ mod tests {
         canvas.clear_selection();
         assert!(!canvas.reorder_selection("back"));
         assert_eq!(canvas.get_undo_count(), 1);
+    }
+
+    #[test]
+    fn select_all_selects_the_group_and_not_its_children() {
+        let mut canvas = blank_canvas();
+        let left = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            left,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let right = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = canvas.scene.group(&[left, right]).unwrap();
+        let hidden = canvas.scene.next_id();
+        let mut hidden_rect = Rectangle::new(hidden, Vec2::new(80.0, 0.0), Vec2::new(10.0, 10.0));
+        hidden_rect.props.visible = false;
+        canvas.scene.add_rect(hidden_rect);
+        let locked = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            locked,
+            Vec2::new(120.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        canvas.scene.set_locked(locked, true);
+
+        assert_eq!(canvas.select_all(), 1);
+        assert!(canvas.selection.is_selected(group_id));
+        assert!(!canvas.selection.is_selected(left));
+        assert!(!canvas.selection.is_selected(right));
+        assert!(!canvas.selection.is_selected(hidden));
+        assert!(!canvas.selection.is_selected(locked));
+    }
+
+    #[test]
+    fn delete_selection_removes_group_subtree_and_clears_selection() {
+        let mut canvas = blank_canvas();
+        let left = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            left,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let right = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let text_id = canvas.scene.next_id();
+        let mut text = Text::new(text_id, Vec2::new(70.0, 0.0), "Hi");
+        text.commit_raster(text.revision, 0, "glyph".into(), Vec2::new(16.0, 8.0))
+            .unwrap();
+        canvas.scene.add_text(text);
+        let group_id = canvas.scene.group(&[left, right]).unwrap();
+        canvas
+            .selection
+            .select_element(&mut canvas.scene, group_id, false);
+        canvas
+            .selection
+            .select_element(&mut canvas.scene, text_id, true);
+        canvas
+            .selection
+            .select_element(&mut canvas.scene, left, true);
+
+        // 没有 WebGPU 渲染器时，文本纹理释放是空操作；选择集仍必须清掉。
+        assert_eq!(canvas.delete_selection(), 4);
+        assert!(!canvas.scene.contains(group_id));
+        assert!(!canvas.scene.contains(left));
+        assert!(!canvas.scene.contains(right));
+        assert!(!canvas.scene.contains(text_id));
+        assert!(canvas.selection.is_empty());
+
+        assert!(canvas.undo());
+        assert_eq!(canvas.scene.children_of(group_id), vec![left, right]);
+        assert!(canvas.scene.contains(text_id));
+        assert!(canvas.selection.is_selected(group_id));
+        assert!(canvas.selection.is_selected(text_id));
+        assert!(canvas.selection.is_selected(left));
+        assert!(!canvas.selection.is_selected(right));
     }
 }

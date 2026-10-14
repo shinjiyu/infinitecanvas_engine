@@ -685,22 +685,6 @@ fn peer_slot_from_client(client_id: u64) -> u32 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn derived_slots_stay_inside_21_bits() {
-        for client_id in [0, 1, u64::from(u32::MAX), u64::MAX, 1 << 40, (1 << 53) - 1] {
-            let slot = peer_slot_from_client(client_id);
-            assert!(
-                (1..=MAX_PEER_SLOT).contains(&slot),
-                "{client_id} derived peer_slot {slot}"
-            );
-        }
-    }
-}
-
 fn empty_state_vector() -> StateVector {
     StateVector::from_iter([])
 }
@@ -773,6 +757,22 @@ fn clear_selection(scene: &mut Scene) {
     for id in ids {
         if let Some(element) = scene.get_mut(id) {
             element.as_element_mut().props_mut().selected = false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derived_slots_stay_inside_21_bits() {
+        for client_id in [0, 1, u64::from(u32::MAX), u64::MAX, 1 << 40, (1 << 53) - 1] {
+            let slot = peer_slot_from_client(client_id);
+            assert!(
+                (1..=MAX_PEER_SLOT).contains(&slot),
+                "{client_id} derived peer_slot {slot}"
+            );
         }
     }
 }

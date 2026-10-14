@@ -3,7 +3,7 @@
 //! 实现命令模式，支持撤销/重做功能
 
 use crate::element::{ElementId, TextVisual};
-use crate::scene::OutlineSnapshot;
+use crate::scene::{OutlineSnapshot, RemovedSubtree};
 use crate::style::{
     apply_style_snapshot, capture_style, style_locked, style_target_ids, StylePatch, StyleSnapshot,
 };
@@ -358,10 +358,12 @@ impl Command for AddElementCommand {
 }
 
 /// 删除元素命令
+///
+/// 组会连同子孙一起摘下。撤销时用快照把整棵子树放回原来的父节点。
 #[derive(Debug)]
 pub struct RemoveElementCommand {
-    /// 被删除的元素（撤销时恢复）
-    element: Option<AnyElement>,
+    /// 已经从场景取出的子树。还在场景里时为 `None`。
+    snapshot: Option<RemovedSubtree>,
     /// 元素 ID
     element_id: ElementId,
     /// 删除后暂存的图片资源。撤销时放回场景。
@@ -371,7 +373,7 @@ pub struct RemoveElementCommand {
 impl RemoveElementCommand {
     pub fn new(element_id: ElementId) -> Self {
         Self {
-            element: None,
+            snapshot: None,
             element_id,
             parked: Vec::new(),
         }
@@ -380,21 +382,115 @@ impl RemoveElementCommand {
 
 impl Command for RemoveElementCommand {
     fn execute(&mut self, scene: &mut Scene) {
-        if let Some(element) = scene.remove(self.element_id) {
-            self.parked = parked_asset_for(scene, &element);
-            self.element = Some(element);
+        if self.snapshot.is_some() {
+            return;
         }
+        let Some(snapshot) = scene.take_subtree(self.element_id) else {
+            return;
+        };
+        // 子树里的图片引用归零后，像素要跟快照一起留在撤销栈上。
+        self.parked = parked_assets_for_spawn(scene, snapshot.nodes());
+        self.snapshot = Some(snapshot);
     }
 
     fn undo(&mut self, scene: &mut Scene) {
-        if let Some(element) = self.element.take() {
+        if let Some(snapshot) = self.snapshot.take() {
             scene.restore_assets(std::mem::take(&mut self.parked));
-            scene.add(element);
+            scene.restore_subtree(snapshot);
         }
     }
 
     fn name(&self) -> &'static str {
         "RemoveElement"
+    }
+}
+
+/// 一次删除多个元素。
+///
+/// 选中的是组时，整棵子树一起删除。列表里同时有组和它的子孙时，只摘掉组。
+/// 撤销时按删除前的父节点和兄弟下标放回，元素上的 `selected` 标记保持原样，
+/// 这样撤销后选择集可以按标记恢复。
+#[derive(Debug)]
+pub struct RemoveElementsCommand {
+    ids: Vec<ElementId>,
+    /// 已经从场景取出的子树。在场景里时为空。
+    stored: Vec<RemovedSubtree>,
+    /// 删除后暂存的图片资源。撤销时放回场景。
+    parked: Vec<crate::asset::ImageAsset>,
+}
+
+impl RemoveElementsCommand {
+    /// 创建删除命令。元素此时仍在场景中，`execute` 才会取出。
+    ///
+    /// # 参数
+    /// - `ids`: 要删除的元素 ID。不存在的 ID 会被跳过
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{CommandHistory, Rectangle, RemoveElementsCommand, Scene};
+    /// use infinitecanvas_math::Vec2;
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::ONE));
+    /// let mut history = CommandHistory::new();
+    /// history.execute(Box::new(RemoveElementsCommand::new(vec![1])), &mut scene);
+    /// assert!(scene.is_empty());
+    /// ```
+    pub fn new(ids: Vec<ElementId>) -> Self {
+        Self {
+            ids,
+            stored: Vec::new(),
+            parked: Vec::new(),
+        }
+    }
+}
+
+impl Command for RemoveElementsCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        // 子树已经在命令里时再执行一次不能清掉 stored，否则会丢掉撤销数据。
+        if !self.stored.is_empty() {
+            return;
+        }
+        let wanted: HashSet<ElementId> = self.ids.iter().copied().collect();
+        let mut roots = Vec::new();
+        for id in &self.ids {
+            if !scene.contains(*id) || roots.contains(id) {
+                continue;
+            }
+            if has_selected_ancestor(scene, *id, &wanted) {
+                continue;
+            }
+            roots.push(*id);
+        }
+        // 先快照再删除，兄弟下标才是删除前的位置。
+        let mut snapshots = Vec::new();
+        for id in &roots {
+            if let Some(snapshot) = scene.snapshot_subtree(*id) {
+                snapshots.push((*id, snapshot));
+            }
+        }
+        let nodes: Vec<AnyElement> = snapshots
+            .iter()
+            .flat_map(|(_, snapshot)| snapshot.nodes().iter().cloned())
+            .collect();
+        for (id, _) in &snapshots {
+            scene.remove(*id);
+        }
+        self.parked = parked_assets_for_spawn(scene, &nodes);
+        self.stored = snapshots
+            .into_iter()
+            .map(|(_, snapshot)| snapshot)
+            .collect();
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        scene.restore_assets(std::mem::take(&mut self.parked));
+        for snapshot in self.stored.drain(..).rev() {
+            scene.restore_subtree(snapshot);
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "RemoveElements"
     }
 }
 
@@ -1048,9 +1144,10 @@ fn replay_spawn(scene: &mut Scene, batch: &mut SpawnBatch) {
     scene.insert_copied(&batch.elements);
 }
 
-/// 克隆和粘贴撤销时，留下这棵新子树里引用已经归零的图片。
+/// 留下这批元素里引用已经归零的图片。
 ///
-/// 与 [`parked_asset_for`] 不同：这里包含组里的子图片。删除组的命令仍只留根节点自己的像素。
+/// 克隆、粘贴，以及删除整棵子树都用它，所以组里的子图片会一起暂存。
+/// [`parked_asset_for`] 只看根节点，给只保存根的 [`AddElementCommand`] 用。
 fn parked_assets_for_spawn(
     scene: &mut Scene,
     elements: &[AnyElement],
@@ -1304,6 +1401,18 @@ impl std::fmt::Debug for CommandHistory {
             .field("max_history", &self.max_history)
             .finish()
     }
+}
+
+/// 删除列表里已经包含某个祖先时，这个元素会跟着那棵子树一起被摘掉。
+fn has_selected_ancestor(scene: &Scene, id: ElementId, selected: &HashSet<ElementId>) -> bool {
+    let mut current = scene.parent_of(id);
+    while let Some(parent_id) = current {
+        if selected.contains(&parent_id) {
+            return true;
+        }
+        current = scene.parent_of(parent_id);
+    }
+    false
 }
 
 #[cfg(test)]
@@ -2100,5 +2209,127 @@ mod tests {
         assert_eq!(scene.sibling_order(None), vec![2, 3, 4, 5, 1]);
         assert!(history.undo(&mut scene));
         assert_eq!(scene.sibling_order(None), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn remove_elements_command_undo_restores_every_element() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::ONE));
+        scene.add_rect(Rectangle::new(2, Vec2::new(30.0, 0.0), Vec2::ONE));
+        let mut history = CommandHistory::new();
+
+        history.execute(
+            Box::new(RemoveElementsCommand::new(vec![1, 2, 99])),
+            &mut scene,
+        );
+        assert!(scene.is_empty());
+
+        history.undo(&mut scene);
+        assert!(scene.contains(1));
+        assert!(scene.contains(2));
+
+        history.redo(&mut scene);
+        assert!(scene.is_empty());
+        history.undo(&mut scene);
+        assert_eq!(scene.count(), 2);
+    }
+
+    #[test]
+    fn remove_elements_command_undo_restores_group_subtree() {
+        let mut scene = Scene::new();
+        let left = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            left,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let right = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(40.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let extra = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            extra,
+            Vec2::new(80.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[left, right]).unwrap();
+        scene.enter_group(extra, group_id).unwrap();
+        let outside = scene.next_id();
+        scene.add_rect(Rectangle::new(outside, Vec2::new(200.0, 0.0), Vec2::ONE));
+
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(RemoveElementsCommand::new(vec![group_id, left])),
+            &mut scene,
+        );
+        assert!(!scene.contains(group_id));
+        assert!(!scene.contains(left));
+        assert!(!scene.contains(right));
+        assert!(!scene.contains(extra));
+        assert!(scene.contains(outside));
+        assert_eq!(scene.count(), 1);
+
+        history.undo(&mut scene);
+        assert_eq!(scene.children_of(group_id), vec![left, right, extra]);
+        assert_eq!(scene.parent_of(left), Some(group_id));
+        assert_eq!(scene.parent_of(extra), Some(group_id));
+        assert!(scene.parent_of(group_id).is_none());
+        assert!(scene.contains(outside));
+
+        history.redo(&mut scene);
+        assert_eq!(scene.count(), 1);
+        history.undo(&mut scene);
+        assert_eq!(scene.children_of(group_id), vec![left, right, extra]);
+    }
+
+    #[test]
+    fn remove_elements_command_undo_restores_sibling_order() {
+        let mut scene = Scene::new();
+        let first = scene.next_id();
+        scene.add_rect(Rectangle::new(first, Vec2::ZERO, Vec2::ONE));
+        let second = scene.next_id();
+        scene.add_rect(Rectangle::new(second, Vec2::new(20.0, 0.0), Vec2::ONE));
+        let third = scene.next_id();
+        scene.add_rect(Rectangle::new(third, Vec2::new(40.0, 0.0), Vec2::ONE));
+        let group_id = scene.group(&[first, second]).unwrap();
+        scene.enter_group(third, group_id).unwrap();
+        assert_eq!(scene.children_of(group_id), vec![first, second, third]);
+
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(RemoveElementsCommand::new(vec![first, third])),
+            &mut scene,
+        );
+        assert_eq!(scene.children_of(group_id), vec![second]);
+
+        history.undo(&mut scene);
+        assert_eq!(scene.children_of(group_id), vec![first, second, third]);
+        assert_eq!(scene.parent_of(first), Some(group_id));
+        assert_eq!(scene.parent_of(third), Some(group_id));
+    }
+
+    #[test]
+    fn remove_element_command_undo_restores_group_children() {
+        let mut scene = Scene::new();
+        let left = scene.next_id();
+        scene.add_rect(Rectangle::new(left, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        let right = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[left, right]).unwrap();
+        let mut history = CommandHistory::new();
+        history.execute(Box::new(RemoveElementCommand::new(group_id)), &mut scene);
+        assert!(!scene.contains(left));
+        assert!(!scene.contains(group_id));
+
+        history.undo(&mut scene);
+        assert_eq!(scene.children_of(group_id), vec![left, right]);
+        assert_eq!(scene.parent_of(right), Some(group_id));
     }
 }

@@ -3,13 +3,13 @@
  *
  * 把选择、直线、画笔、压力测试、纹理和小地图放在同一张画布上。
  * 选中元素后右侧属性面板可改填充、描边、线宽、线型、线帽、线结和不透明度，文本还可改字号和颜色。文本描边暂不支持线型。
- * 方向键按世界单位微调选中元素（Shift 为 10 倍）；输入框内不触发。
+ * 键盘操作只读 `www/shortcuts.js`：方向键按世界单位微调（Shift 为 10 倍），
+ * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。输入框、下拉框内不触发。
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
- * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，按钮在工具栏和属性面板，进撤销栈。
+ * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，和工具栏、属性面板的按钮一样，进撤销栈。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
- * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，面板上有同样的四个按钮。
- * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。
+ * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
  * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
  * @example
@@ -28,10 +28,16 @@ import {
   screenToWorld,
   writeTextClipboard,
 } from './clipboard.js';
-import { orientAction } from './flip-keys.js';
-import { arrowNudge } from './nudge-keys.js';
-import { stackOrderAction } from './stack-order-keys.js';
 import { rasterizeText } from './text-raster.js';
+import {
+  SHORTCUTS,
+  escapeAction,
+  formatChord,
+  helpEntries,
+  isEditableTarget,
+  matchShortcut,
+  prefersMacModifier,
+} from './shortcuts.js';
 
 const TEXTURE_ID = 'landing-badge';
 const STORAGE_KEY = 'infinitecanvas.scene.v1';
@@ -500,6 +506,356 @@ async function addElements(engine, canvas, count) {
 }
 
 /**
+ * 帮助面板是否打开。
+ *
+ * @returns {boolean}
+ */
+function isHelpOpen() {
+  const panel = document.getElementById('shortcut-help');
+  return Boolean(panel) && !panel.hidden;
+}
+
+/**
+ * 打开或关闭快捷键帮助。打开时按当前平台重绘，Mac 显示 ⌘。
+ *
+ * @param {boolean} open
+ */
+function setHelpOpen(open) {
+  const panel = document.getElementById('shortcut-help');
+  if (!panel) return;
+  if (open) renderShortcutHelp();
+  panel.hidden = !open;
+}
+
+/**
+ * 用快捷键表填满帮助面板。面板上的每一行都来自这张表。
+ */
+function renderShortcutHelp() {
+  const body = document.getElementById('shortcut-help-body');
+  if (!body) return;
+  const mac = prefersMacModifier();
+  const fragment = document.createDocumentFragment();
+  for (const row of helpEntries(SHORTCUTS, mac)) {
+    const line = document.createElement('div');
+    line.className = 'shortcut-row';
+
+    const keys = document.createElement('div');
+    keys.className = 'shortcut-keys';
+    row.chords.forEach((chord, index) => {
+      if (index > 0) {
+        const separator = document.createElement('span');
+        separator.className = 'shortcut-or';
+        separator.textContent = ' / ';
+        keys.append(separator);
+      }
+      const kbd = document.createElement('kbd');
+      kbd.textContent = chord;
+      keys.append(kbd);
+    });
+
+    const action = document.createElement('div');
+    action.className = 'shortcut-action';
+    action.textContent = row.action;
+
+    const tool = document.createElement('div');
+    tool.className = 'shortcut-tool';
+    tool.textContent = row.toolLabel;
+
+    line.append(keys, action, tool);
+    fragment.append(line);
+  }
+  body.replaceChildren(fragment);
+}
+
+/**
+ * 工具按钮上的键帽跟快捷键表保持一致。
+ */
+function syncShortcutLabels() {
+  const mac = prefersMacModifier();
+  for (const shortcut of SHORTCUTS) {
+    if (shortcut.handler !== 'tool') continue;
+    const kbd = document.querySelector(`.tool[data-tool="${shortcut.tool}"] kbd`);
+    if (kbd) kbd.textContent = formatChord(shortcut, mac);
+  }
+  const help = SHORTCUTS.find((shortcut) => shortcut.handler === 'toggleHelp');
+  const helpKbd = document.querySelector('#shortcuts-btn kbd');
+  if (help && helpKbd) helpKbd.textContent = formatChord(help, mac);
+}
+
+/**
+ * 把当前选择收成一个组，并改选新组。
+ *
+ * 选择里如果同时有组和它的子孙，只把组交出去。少于两个，或引擎拒绝时，选择保持不变。
+ *
+ * @param {WasmCanvas} engine
+ */
+function groupSelection(engine) {
+  const tree = engine.get_scene_tree();
+  const ids = selectionRoots([...engine.get_selected_ids()], tree?.roots);
+  if (ids.length < 2) {
+    setStatus('成组至少需要两个元素');
+    return;
+  }
+  const groupId = engine.group_elements(ids);
+  if (groupId === 0n || groupId === 0) {
+    setStatus('无法成组');
+    return;
+  }
+  engine.clear_selection();
+  engine.select_element(groupId, false);
+  scheduleAutosave(engine);
+  setStatus('已成组');
+}
+
+/**
+ * 解散当前选中的组，并改选原来的直接子元素。
+ *
+ * 不是组的选中项会被 `ungroup` 拒绝。子元素列表在解散前从场景树读出。
+ *
+ * @param {WasmCanvas} engine
+ */
+function ungroupSelection(engine) {
+  const ids = [...engine.get_selected_ids()];
+  const tree = engine.get_scene_tree();
+  /** @type {Array<bigint | number>} */
+  const children = [];
+  let changed = false;
+  for (const id of ids) {
+    const node = findTreeNode(tree?.roots, id);
+    if (!engine.ungroup(id)) continue;
+    changed = true;
+    for (const child of node?.children ?? []) {
+      children.push(child.id);
+    }
+  }
+  if (!changed) return;
+  engine.clear_selection();
+  for (const childId of children) {
+    engine.select_element(childId, true);
+  }
+  scheduleAutosave(engine);
+  setStatus('已取消分组');
+}
+
+/**
+ * 去掉那些祖先也在选择里的 id。成组时只提交这批根。
+ *
+ * @param {Array<bigint | number>} ids
+ * @param {Array<{ id: bigint | number, parentId: bigint | number | null, children?: unknown[] }> | undefined} roots
+ * @returns {Array<bigint | number>}
+ */
+function selectionRoots(ids, roots) {
+  const selected = new Set(ids.map((id) => String(id)));
+  return ids.filter((id) => {
+    let parentId = findTreeNode(roots, id)?.parentId;
+    while (parentId != null) {
+      if (selected.has(String(parentId))) return false;
+      parentId = findTreeNode(roots, parentId)?.parentId;
+    }
+    return true;
+  });
+}
+
+/**
+ * 在场景树里按 id 查找节点。数字和 bigint 都按十进制文本比较。
+ *
+ * @param {Array<{ id: bigint | number, parentId?: bigint | number | null, children?: unknown[] }> | undefined} nodes
+ * @param {bigint | number} id
+ * @returns {any}
+ */
+function findTreeNode(nodes, id) {
+  if (!nodes) return null;
+  for (const node of nodes) {
+    if (String(node.id) === String(id)) return node;
+    const found = findTreeNode(node.children, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * 执行快捷键表命中的动作。
+ *
+ * @param {import('./shortcuts.js').Shortcut} shortcut
+ * @param {WasmCanvas} engine
+ */
+function dispatchShortcut(shortcut, engine) {
+  switch (shortcut.handler) {
+    case 'undo':
+      if (engine.can_undo()) {
+        activeStyleControl = null;
+        engine.undo();
+        scheduleAutosave(engine);
+        syncPropertyPanel(engine);
+      }
+      break;
+    case 'redo':
+      if (engine.can_redo()) {
+        activeStyleControl = null;
+        engine.redo();
+        scheduleAutosave(engine);
+        syncPropertyPanel(engine);
+      }
+      break;
+    case 'toggleMinimap':
+      setMinimapVisible(!minimapVisible);
+      break;
+    case 'save':
+      saveSceneFile(engine);
+      break;
+    case 'open':
+      document.getElementById('open-file')?.click();
+      break;
+    case 'pushHand':
+      if (!spaceHeld) {
+        spaceHeld = true;
+        engine.push_hand_tool();
+      }
+      break;
+    case 'popHand':
+      if (spaceHeld) {
+        spaceHeld = false;
+        engine.pop_temporary_tool();
+      }
+      break;
+    case 'tool':
+      setTool(shortcut.tool);
+      break;
+    case 'delete':
+      if (engine.delete_selection() > 0) scheduleAutosave(engine);
+      break;
+    case 'selectAll':
+      engine.select_all();
+      scheduleAutosave(engine);
+      break;
+    case 'group':
+      groupSelection(engine);
+      break;
+    case 'ungroup':
+      ungroupSelection(engine);
+      break;
+    case 'copy':
+      enqueueClipboard(() => copySelection(engine));
+      break;
+    case 'paste': {
+      // 序号先于 paste 事件。图片路径会把已消费序号抬到这里，元素 JSON 就不再跑。
+      const serial = ++imagePasteSerial;
+      enqueueClipboard(() => new Promise((resolve) => {
+        setTimeout(async () => {
+          try {
+            if (imagePasteConsumed >= serial) return;
+            await pasteSelection(engine);
+          } finally {
+            resolve();
+          }
+        }, 0);
+      }));
+      break;
+    }
+    case 'duplicate':
+      duplicateSelection(engine);
+      break;
+    case 'nudge':
+      nudgeSelection(engine, shortcut);
+      break;
+    case 'reorder':
+      reorderSelection(engine, shortcut.order);
+      break;
+    case 'flip':
+      flipSelection(engine, shortcut.axis);
+      break;
+    case 'rotate':
+      rotateSelectionQuarter(engine, shortcut.dir);
+      break;
+    case 'escape':
+      if (escapeAction(isHelpOpen()) === 'closeHelp') {
+        setHelpOpen(false);
+      } else {
+        engine.clear_selection();
+        scheduleAutosave(engine);
+      }
+      break;
+    case 'zoomFit':
+      if (engine.zoom_to_fit()) setStatus('已缩放到适合');
+      break;
+    case 'zoom100':
+      engine.set_zoom(1);
+      setStatus('已缩放到 100%');
+      break;
+    case 'toggleHelp':
+      setHelpOpen(!isHelpOpen());
+      break;
+    default:
+      break;
+  }
+}
+
+/**
+ * 方向键微调当前选中。普通步长 1 个世界单位，Shift 为 10 倍，由引擎计算。
+ *
+ * @param {WasmCanvas} engine
+ * @param {import('./shortcuts.js').Shortcut} shortcut
+ */
+function nudgeSelection(engine, shortcut) {
+  const direction = shortcut.direction;
+  if (direction !== 'left' && direction !== 'right' && direction !== 'up' && direction !== 'down') {
+    return;
+  }
+  if (engine.nudge_selection(direction, shortcut.shift === true)) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+  }
+}
+
+/**
+ * 把当前选中按同一层的兄弟顺序重排。动作名交给引擎。
+ *
+ * @param {WasmCanvas} engine
+ * @param {string | undefined} order `front`、`back`、`forward` 或 `backward`
+ */
+function reorderSelection(engine, order) {
+  if (order !== 'front' && order !== 'back' && order !== 'forward' && order !== 'backward') {
+    return;
+  }
+  if (engine.reorder_selection(order)) {
+    scheduleAutosave(engine);
+    layerPanel?.sync();
+  }
+}
+
+/**
+ * 绕选区中心水平或垂直翻转。按住不重复，避免一次长按堆很多条撤销。
+ *
+ * @param {WasmCanvas} engine
+ * @param {string | undefined} axis `horizontal` 或 `vertical`
+ */
+function flipSelection(engine, axis) {
+  if (axis !== 'horizontal' && axis !== 'vertical') return;
+  if (typeof engine.flip_selection !== 'function') return;
+  if (engine.flip_selection(axis)) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+    setStatus(axis === 'vertical' ? '已垂直翻转' : '已水平翻转');
+  }
+}
+
+/**
+ * 绕选区中心转 90°。`cw` 顺时针，`ccw` 逆时针。
+ *
+ * @param {WasmCanvas} engine
+ * @param {string | undefined} dir `cw` 或 `ccw`
+ */
+function rotateSelectionQuarter(engine, dir) {
+  if (dir !== 'cw' && dir !== 'ccw') return;
+  if (typeof engine.rotate_selection_quarter !== 'function') return;
+  if (engine.rotate_selection_quarter(dir)) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+    setStatus(dir === 'ccw' ? '已逆时针旋转 90°' : '已顺时针旋转 90°');
+  }
+}
+
+/**
  * @param {string} toolName
  */
 function setTool(toolName) {
@@ -761,10 +1117,6 @@ function bindMinimap(canvas, engine) {
   });
 }
 
-/**
- * @param {HTMLCanvasElement} canvas
- * @param {WasmCanvas} engine
- */
 /**
  * 结束一次属性拖动，并把前后差值收成一条撤销记录。
  *
@@ -1206,13 +1558,12 @@ function bindInput(canvas, engine) {
   const editor = document.getElementById('text-editor');
   if (editor instanceof HTMLTextAreaElement) {
     editor.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        closeTextEditor(engine, false);
-      } else if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        closeTextEditor(engine, true);
-      }
+      const shortcut = matchShortcut(SHORTCUTS, event, 'down', 'text-editor');
+      if (!shortcut) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (shortcut.handler === 'commitText') closeTextEditor(engine, true);
+      if (shortcut.handler === 'cancelText') closeTextEditor(engine, false);
     });
     editor.addEventListener('blur', () => {
       if (textEditorOpening) return;
@@ -1347,134 +1698,36 @@ function bindInput(canvas, engine) {
     }
   });
 
+  syncShortcutLabels();
+  renderShortcutHelp();
+  document.getElementById('shortcuts-btn')?.addEventListener('click', () => {
+    setHelpOpen(!isHelpOpen());
+  });
+  document.getElementById('shortcut-help-close')?.addEventListener('click', () => {
+    setHelpOpen(false);
+  });
+  document.getElementById('shortcut-help')?.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) setHelpOpen(false);
+  });
+
   document.addEventListener('keydown', (event) => {
-    const inField = event.target instanceof HTMLElement
-      && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA');
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
-      event.preventDefault();
-      activeStyleControl = null;
-      engine.undo();
-      scheduleAutosave(engine);
-      syncPropertyPanel(engine);
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))) {
-      event.preventDefault();
-      activeStyleControl = null;
-      engine.redo();
-      scheduleAutosave(engine);
-      syncPropertyPanel(engine);
-      return;
-    }
-    if (inField) return;
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      saveSceneFile(engine);
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
-      event.preventDefault();
-      enqueueClipboard(() => copySelection(engine));
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v') {
-      // 不 preventDefault：paste 事件要先看到剪贴板里的图片。
-      // 有图片则粘贴图片；否则在下一拍走元素 JSON。
-      const serial = ++imagePasteSerial;
-      enqueueClipboard(() => new Promise((resolve) => {
-        setTimeout(async () => {
-          try {
-            if (imagePasteConsumed >= serial) return;
-            await pasteSelection(engine);
-          } finally {
-            resolve();
-          }
-        }, 0);
-      }));
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'd') {
-      event.preventDefault();
-      duplicateSelection(engine);
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
-      event.preventDefault();
-      document.getElementById('open-file')?.click();
-      return;
-    }
-    const stackAction = stackOrderAction(event);
-    if (stackAction) {
-      event.preventDefault();
-      if (engine.reorder_selection(stackAction)) {
-        scheduleAutosave(engine);
-        layerPanel?.sync();
-      }
-      return;
-    }
-    if (event.key === ' ' && !spaceHeld) {
-      event.preventDefault();
-      spaceHeld = true;
-      engine.push_hand_tool();
-      return;
-    }
-    const orient = orientAction(event);
-    if (orient) {
-      event.preventDefault();
-      const changed = orient.kind === 'flip'
-        ? engine.flip_selection(orient.axis)
-        : engine.rotate_selection_quarter(orient.dir);
-      if (changed) {
-        scheduleAutosave(engine);
-        syncPropertyPanel(engine);
-      }
-      return;
-    }
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    const nudge = arrowNudge(event);
-    if (nudge) {
-      event.preventDefault();
-      if (engine.nudge_selection(nudge.direction, nudge.shift)) {
-        scheduleAutosave(engine);
-        syncPropertyPanel(engine);
-      }
-      return;
-    }
-    switch (event.key.toLowerCase()) {
-      case 'v':
-        setTool('select');
-        break;
-      case 'l':
-        setTool('line');
-        break;
-      case 'p':
-        setTool('pen');
-        break;
-      case 'r':
-        setTool('rectangle');
-        break;
-      case 'o':
-        setTool('circle');
-        break;
-      case 'h':
-        setTool('pan');
-        break;
-      case 't':
-        setTool('text');
-        break;
-      case 'm':
-        setMinimapVisible(!minimapVisible);
-        break;
-      default:
-        break;
+    if (isEditableTarget(event.target)) return;
+    const shortcut = matchShortcut(SHORTCUTS, event, 'down');
+    if (shortcut) {
+      // Ctrl/Cmd+V 不拦截默认动作：paste 事件要先看到剪贴板里的图片。
+      if (shortcut.handler !== 'paste') event.preventDefault();
+      if (event.repeat && shortcut.allowRepeat === false) return;
+      dispatchShortcut(shortcut, engine);
     }
   });
 
   document.addEventListener('keyup', (event) => {
-    if (event.key === ' ' && spaceHeld) {
-      spaceHeld = false;
-      engine.pop_temporary_tool();
-    }
+    const shortcut = matchShortcut(SHORTCUTS, event, 'up');
+    if (!shortcut) return;
+    // 空格是按下时记下的。焦点中途进了输入框，松开时也要恢复工具。
+    if (isEditableTarget(event.target) && !(shortcut.handler === 'popHand' && spaceHeld)) return;
+    event.preventDefault();
+    dispatchShortcut(shortcut, engine);
   });
 }
 

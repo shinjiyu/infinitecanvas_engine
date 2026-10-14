@@ -30,11 +30,11 @@ Scene
 - `Scene::move_in_outline`：改兄弟顺序，或移入 / 移出组。下标 `0` 是最底层。世界坐标不变
 - `Scene::arrange_siblings` / `ReorderSelectionCommand`：对当前选中做置顶、置底、前移、后移。只动同一父节点下的兄弟；选中组时移动组根。见 [stack-order.md](./stack-order.md)
 - `Scene::scene_tree`：层级面板数据
-- 删除组会删掉整棵子树；只去掉组节点用 `ungroup`
+- 删除组会删掉整棵子树；只去掉组节点用 `ungroup`。`RemoveElementsCommand` 删除前快照整棵子树，撤销时按原来的父节点和兄弟下标放回
 
 `move_in_outline` 和 `arrange_siblings` 成功后按深度优先重写 `z_index`（越靠后的兄弟越大），并推进 `structure_epoch`。顶点缓存、PNG 和 SVG 都按这个 `z_index` 绘制。几何脏标记不置位，因为三角形没变。`ReorderOutlineCommand` 和 `ReorderSelectionCommand` 记下移动前的父指针、子列表和 `z_index`，撤销时写回。
 
-隐藏组时，子孙的命中和绘制会被跳过，但不会改写它们自己的 `visible`。锁定会沿着祖先链生效：被锁定的元素不能被点选、框选或拖动。
+隐藏组时，子孙的命中和绘制会被跳过，但不会改写它们自己的 `visible`。锁定会沿着祖先链生效：被锁定的元素不能被点选、框选、全选或拖动。
 
 Demo 的图层面板在 `www/layer-panel.js`。列表按视口虚拟滚动；点击和画布选中双向同步，拖拽走 `reorder_element`。
 

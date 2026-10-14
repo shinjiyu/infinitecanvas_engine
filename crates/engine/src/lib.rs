@@ -48,9 +48,9 @@ pub use asset::{fitted_size, AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE}
 pub use command::{
     apply_nudge, apply_stack_reorder, AddElementCommand, Command, CommandHistory,
     DuplicateElementsCommand, MoveCommand, NudgeDirection, NudgeElementsCommand,
-    PasteElementsCommand, RemoveElementCommand, ReorderOutlineCommand, ReorderSelectionCommand,
-    SetStyleCommand, StackOrderAction, TransformElementsCommand, UpdateTextCommand,
-    NUDGE_SHIFT_FACTOR, NUDGE_STEP,
+    PasteElementsCommand, RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand,
+    ReorderSelectionCommand, SetStyleCommand, StackOrderAction, TransformElementsCommand,
+    UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{
     Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Rectangle,

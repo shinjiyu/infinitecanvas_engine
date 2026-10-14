@@ -305,10 +305,10 @@ fn allocated_id_stays_within_js_safe_integer() {
     let mut session = CollabSession::with_client_id(9, MAX_PEER_SLOT);
     let id = session.allocate_id();
     assert_eq!(id, (u64::from(MAX_PEER_SLOT) << 32) | 1);
-    assert!(id <= (1u64 << 53) - 1);
+    assert!(id < (1u64 << 53));
     let again = session.allocate_id();
     assert_eq!(again, id + 1);
-    assert!(again <= (1u64 << 53) - 1);
+    assert!(again < (1u64 << 53));
 }
 
 #[test]

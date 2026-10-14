@@ -725,7 +725,9 @@ fn parse_data_url(value: &str) -> Result<(String, Vec<u8>), AssetError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command::{AddElementCommand, CommandHistory, RemoveElementCommand};
+    use crate::command::{
+        AddElementCommand, CommandHistory, RemoveElementCommand, RemoveElementsCommand,
+    };
     use crate::element::Image;
     use crate::math::Vec2;
     use crate::{AnyElement, Scene};
@@ -888,6 +890,66 @@ mod tests {
             vec![9, 8, 7, 255]
         );
         assert!(scene.get(id).is_some());
+    }
+
+    #[test]
+    fn remove_command_undo_restores_grouped_image_pixels() {
+        let exclusive = solid_png(1, 1, [9, 8, 7, 255]);
+        let shared = solid_png(1, 1, [1, 2, 3, 255]);
+        let mut scene = Scene::new();
+        let exclusive_id = scene.insert_image_bytes(&exclusive, "image/png").unwrap();
+        let shared_id = scene.insert_image_bytes(&shared, "image/png").unwrap();
+        let inside = scene.next_id();
+        scene.add_image(Image::from_asset(inside, Vec2::ZERO, &exclusive_id, 1, 1));
+        let also = scene.next_id();
+        scene.add_image(Image::from_asset(
+            also,
+            Vec2::new(8.0, 0.0),
+            &shared_id,
+            1,
+            1,
+        ));
+        let outside = scene.next_id();
+        scene.add_image(Image::from_asset(
+            outside,
+            Vec2::new(24.0, 0.0),
+            &shared_id,
+            1,
+            1,
+        ));
+        let group_id = scene.group(&[inside, also]).unwrap();
+        assert_eq!(scene.asset_refcount(&shared_id), 2);
+
+        let mut history = CommandHistory::new();
+        history.execute(Box::new(RemoveElementCommand::new(group_id)), &mut scene);
+        assert!(!scene.contains(inside) && !scene.contains(also));
+        assert!(scene.image_asset(&exclusive_id).is_none());
+        assert_eq!(scene.asset_refcount(&shared_id), 1);
+        assert!(scene.contains(outside));
+
+        history.undo(&mut scene);
+        assert_eq!(scene.children_of(group_id), vec![inside, also]);
+        assert_eq!(scene.asset_refcount(&exclusive_id), 1);
+        assert_eq!(
+            scene.image_asset(&exclusive_id).unwrap().rgba,
+            vec![9, 8, 7, 255]
+        );
+        assert_eq!(scene.asset_refcount(&shared_id), 2);
+
+        history.redo(&mut scene);
+        assert!(scene.image_asset(&exclusive_id).is_none());
+        assert_eq!(scene.asset_refcount(&shared_id), 1);
+
+        history.undo(&mut scene);
+        history.execute(
+            Box::new(RemoveElementsCommand::new(vec![group_id, inside])),
+            &mut scene,
+        );
+        assert!(scene.image_asset(&exclusive_id).is_none());
+        history.undo(&mut scene);
+        assert_eq!(scene.asset_refcount(&exclusive_id), 1);
+        assert_eq!(scene.asset_refcount(&shared_id), 2);
+        assert!(scene.contains(outside));
     }
 
     #[test]

@@ -78,6 +78,41 @@ impl SelectionManager {
         self.selected.remove(&id);
     }
 
+    /// 选中顶层的可见元素。
+    ///
+    /// 组只选中组本身，不选中它的子孙。元素不可见、祖先被隐藏，或自身及祖先被锁定时，不选。
+    /// 先清空当前选择，再逐个选中。返回选中数量。
+    ///
+    /// # 参数
+    /// - `scene`: 要选择的场景
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene, SelectionManager};
+    /// use infinitecanvas_math::Vec2;
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::ONE));
+    /// let mut selection = SelectionManager::new();
+    /// assert_eq!(selection.select_all(&mut scene), 1);
+    /// ```
+    pub fn select_all(&mut self, scene: &mut Scene) -> usize {
+        let ids: Vec<ElementId> = scene
+            .iter()
+            .filter(|element| {
+                let id = element.id();
+                scene.parent_of(id).is_none()
+                    && scene.is_effectively_visible(id)
+                    && !scene.is_effectively_locked(id)
+            })
+            .map(|element| element.id())
+            .collect();
+        self.clear(scene);
+        for id in ids {
+            self.select_element(scene, id, true);
+        }
+        self.len()
+    }
+
     /// Returns a sorted list of selected IDs.
     pub fn selected_ids(&self) -> Vec<ElementId> {
         let mut ids: Vec<ElementId> = self.selected.iter().copied().collect();
@@ -228,6 +263,104 @@ mod tests {
         assert_eq!(hits, vec![1]);
         assert!(selection.is_selected(1));
         assert!(!selection.is_selected(2));
+    }
+
+    #[test]
+    fn select_all_selects_every_element() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::ONE));
+        scene.add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::ONE));
+
+        let mut selection = SelectionManager::new();
+        selection.select_element(&mut scene, 1, false);
+        assert_eq!(selection.select_all(&mut scene), 2);
+        assert!(selection.is_selected(1));
+        assert!(selection.is_selected(2));
+        assert!(scene.get(2).unwrap().as_element().props().selected);
+
+        let mut empty = Scene::new();
+        assert_eq!(selection.select_all(&mut empty), 0);
+        assert!(selection.is_empty());
+    }
+
+    #[test]
+    fn select_all_selects_visible_top_level_only() {
+        let mut scene = Scene::new();
+        let left = scene.next_id();
+        scene.add_rect(Rectangle::new(left, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        let right = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let hidden_id = scene.next_id();
+        let mut hidden = Rectangle::new(hidden_id, Vec2::new(80.0, 0.0), Vec2::new(10.0, 10.0));
+        hidden.props.visible = false;
+        scene.add_rect(hidden);
+        let group_id = scene.group(&[left, right]).unwrap();
+        let top = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            top,
+            Vec2::new(120.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+
+        let mut selection = SelectionManager::new();
+        selection.select_element(&mut scene, hidden_id, false);
+        assert_eq!(selection.select_all(&mut scene), 2);
+        assert!(selection.is_selected(group_id));
+        assert!(selection.is_selected(top));
+        assert!(!selection.is_selected(left));
+        assert!(!selection.is_selected(right));
+        assert!(!selection.is_selected(hidden_id));
+        assert!(scene.get(group_id).unwrap().as_element().props().selected);
+        assert!(!scene.get(left).unwrap().as_element().props().selected);
+    }
+
+    #[test]
+    fn select_all_skips_effectively_locked() {
+        let mut scene = Scene::new();
+        let open = scene.next_id();
+        scene.add_rect(Rectangle::new(open, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        let locked_id = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            locked_id,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.set_locked(locked_id, true);
+        let child = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            child,
+            Vec2::new(80.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let sibling = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            sibling,
+            Vec2::new(110.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[child, sibling]).unwrap();
+        scene.set_locked(group_id, true);
+        let free = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            free,
+            Vec2::new(160.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+
+        let mut selection = SelectionManager::new();
+        assert_eq!(selection.select_all(&mut scene), 2);
+        assert!(selection.is_selected(open));
+        assert!(selection.is_selected(free));
+        assert!(!selection.is_selected(locked_id));
+        assert!(!selection.is_selected(group_id));
+        assert!(!selection.is_selected(child));
+        assert!(!selection.is_selected(sibling));
+        assert!(!scene.get(locked_id).unwrap().as_element().props().selected);
+        assert!(!scene.get(group_id).unwrap().as_element().props().selected);
     }
 
     #[test]

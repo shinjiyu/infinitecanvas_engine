@@ -101,6 +101,43 @@ impl Viewport {
         self.zoom = zoom.clamp(self.min_zoom, self.max_zoom);
     }
 
+    /// 缩放并平移，使 `bounds` 完整落在画布内。
+    ///
+    /// 四周留出 `padding` 屏幕像素。缩放被限制在最小/最大缩放之间，
+    /// 矩形中心对齐画布中心。宽或高过小的矩形按一个很小的尺寸估算缩放，避免除零。
+    ///
+    /// # 参数
+    /// - `bounds`: 世界空间包围盒
+    /// - `padding`: 四周留白（屏幕像素）。负数或非有限值按 0 处理
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::Viewport;
+    /// use infinitecanvas_math::{Rect, Vec2};
+    /// let mut viewport = Viewport::new(Vec2::new(800.0, 600.0));
+    /// viewport.fit_rect(Rect::new(0.0, 0.0, 200.0, 100.0), 0.0);
+    /// assert!((viewport.zoom() - 4.0).abs() < 1e-4);
+    /// ```
+    pub fn fit_rect(&mut self, bounds: Rect, padding: f32) {
+        let padding = if padding.is_finite() {
+            padding.max(0.0)
+        } else {
+            0.0
+        };
+        let available_width = (self.canvas_size.x - padding * 2.0).max(1.0);
+        let available_height = (self.canvas_size.y - padding * 2.0).max(1.0);
+        let zoom = (available_width / positive_extent(bounds.width))
+            .min(available_height / positive_extent(bounds.height));
+        self.set_zoom(zoom);
+        if bounds.x.is_finite()
+            && bounds.y.is_finite()
+            && bounds.width.is_finite()
+            && bounds.height.is_finite()
+        {
+            self.center = bounds.center();
+        }
+    }
+
     /// 移动到指定位置
     pub fn move_to(&mut self, center: Vec2) {
         self.center = center;
@@ -151,6 +188,15 @@ impl Viewport {
     /// 判断矩形是否在视口内（用于裁剪）
     pub fn is_visible(&self, rect: &Rect) -> bool {
         self.bounds().intersects(rect)
+    }
+}
+
+/// 用于缩放计算的最小边长。过小或非有限的宽高按这个值处理，避免除零。
+fn positive_extent(value: f32) -> f32 {
+    if value.is_finite() && value > 1.0e-3 {
+        value
+    } else {
+        1.0e-3
     }
 }
 
@@ -221,6 +267,27 @@ mod tests {
         assert_eq!(bounds.center(), Vec2::ZERO);
         assert_eq!(bounds.width, 800.0);
         assert_eq!(bounds.height, 600.0);
+    }
+
+    #[test]
+    fn fit_rect_centers_content_and_uses_the_tighter_axis() {
+        let mut viewport = Viewport::new(Vec2::new(800.0, 600.0));
+        viewport.fit_rect(Rect::new(0.0, 0.0, 200.0, 100.0), 0.0);
+
+        assert!((viewport.zoom() - 4.0).abs() < 1e-4);
+        assert_eq!(viewport.center(), Vec2::new(100.0, 50.0));
+    }
+
+    #[test]
+    fn fit_rect_reserves_padding_and_clamps_to_max_zoom() {
+        let mut viewport = Viewport::new(Vec2::new(800.0, 600.0));
+        viewport.fit_rect(Rect::new(0.0, 0.0, 200.0, 100.0), 50.0);
+        assert!((viewport.zoom() - 3.5).abs() < 1e-4);
+        assert_eq!(viewport.center(), Vec2::new(100.0, 50.0));
+
+        viewport.fit_rect(Rect::new(10.0, 20.0, 1.0, 1.0), 0.0);
+        assert!((viewport.zoom() - 10.0).abs() < 1e-4);
+        assert_eq!(viewport.center(), Vec2::new(10.5, 20.5));
     }
 
     #[test]
