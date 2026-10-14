@@ -64,9 +64,9 @@ pub use command::{
     StackOrderAction, TransformElementsCommand, UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{
-    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, Frame, Group, Image, Line,
-    Path, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin, Text, TextAlign,
-    TextClickResolver, TextPlacement, TextVisual,
+    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, Frame,
+    GradientStop, Group, Image, Line, Path, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin,
+    Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };
 pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,

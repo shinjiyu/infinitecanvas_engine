@@ -14,7 +14,7 @@
 //! ```
 
 use crate::command::{CommandHistory, SetStyleCommand};
-use crate::element::ElementId;
+use crate::element::{ElementId, ElementStyle, FillKind};
 use crate::hit_test::{hit_test_point, HitTestOptions};
 use crate::math::Vec2;
 use crate::style::{capture_style, style_locked, style_target_ids, StylePatch, StyleSnapshot};
@@ -38,8 +38,9 @@ pub struct SampledPaint {
 impl SampledPaint {
     /// 变成样式补丁。
     ///
-    /// 有填充时同时写形状 `fill` 和文本 `text_color`。
-    /// 有描边时写 `stroke`。缺的通道保持 `None`，不会把目标颜色清掉。
+    /// 有填充时同时写形状 `fill` 和文本 `text_color`，并把形状收成纯色，
+    /// 这样采到的颜色会盖过原来的渐变。有描边时写 `stroke`。
+    /// 缺的通道保持 `None`，不会把目标颜色清掉。
     ///
     /// # 示例
     /// ```
@@ -61,6 +62,7 @@ impl SampledPaint {
             fill: self.fill.map(Some),
             stroke: self.stroke.map(Some),
             text_color: self.fill,
+            fill_kind: self.fill.map(|_| FillKind::Solid),
             ..StylePatch::default()
         }
     }
@@ -113,7 +115,7 @@ pub fn sample_paint_at(scene: &Scene, point: Vec2) -> Option<SampledPaint> {
             stroke: None,
         });
     };
-    Some(paint_from_snapshot(hit.id, &snapshot))
+    Some(paint_from_snapshot(scene, hit.id, &snapshot, point))
 }
 
 /// 把采样到的颜色写到 `selected_ids`。
@@ -173,13 +175,18 @@ fn editable_leaves(scene: &Scene, selected_ids: &[ElementId]) -> Vec<ElementId> 
         .collect()
 }
 
-fn paint_from_snapshot(id: ElementId, snapshot: &StyleSnapshot) -> SampledPaint {
+fn paint_from_snapshot(
+    scene: &Scene,
+    id: ElementId,
+    snapshot: &StyleSnapshot,
+    point: Vec2,
+) -> SampledPaint {
     match snapshot {
         StyleSnapshot::Shape(style)
         | StyleSnapshot::Rectangle { style, .. }
         | StyleSnapshot::Polygon { style, .. } => SampledPaint {
             id,
-            fill: style.fill,
+            fill: fill_at(scene, id, style, point),
             stroke: style.stroke,
         },
         StyleSnapshot::Text(text) => SampledPaint {
@@ -193,6 +200,27 @@ fn paint_from_snapshot(id: ElementId, snapshot: &StyleSnapshot) -> SampledPaint 
             stroke: None,
         },
     }
+}
+
+/// 渐变上取该点的颜色。纯色仍读 `fill`。逆变换失败时退回纯色通道或第一个色标。
+fn fill_at(scene: &Scene, id: ElementId, style: &ElementStyle, point: Vec2) -> Option<Color> {
+    if !style.uses_gradient() {
+        return style.fill;
+    }
+    let Some(element) = scene.get(id) else {
+        return style.fill;
+    };
+    let local = element
+        .as_element()
+        .props()
+        .transform
+        .inverse_transform_point(point);
+    if local.x.is_finite() && local.y.is_finite() {
+        return style.sample_fill(local, element.as_element().local_bounds());
+    }
+    style
+        .fill
+        .or_else(|| style.normalized_stops().first().map(|stop| stop.color))
 }
 
 #[cfg(test)]
@@ -538,5 +566,45 @@ mod tests {
             &sample
         ));
         assert_eq!(history.undo_count(), 0);
+    }
+
+    #[test]
+    fn gradient_sample_is_the_color_under_the_point_and_apply_flattens() {
+        use crate::element::GradientStop;
+
+        let mut scene = Scene::new();
+        let mut source = Rectangle::new(1, Vec2::ZERO, Vec2::new(20.0, 20.0));
+        source.style.fill_kind = FillKind::Linear;
+        source.style.fill_angle = 0.0;
+        source.style.fill = Some(Color::WHITE);
+        source.style.fill_stops = vec![
+            GradientStop {
+                offset: 0.0,
+                color: Color::RED,
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::BLUE,
+            },
+        ];
+        scene.add_rect(source);
+        scene.add_rect(rect(2, Vec2::new(40.0, 0.0), Color::GREEN, None, 1));
+
+        let left = sample_paint_at(&scene, Vec2::new(-10.0, 0.0)).unwrap();
+        assert_eq!(left.fill, Some(Color::RED));
+        let right = sample_paint_at(&scene, Vec2::new(10.0, 0.0)).unwrap();
+        assert_eq!(right.fill, Some(Color::BLUE));
+
+        let mut history = CommandHistory::new();
+        assert!(apply_sampled_paint(&mut history, &mut scene, &[2], &right));
+        assert_eq!(history.undo_count(), 1);
+        assert_eq!(shape_style(&scene, 2).fill, Some(Color::BLUE));
+        assert_eq!(shape_style(&scene, 2).fill_kind, FillKind::Solid);
+
+        assert!(apply_sampled_paint(&mut history, &mut scene, &[1], &left));
+        assert_eq!(shape_style(&scene, 1).fill_kind, FillKind::Solid);
+        assert_eq!(shape_style(&scene, 1).fill, Some(Color::RED));
+        assert!(history.undo(&mut scene));
+        assert_eq!(shape_style(&scene, 1).fill_kind, FillKind::Linear);
     }
 }

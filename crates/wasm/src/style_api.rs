@@ -6,8 +6,9 @@
 
 use infinitecanvas_engine::{
     apply_sampled_paint, apply_style_snapshot, capture_style, math::Color, math::Vec2,
-    sample_paint_at, selection_style, style_locked, style_target_ids, ElementId, SampledPaint,
-    SetStyleCommand, StrokeCap, StrokeJoin, StyleField, StylePatch, StyleSnapshot,
+    sample_paint_at, selection_style, style_locked, style_target_ids, ElementId, FillKind,
+    GradientStop, SampledPaint, SetStyleCommand, StrokeCap, StrokeJoin, StyleField, StylePatch,
+    StyleSnapshot,
 };
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
@@ -36,6 +37,9 @@ impl InfiniteCanvas {
     /// - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
     /// - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
     /// - `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字。`shadowColor` 是 `#rrggbbaa`（面板只用 RGB，浓度在 `shadowOpacity`）。没有形状、文本或图片时 `shadowSupported` 为 false
+    /// - `fillKind`：`solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
+    ///   `fillAngle` 为度，`fillCenter` 为 `{x, y}`，`fillRadius` 为局部半径（0 表示自动）。
+    ///   这几项只统计形状。多选不一致时对应的 `*Mixed` 为 true
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -76,6 +80,11 @@ impl InfiniteCanvas {
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
         write_label(&obj, "strokeJoin", &style.stroke_join, StrokeJoin::as_str);
+        write_label(&obj, "fillKind", &style.fill_kind, FillKind::as_str);
+        write_stops(&obj, &style.fill_stops);
+        write_number(&obj, "fillAngle", &style.fill_angle);
+        write_center(&obj, &style.fill_center);
+        write_number(&obj, "fillRadius", &style.fill_radius);
         obj.into()
     }
 
@@ -89,7 +98,10 @@ impl InfiniteCanvas {
     /// `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
     /// `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。空选择或没有变化时返回 false。
     /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
-    /// 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
+    /// `fillKind` 是 `solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
+    /// `fillAngle`、`fillRadius` 是数字。`fillCenter` 是 `{x, y}` 或 `[x, y]`。
+    /// 也接受 `fill_kind`、`fill_stops`、`fill_angle`、`fill_center`、`fill_radius`。
+    /// 渐变只改形状，描边保持纯色。线型和线帽线结只改形状，文本描边保持原来的光栅描边。
     /// 没有任何变化时返回 false，也不入栈。
     #[wasm_bindgen]
     pub fn set_selection_style(&mut self, patch: JsValue) -> bool {
@@ -418,6 +430,12 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
             .or_else(|| read_color(value, "shadow_color")),
         shadow_opacity: read_f32(value, "shadowOpacity")
             .or_else(|| read_f32(value, "shadow_opacity")),
+        fill_kind: read_label(value, "fillKind", FillKind::parse)
+            .or_else(|| read_label(value, "fill_kind", FillKind::parse)),
+        fill_stops: read_stops(value, "fillStops").or_else(|| read_stops(value, "fill_stops")),
+        fill_angle: read_f32(value, "fillAngle").or_else(|| read_f32(value, "fill_angle")),
+        fill_center: read_vec2(value, "fillCenter").or_else(|| read_vec2(value, "fill_center")),
+        fill_radius: read_f32(value, "fillRadius").or_else(|| read_f32(value, "fill_radius")),
     })
 }
 
@@ -431,6 +449,122 @@ fn read_sides(value: &JsValue) -> Option<u32> {
         return None;
     }
     Some(rounded as u32)
+}
+
+fn write_stops(obj: &Object, field: &StyleField<Vec<GradientStop>>) {
+    match field {
+        StyleField::Absent => {
+            js_set(obj, "fillStops", JsValue::NULL);
+            js_set(obj, "fillStopsMixed", JsValue::from(false));
+            js_set(obj, "fillStopsSupported", JsValue::from(false));
+        }
+        StyleField::Mixed => {
+            js_set(obj, "fillStops", JsValue::NULL);
+            js_set(obj, "fillStopsMixed", JsValue::from(true));
+            js_set(obj, "fillStopsSupported", JsValue::from(true));
+        }
+        StyleField::Uniform(stops) => {
+            let array = Array::new();
+            for stop in stops {
+                let item = Object::new();
+                js_set(&item, "offset", JsValue::from(stop.offset));
+                js_set(&item, "color", JsValue::from_str(&stop.color.to_hex()));
+                array.push(&item);
+            }
+            js_set(obj, "fillStops", array.into());
+            js_set(obj, "fillStopsMixed", JsValue::from(false));
+            js_set(obj, "fillStopsSupported", JsValue::from(true));
+        }
+    }
+}
+
+fn write_center(obj: &Object, field: &StyleField<Vec2>) {
+    match field {
+        StyleField::Absent => {
+            js_set(obj, "fillCenter", JsValue::NULL);
+            js_set(obj, "fillCenterMixed", JsValue::from(false));
+            js_set(obj, "fillCenterSupported", JsValue::from(false));
+        }
+        StyleField::Mixed => {
+            js_set(obj, "fillCenter", JsValue::NULL);
+            js_set(obj, "fillCenterMixed", JsValue::from(true));
+            js_set(obj, "fillCenterSupported", JsValue::from(true));
+        }
+        StyleField::Uniform(center) => {
+            let point = Object::new();
+            js_set(&point, "x", JsValue::from(center.x));
+            js_set(&point, "y", JsValue::from(center.y));
+            js_set(obj, "fillCenter", point.into());
+            js_set(obj, "fillCenterMixed", JsValue::from(false));
+            js_set(obj, "fillCenterSupported", JsValue::from(true));
+        }
+    }
+}
+
+fn read_stops(value: &JsValue, key: &str) -> Option<Vec<GradientStop>> {
+    if !has_key(value, key) {
+        return None;
+    }
+    let current = Reflect::get(value, &JsValue::from_str(key)).ok()?;
+    if current.is_null() || current.is_undefined() {
+        return Some(Vec::new());
+    }
+    if !Array::is_array(&current) {
+        return None;
+    }
+    let array = Array::from(&current);
+    let mut stops = Vec::with_capacity(array.length() as usize);
+    for item in array.iter() {
+        if !item.is_object() {
+            continue;
+        }
+        let offset = Reflect::get(&item, &JsValue::from_str("offset"))
+            .ok()
+            .and_then(|value| value.as_f64())
+            .filter(|value| value.is_finite())
+            .map(|value| value as f32)
+            .unwrap_or(0.0);
+        let color = Reflect::get(&item, &JsValue::from_str("color"))
+            .ok()
+            .and_then(|value| value.as_string())
+            .and_then(|text| Color::from_hex(&text).ok())
+            .unwrap_or(Color::BLACK);
+        stops.push(GradientStop { offset, color });
+    }
+    Some(stops)
+}
+
+fn read_vec2(value: &JsValue, key: &str) -> Option<Vec2> {
+    if !has_key(value, key) {
+        return None;
+    }
+    let current = Reflect::get(value, &JsValue::from_str(key)).ok()?;
+    if current.is_null() || current.is_undefined() {
+        return Some(Vec2::ZERO);
+    }
+    if Array::is_array(&current) {
+        let array = Array::from(&current);
+        let x = array.get(0).as_f64()?;
+        let y = array.get(1).as_f64()?;
+        if x.is_finite() && y.is_finite() {
+            return Some(Vec2::new(x as f32, y as f32));
+        }
+        return None;
+    }
+    if !current.is_object() {
+        return None;
+    }
+    let x = Reflect::get(&current, &JsValue::from_str("x"))
+        .ok()
+        .and_then(|value| value.as_f64())?;
+    let y = Reflect::get(&current, &JsValue::from_str("y"))
+        .ok()
+        .and_then(|value| value.as_f64())?;
+    if x.is_finite() && y.is_finite() {
+        Some(Vec2::new(x as f32, y as f32))
+    } else {
+        None
+    }
 }
 
 fn read_dash(value: &JsValue, key: &str) -> Option<Vec<f32>> {

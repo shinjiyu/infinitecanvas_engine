@@ -76,13 +76,17 @@ pub fn hit_test_point(scene: &Scene, point: Vec2, options: &HitTestOptions) -> V
 /// # 示例
 /// ```
 /// use infinitecanvas_engine::hit_test::click_target;
-/// use infinitecanvas_engine::{Frame, Rectangle, Scene};
+/// use infinitecanvas_engine::{
+///     apply_reparent_into_frame, CommandHistory, Frame, Rectangle, Scene,
+/// };
 /// use infinitecanvas_math::Vec2;
 ///
 /// let mut scene = Scene::new();
-/// scene.add_frame(Frame::new(1, Vec2::ZERO, Vec2::new(40.0, 40.0)));
+/// let frame_id = scene.add_frame(Frame::new(1, Vec2::ZERO, Vec2::new(40.0, 40.0)));
 /// scene.add_rect(Rectangle::new(2, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+/// apply_reparent_into_frame(&mut CommandHistory::new(), &mut scene, &[2], frame_id);
 /// assert_eq!(click_target(&scene, Vec2::ZERO, false), Some(2));
+/// assert_eq!(click_target(&scene, Vec2::ZERO, true), Some(frame_id));
 /// ```
 pub fn click_target(scene: &Scene, point: Vec2, prefer_frame: bool) -> Option<ElementId> {
     let hits = hit_test_point(

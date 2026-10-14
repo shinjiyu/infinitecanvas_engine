@@ -5,9 +5,8 @@
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
 //! 画板有自己的填充和描边；选中画板只改画板，不把样式写到子元素上。
 //!
-//! 投影是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
-//! 吸管只写填充和描边。渐变、混合模式以后也可以加同样的可选字段；后合并的改动负责
-//! 同一符号上的冲突。
+//! 投影和渐变都是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
+//! 吸管只写填充和描边，并把渐变收成纯色。混合模式以后也可以加同样的可选字段。
 //!
 //! ```text
 //! 选中 id ──► style_target_ids（组展开为子孙，画板不展开）
@@ -18,15 +17,17 @@
 //!                                      ├─ 文本字号 / 颜色 / 描边变化时丢掉光栅
 //!                                      ├─ 矩形圆角（其它元素忽略该字段）
 //!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
+//!                                      ├─ 形状渐变（种类、色标、角度、圆心、半径）
 //!                                      ├─ 投影（形状、文本、图片；不丢文本光栅）
 //!                                      └─ 图片只改 alpha 和投影
 //! ```
 
 use crate::element::{
-    DropShadow, ElementId, ElementStyle, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin,
+    DropShadow, ElementId, ElementStyle, FillKind, GradientStop, Polygon, PolygonKind, Rectangle,
+    StrokeCap, StrokeJoin,
 };
 use crate::scene::{AnyElement, Scene};
-use infinitecanvas_math::Color;
+use infinitecanvas_math::{Color, Vec2};
 
 /// 一个样式字段在当前选择上的取值。
 #[derive(Debug, Clone, PartialEq)]
@@ -132,6 +133,16 @@ pub struct StylePatch {
     pub shadow_color: Option<Color>,
     /// 投影浓度，写入颜色 alpha，范围 0 到 1。0 表示不绘制。
     pub shadow_opacity: Option<f32>,
+    /// 形状填充种类。文本和图片忽略。
+    pub fill_kind: Option<FillKind>,
+    /// 渐变色标。空数组清掉色标，线性/径向会退回纯色 [`ElementStyle::fill`]。
+    pub fill_stops: Option<Vec<GradientStop>>,
+    /// 线性渐变角度，单位度。
+    pub fill_angle: Option<f32>,
+    /// 径向渐变中心，局部坐标。
+    pub fill_center: Option<Vec2>,
+    /// 径向渐变半径，局部单位。0 表示自动。
+    pub fill_radius: Option<f32>,
 }
 
 /// 当前选择的公共样式。
@@ -177,6 +188,16 @@ pub struct SelectionStyle {
     pub shadow_opacity: StyleField<f32>,
     /// 选择里有形状、文本或图片，可以改投影。
     pub shadow_supported: bool,
+    /// 形状填充种类。文本和图片不参与。
+    pub fill_kind: StyleField<FillKind>,
+    /// 形状渐变色标。文本和图片不参与。
+    pub fill_stops: StyleField<Vec<GradientStop>>,
+    /// 线性渐变角度。文本和图片不参与。
+    pub fill_angle: StyleField<f32>,
+    /// 径向渐变中心。文本和图片不参与。
+    pub fill_center: StyleField<Vec2>,
+    /// 径向渐变半径。文本和图片不参与。
+    pub fill_radius: StyleField<f32>,
     /// 选择里有形状（含组内的形状）。
     pub has_shape: bool,
     /// 选择里有矩形（含组内的矩形）。圆角只对它们生效。
@@ -404,6 +425,11 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut shadow_blurs = Vec::new();
     let mut shadow_colors = Vec::new();
     let mut shadow_opacities = Vec::new();
+    let mut fill_kinds = Vec::new();
+    let mut fill_stops = Vec::new();
+    let mut fill_angles = Vec::new();
+    let mut fill_centers = Vec::new();
+    let mut fill_radii = Vec::new();
     let mut has_shape = false;
     let mut has_polygon = false;
     let mut has_star = false;
@@ -420,6 +446,14 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut strokes,
                     &mut widths,
                     &mut opacities,
+                    &style,
+                );
+                push_gradient(
+                    &mut fill_kinds,
+                    &mut fill_stops,
+                    &mut fill_angles,
+                    &mut fill_centers,
+                    &mut fill_radii,
                     &style,
                 );
                 dashes.push(style.stroke_dash);
@@ -447,6 +481,14 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut opacities,
                     &style,
                 );
+                push_gradient(
+                    &mut fill_kinds,
+                    &mut fill_stops,
+                    &mut fill_angles,
+                    &mut fill_centers,
+                    &mut fill_radii,
+                    &style,
+                );
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
@@ -472,6 +514,14 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut strokes,
                     &mut widths,
                     &mut opacities,
+                    &style,
+                );
+                push_gradient(
+                    &mut fill_kinds,
+                    &mut fill_stops,
+                    &mut fill_angles,
+                    &mut fill_centers,
+                    &mut fill_radii,
                     &style,
                 );
                 dashes.push(style.stroke_dash);
@@ -546,6 +596,11 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         shadow_color: fold(shadow_colors),
         shadow_opacity: fold(shadow_opacities),
         shadow_supported: has_shape || has_text || has_image,
+        fill_kind: fold(fill_kinds),
+        fill_stops: fold(fill_stops),
+        fill_angle: fold(fill_angles),
+        fill_center: fold(fill_centers),
+        fill_radius: fold(fill_radii),
         has_shape,
         has_rect,
         has_text,
@@ -603,6 +658,23 @@ fn apply_shape_paint(style: &mut ElementStyle, patch: &StylePatch) {
     if let Some(join) = patch.stroke_join {
         style.stroke_join = join;
     }
+    if let Some(kind) = patch.fill_kind {
+        style.fill_kind = kind;
+    }
+    if let Some(stops) = &patch.fill_stops {
+        style.fill_stops = GradientStop::normalize(stops);
+    }
+    if let Some(angle) = patch.fill_angle.filter(|value| value.is_finite()) {
+        style.fill_angle = angle;
+    }
+    if let Some(center) = patch.fill_center {
+        if center.x.is_finite() && center.y.is_finite() {
+            style.fill_center = center;
+        }
+    }
+    if let Some(radius) = patch.fill_radius.filter(|value| value.is_finite()) {
+        style.fill_radius = radius.max(0.0);
+    }
     apply_shadow(&mut style.shadow, patch);
 }
 
@@ -640,6 +712,21 @@ fn push_shadow(
     blurs.push(shadow.blur);
     colors.push(Color::rgb(shadow.color.r, shadow.color.g, shadow.color.b));
     opacities.push(shadow.color.a);
+}
+
+fn push_gradient(
+    kinds: &mut Vec<FillKind>,
+    stops: &mut Vec<Vec<GradientStop>>,
+    angles: &mut Vec<f32>,
+    centers: &mut Vec<Vec2>,
+    radii: &mut Vec<f32>,
+    style: &ElementStyle,
+) {
+    kinds.push(style.fill_kind);
+    stops.push(GradientStop::normalize(&style.fill_stops));
+    angles.push(style.fill_angle);
+    centers.push(style.fill_center);
+    radii.push(style.fill_radius);
 }
 
 fn assign_rectangle(rect: &mut Rectangle, snapshot: &StyleSnapshot) -> bool {
@@ -761,6 +848,8 @@ mod tests {
 
         let style = selection_style(&scene, &[1, 2]);
         assert_eq!(style.fill, StyleField::Mixed);
+        assert_eq!(style.fill_kind, StyleField::Uniform(FillKind::Solid));
+        assert_eq!(style.fill_stops, StyleField::Uniform(Vec::new()));
         assert_eq!(style.opacity, StyleField::Uniform(1.0));
         assert_eq!(style.stroke_width, StyleField::Uniform(1.0));
         assert!(style.has_shape);
@@ -966,6 +1055,9 @@ mod tests {
         assert!(!image_only.has_text);
         assert_eq!(image_only.opacity, StyleField::Uniform(0.8));
         assert_eq!(image_only.fill, StyleField::Absent);
+        assert_eq!(image_only.fill_kind, StyleField::Absent);
+        assert_eq!(image_only.fill_stops, StyleField::Absent);
+        assert_eq!(image_only.fill_angle, StyleField::Absent);
         assert_eq!(image_only.stroke_width, StyleField::Absent);
         assert_eq!(image_only.stroke_dash, StyleField::Absent);
         assert_eq!(image_only.stroke_cap, StyleField::Absent);
@@ -1213,6 +1305,175 @@ mod tests {
         }
         let together = selection_style(&scene, &[1, 2]);
         assert_eq!(together.corner_radius, StyleField::Mixed);
+    }
+
+    fn red_blue() -> Vec<GradientStop> {
+        vec![
+            GradientStop {
+                offset: 0.0,
+                color: Color::RED,
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::BLUE,
+            },
+        ]
+    }
+
+    #[test]
+    fn gradient_is_one_undo_step_and_old_json_stays_solid() {
+        let mut scene = Scene::new();
+        scene.add_rect(
+            Rectangle::new(1, Vec2::new(100.0, 40.0), Vec2::new(20.0, 10.0))
+                .with_style(ElementStyle::fill_only(Color::BLACK)),
+        );
+        scene.add_circle(
+            Circle::new(2, Vec2::new(40.0, 0.0), 10.0)
+                .with_style(ElementStyle::fill_only(Color::BLACK)),
+        );
+        scene.add_rect(
+            Rectangle::new(3, Vec2::new(80.0, 0.0), Vec2::new(20.0, 10.0))
+                .with_style(ElementStyle::stroke_only(Color::GREEN, 4.0)),
+        );
+
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[],
+            &StylePatch {
+                fill_kind: Some(FillKind::Linear),
+                fill_stops: Some(red_blue()),
+                ..StylePatch::default()
+            }
+        )
+        .is_none());
+        let same = StylePatch {
+            fill_kind: Some(FillKind::Solid),
+            ..StylePatch::default()
+        };
+        assert!(SetStyleCommand::from_patch(&scene, &[1], &same).is_none());
+
+        let patch = StylePatch {
+            fill_kind: Some(FillKind::Linear),
+            fill_stops: Some(red_blue()),
+            fill_angle: Some(0.0),
+            opacity: Some(0.5),
+            ..StylePatch::default()
+        };
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1, 2], &patch).unwrap()),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert!(scene.has_dirty_elements());
+        assert_eq!(shape_style(&scene, 3).fill_kind, FillKind::Solid);
+
+        let rect_vertices = match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => rect.generate_fill_vertices(),
+            other => panic!("rect, got {other:?}"),
+        };
+        let left = rect_vertices
+            .iter()
+            .min_by(|a, b| a.position[0].partial_cmp(&b.position[0]).unwrap())
+            .unwrap();
+        let right = rect_vertices
+            .iter()
+            .max_by(|a, b| a.position[0].partial_cmp(&b.position[0]).unwrap())
+            .unwrap();
+        assert!(left.position[0] < 95.0);
+        assert!(right.position[0] > 105.0);
+        assert!(left.color[0] > 0.9 && left.color[2] < 0.1);
+        assert!(right.color[2] > 0.9 && right.color[0] < 0.1);
+        assert!((left.color[3] - 0.5).abs() < 1.0e-4);
+
+        let circle_vertices = match scene.get(2).unwrap() {
+            AnyElement::Circle(circle) => circle.generate_fill_vertices(),
+            other => panic!("circle, got {other:?}"),
+        };
+        assert!(circle_vertices.iter().any(|vertex| vertex.color[0] > 0.9));
+        assert!(circle_vertices.iter().any(|vertex| vertex.color[2] > 0.9));
+
+        let stroke = match scene.get(3).unwrap() {
+            AnyElement::Rectangle(rect) => rect.generate_stroke_vertices(),
+            other => panic!("rect, got {other:?}"),
+        };
+        assert!(stroke.iter().all(|vertex| vertex.color[1] > 0.9));
+
+        let mut cache = VertexCache::new();
+        let _ = cache.sync(&mut scene);
+        assert!(!scene.has_dirty_elements());
+        assert!(cache.fill_slice(1).unwrap().len() >= 6);
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"fill_kind\":\"linear\""));
+        assert!(json.contains("\"fill_stops\""));
+        let restored = Scene::from_json(&json).unwrap();
+        let restored_style = shape_style(&restored, 1);
+        assert_eq!(restored_style.fill_kind, FillKind::Linear);
+        assert_eq!(restored_style.fill_stops, red_blue());
+        assert!((restored_style.opacity - 0.5).abs() < 1.0e-5);
+        assert_eq!(shape_style(&restored, 2).fill_kind, FillKind::Linear);
+
+        assert!(history.undo(&mut scene));
+        assert_eq!(shape_style(&scene, 1).fill_kind, FillKind::Solid);
+        assert!(shape_style(&scene, 1).fill_stops.is_empty());
+        assert_eq!(shape_fill(&scene, 1), Some(Color::BLACK));
+        assert!(history.redo(&mut scene));
+        assert_eq!(shape_style(&scene, 1).fill_kind, FillKind::Linear);
+
+        let radial = StylePatch {
+            fill_kind: Some(FillKind::Radial),
+            fill_stops: Some(red_blue()),
+            fill_center: Some(Vec2::new(1.0, -2.0)),
+            fill_radius: Some(8.0),
+            ..StylePatch::default()
+        };
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1], &radial).unwrap()),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 2);
+        let summary = selection_style(&scene, &[1, 2]);
+        assert_eq!(summary.fill_kind, StyleField::Mixed);
+        assert_eq!(summary.fill_stops, StyleField::Uniform(red_blue()));
+        assert!(summary.has_shape);
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style.fill_center, Vec2::new(1.0, -2.0));
+                assert_eq!(rect.style.fill_radius, 8.0);
+                let vertices = rect.generate_fill_vertices();
+                assert!(vertices.iter().any(|vertex| {
+                    let dx = vertex.position[0] - 101.0;
+                    let dy = vertex.position[1] - 38.0;
+                    dx * dx + dy * dy < 1.0 && vertex.color[0] > 0.9
+                }));
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+
+        scene.set_visible(1, false);
+        let mut hidden_cache = VertexCache::new();
+        let _ = hidden_cache.sync(&mut scene);
+        assert_eq!(hidden_cache.fill_slice(1).map(|slice| slice.len()), Some(0));
+
+        let legacy = serde_json::json!({
+            "version": 1,
+            "elements": [{
+                "type": "rectangle",
+                "data": {
+                    "props": { "id": 9 },
+                    "size": [4.0, 4.0]
+                }
+            }]
+        });
+        let legacy_scene = Scene::from_json(&legacy.to_string()).unwrap();
+        let legacy_style = shape_style(&legacy_scene, 9);
+        assert_eq!(legacy_style.fill_kind, FillKind::Solid);
+        assert!(legacy_style.fill_stops.is_empty());
+        assert_eq!(legacy_style.fill_angle, 0.0);
+        assert_eq!(legacy_style.fill_center, Vec2::ZERO);
+        assert_eq!(legacy_style.fill_radius, 0.0);
+        assert_eq!(legacy_style, ElementStyle::new());
     }
 
     #[test]

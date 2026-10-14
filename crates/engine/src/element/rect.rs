@@ -1,4 +1,5 @@
 //! 矩形元素
+use super::gradient::paint_gradient_fill;
 use super::shadow::soft_shadow_vertices;
 use super::stroke::{
     color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled, transform_vertices,
@@ -169,12 +170,33 @@ impl Rectangle {
     /// 三角形1: [0, 1, 2]
     /// 三角形2: [2, 1, 3]
     pub fn generate_fill_vertices(&self) -> Vec<Vertex> {
-        if self.style.fill.is_none() {
+        if !self.style.has_paintable_fill() {
             return Vec::new();
         }
 
-        let color = color_with_opacity(self.style.fill.unwrap(), self.style.opacity);
         let radius = self.effective_corner_radius();
+        if self.style.uses_gradient() {
+            let outline = if radius > 0.0 {
+                self.rounded_outline(radius)
+            } else {
+                let half_w = self.size.x / 2.0;
+                let half_h = self.size.y / 2.0;
+                vec![
+                    Vec2::new(-half_w, -half_h),
+                    Vec2::new(half_w, -half_h),
+                    Vec2::new(half_w, half_h),
+                    Vec2::new(-half_w, half_h),
+                ]
+            };
+            return paint_gradient_fill(
+                &outline,
+                &self.style,
+                self.local_bounds(),
+                &self.props.transform,
+            );
+        }
+
+        let color = color_with_opacity(self.style.fill.unwrap(), self.style.opacity);
         if radius > 0.0 {
             return self.fill_from_outline(&self.rounded_outline(radius), color);
         }
@@ -535,7 +557,7 @@ mod tests {
 
         let vertices = rect.generate_fill_vertices();
         assert!(vertices.len() > 6);
-        assert!(vertices.len() % 3 == 0);
+        assert!(vertices.len().is_multiple_of(3));
         assert!(vertices
             .iter()
             .all(|vertex| vertex.color == [1.0, 0.0, 0.0, 1.0]));

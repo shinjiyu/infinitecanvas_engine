@@ -166,7 +166,7 @@ export class InfiniteCanvas {
    *
    * 只写需要改的字段。`fill` / `stroke` 传 `null` 表示清掉。
    *
-   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`、`strokeDash`、`strokeCap`、`strokeJoin`、`cornerRadius`（仅矩形）、`sides`、`innerRadius`（仅星形）、`shadowOffsetX`、`shadowOffsetY`、`shadowBlur`、`shadowColor`（只改 RGB）、`shadowOpacity`。未写出的字段保持原值。线型只作用于形状，文本描边不读这些字段
+   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`、`strokeDash`、`strokeCap`、`strokeJoin`、`cornerRadius`（仅矩形）、`sides`、`innerRadius`（仅星形）、`shadowOffsetX`、`shadowOffsetY`、`shadowBlur`、`shadowColor`（只改 RGB）、`shadowOpacity`、`fillKind`（`solid` / `linear` / `radial`）、`fillStops`、`fillAngle`、`fillCenter`、`fillRadius`。未写出的字段保持原值。渐变和线型只作用于形状，文本描边不读这些字段
    * @returns 是否写入了撤销栈
    */
   setSelectionStyle(patch: Record<string, unknown>): boolean {
