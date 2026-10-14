@@ -20,7 +20,9 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 层级也在这张表里：`]` 前移，`[` 后移，`Ctrl/Cmd+]` 置顶，`Ctrl/Cmd+[` 置底。Shift 或 Alt 不触发。图层面板上的四个按钮调用同一个 `reorder_selection`。
 
-翻转和 90° 旋转（#49）也在这张表里：`Shift+H` 水平翻转，`Shift+V` 垂直翻转，`Shift+R` 顺时针 90°，`Shift+Alt+R` 逆时针 90°。按住不重复。不带 Shift 的 H / V / R 仍是平移、选择、矩形。带 Ctrl 或 ⌘ 不触发，避免和刷新、撤销抢键。工具栏和属性面板的四个按钮调用同一个 `flip_selection` / `rotate_selection_quarter`。
+翻转和 90° 旋转（#49）也在这张表里：`Shift+H` 水平翻转，`Shift+V` 垂直翻转，`Shift+R` 顺时针 90°，`Shift+Alt+R` 逆时针 90°。按住不重复。不带 Shift 的 H / V / R 仍是平移、选择、矩形。带 Ctrl 或 ⌘ 的 H / V / R 不翻转、不旋转。工具栏和属性面板的四个按钮调用同一个 `flip_selection` / `rotate_selection_quarter`。
+
+锁定和隐藏（#57）也在这张表里：`Ctrl/Cmd+L` 切换锁定，`Ctrl/Cmd+Shift+H` 切换隐藏。按住不重复。图层面板的眼睛和锁调用 `set_element_visible` / `set_element_locked`，和这两条快捷键共用 `SetVisibilityCommand` / `SetLockedCommand`。空选不入栈。隐藏后不参与命中和框选。锁定后不能平移或变换，图层面板仍可选中，快捷键切换时选择保留。Mac 上显示为 ⌘L、⌘⇧H。
 
 视图缩放也在这张表里：`Shift+1`（`zoomFit`）调用 `zoom_to_fit`，`fit_scene` 是同一个命令；`Shift+2`（`zoomSelection`）调用 `zoom_to_selection`；`Shift+0`（`zoom100`）调用 `set_zoom(1)`。`?` 帮助面板从同一张表列出这三行。工具栏的「适应全部」和「缩放到选中」走同样的两个函数。详见 [camera-fit.md](./camera-fit.md)。
 

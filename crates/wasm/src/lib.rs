@@ -28,8 +28,8 @@ mod texture_manager;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
-    apply_align, apply_distribute, apply_flip, apply_nudge, apply_rotate_quarter,
-    apply_stack_reorder,
+    apply_align, apply_distribute, apply_flip, apply_nudge, apply_rotate_quarter, apply_set_locked,
+    apply_set_visibility, apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
@@ -570,12 +570,17 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn move_selection(&mut self, dx: f32, dy: f32) {
         let delta = Vec2::new(dx, dy);
-        let selected_ids = self.selection.selected_ids();
+        let selected_ids: Vec<ElementId> = self
+            .selection
+            .selected_ids()
+            .into_iter()
+            .filter(|id| !self.scene.is_effectively_locked(*id))
+            .collect();
         if selected_ids.is_empty() {
             return;
         }
 
-        // 创建并执行移动命令
+        // 创建并执行移动命令。锁定的选中项留在选择集里，但不参与平移。
         let cmd = MoveCommand::new(selected_ids, delta);
         self.command_history.execute(Box::new(cmd), &mut self.scene);
     }
@@ -1756,24 +1761,92 @@ impl InfiniteCanvas {
         self.scene.translate_element(id, Vec2::new(dx, dy)).is_ok()
     }
 
-    /// 设置元素可见性。
+    /// 设置元素可见性，并记入一条撤销记录。
+    ///
+    /// 与图层面板的眼睛按钮、[`Self::toggle_selection_visible`] 共用 [`infinitecanvas_engine::SetVisibilityCommand`]。
+    /// 隐藏组不改子孙自己的标志。元素不存在时返回 `false`。已经是目标值时不入栈，仍返回 `true`。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.set_element_visible(id, false);
+    /// canvas.undo();
+    /// ```
     #[wasm_bindgen]
     pub fn set_element_visible(&mut self, id: u64, visible: bool) -> bool {
-        self.scene.set_visible(id, visible)
+        if !self.scene.contains(id) {
+            return false;
+        }
+        self.finish_active_gesture();
+        let _ = apply_set_visibility(&mut self.command_history, &mut self.scene, &[id], visible);
+        true
     }
 
-    /// 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+    /// 设置元素锁定，并记入一条撤销记录。
     ///
-    /// 锁定时会取消选中该元素和它的子孙，画布上不能再点选或拖动它们。
+    /// 与图层面板的锁按钮、[`Self::toggle_selection_locked`] 共用 [`infinitecanvas_engine::SetLockedCommand`]。
+    /// 锁定后组和平移、变换会拒绝修改它以及它的子孙。元素仍留在选择集里，图层面板可以继续选中它；
+    /// 画布命中、框选和全选会跳过。元素不存在时返回 `false`。已经是目标值时不入栈，仍返回 `true`。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.set_element_locked(id, true);
+    /// canvas.undo();
+    /// ```
     #[wasm_bindgen]
     pub fn set_element_locked(&mut self, id: u64, locked: bool) -> bool {
-        let updated = self.scene.set_locked(id, locked);
-        if updated && locked {
-            for element_id in self.scene.subtree_ids(id) {
-                let _ = self.selection.deselect(&mut self.scene, element_id);
-            }
+        if !self.scene.contains(id) {
+            return false;
         }
-        updated
+        self.finish_active_gesture();
+        let _ = apply_set_locked(&mut self.command_history, &mut self.scene, &[id], locked);
+        true
+    }
+
+    /// 切换当前选中元素的可见性，并记入一条撤销记录。
+    ///
+    /// 全部已经隐藏时改为显示，否则隐藏仍可见的选中项。选中组时只改组自己的标志，
+    /// 子孙的命中和框选按有效可见性跳过。空选或不存在的 id 不入栈。
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.toggle_selection_visible();
+    /// canvas.undo();
+    /// ```
+    #[wasm_bindgen]
+    pub fn toggle_selection_visible(&mut self) -> bool {
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        apply_toggle_visibility(&mut self.command_history, &mut self.scene, &selected)
+    }
+
+    /// 切换当前选中元素的锁定，并记入一条撤销记录。
+    ///
+    /// 可改的选中项里只要有一个未锁定，就把它们锁定；全部已锁定则解锁。
+    /// 祖先已锁定、自己未锁定的元素跳过。锁定后仍保持选中，但不能平移或变换。
+    /// 空选时不入栈。
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.toggle_selection_locked();
+    /// canvas.undo();
+    /// ```
+    #[wasm_bindgen]
+    pub fn toggle_selection_locked(&mut self) -> bool {
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        apply_toggle_locked(&mut self.command_history, &mut self.scene, &selected)
+    }
+
+    /// 可见性或锁定的版本。图层面板用它重读眼睛和锁，不代表场景结构变了。
+    #[wasm_bindgen]
+    pub fn get_flags_epoch(&self) -> u64 {
+        self.scene.flags_epoch()
     }
 
     /// 场景树。`roots` 里每个节点含 `id`、`elementType`、`parentId`、`visible`、`locked`、`zIndex`、`children`。
@@ -3338,6 +3411,9 @@ impl InfiniteCanvas {
     fn selected_element_refs(&self) -> Vec<&dyn infinitecanvas_engine::Element> {
         let mut elements = Vec::new();
         for id in self.selection.selected_ids() {
+            if self.scene.is_effectively_locked(id) {
+                continue;
+            }
             if let Some(element) = self.scene.get(id) {
                 let element = element.as_element();
                 if element.props().visible {
@@ -3352,6 +3428,7 @@ impl InfiniteCanvas {
         self.selection
             .selected_ids()
             .into_iter()
+            .filter(|id| !self.scene.is_effectively_locked(*id))
             .filter_map(|id| {
                 self.scene
                     .get(id)
@@ -4060,6 +4137,98 @@ mod tests {
         canvas.clear_selection();
         assert!(!canvas.reorder_selection("back"));
         assert_eq!(canvas.get_undo_count(), 1);
+    }
+
+    /// 锁定和隐藏快捷键与图层面板按钮走同一条命令。空选不入栈，撤销恢复标志。
+    #[test]
+    fn toggle_lock_and_hide_share_the_layer_commands() {
+        let mut canvas = blank_canvas();
+        canvas.scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(10.0, 10.0),
+            Vec2::new(20.0, 20.0),
+        ));
+        canvas.scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(40.0, 10.0),
+            Vec2::new(12.0, 12.0),
+        ));
+        let structure = canvas.get_structure_epoch();
+        assert!(!canvas.toggle_selection_locked());
+        assert!(!canvas.toggle_selection_visible());
+        assert_eq!(canvas.get_undo_count(), 0);
+
+        assert!(canvas.select_element(1, false));
+        assert!(canvas.select_element(2, true));
+        let flags = canvas.get_flags_epoch();
+        assert!(canvas.toggle_selection_locked());
+        assert!(canvas.selection.is_selected(1));
+        assert!(canvas.selection.is_selected(2));
+        assert!(canvas.scene.is_effectively_locked(1));
+        assert!(canvas.scene.is_effectively_locked(2));
+        assert!(canvas.get_flags_epoch() > flags);
+        assert_eq!(canvas.get_structure_epoch(), structure);
+        assert_eq!(canvas.get_undo_count(), 1);
+        let undo_count = canvas.get_undo_count();
+        assert!(!canvas.nudge_selection("right", false));
+        canvas.move_selection(5.0, 0.0);
+        assert_eq!(translation(&canvas.scene, 1), Vec2::new(10.0, 10.0));
+        assert_eq!(canvas.get_undo_count(), undo_count);
+        assert!(hit_test_point(
+            &canvas.scene,
+            Vec2::new(10.0, 10.0),
+            &HitTestOptions::default(),
+        )
+        .is_empty());
+
+        assert!(canvas.toggle_selection_locked());
+        assert!(!canvas.scene.is_effectively_locked(1));
+        assert!(canvas.undo());
+        assert!(canvas.scene.is_effectively_locked(1));
+        assert!(canvas.undo());
+        assert!(!canvas.scene.is_effectively_locked(1));
+        assert!(canvas.redo());
+        assert!(canvas.scene.is_effectively_locked(1));
+        canvas.undo();
+
+        assert!(canvas.toggle_selection_visible());
+        assert!(!canvas.scene.is_effectively_visible(1));
+        assert!(!canvas.scene.get(2).unwrap().as_element().props().visible);
+        assert!(hit_test_point(
+            &canvas.scene,
+            Vec2::new(10.0, 10.0),
+            &HitTestOptions::default(),
+        )
+        .is_empty());
+        let hits = canvas.selection.select_in_rect(
+            &mut canvas.scene,
+            Rect::new(-10.0, -10.0, 80.0, 40.0),
+            false,
+        );
+        assert!(!hits.contains(&1));
+        assert!(!hits.contains(&2));
+        assert!(canvas.undo());
+        assert!(canvas.scene.is_effectively_visible(1));
+        assert!(!hit_test_point(
+            &canvas.scene,
+            Vec2::new(10.0, 10.0),
+            &HitTestOptions::default(),
+        )
+        .is_empty());
+
+        canvas.selection.clear(&mut canvas.scene);
+        assert!(canvas.select_element(1, false));
+        assert!(canvas.set_element_visible(1, false));
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.set_element_locked(1, true));
+        assert!(canvas.selection.is_selected(1));
+        assert!(canvas.scene.is_effectively_locked(1));
+        assert!(canvas.undo());
+        assert!(!canvas.scene.is_effectively_locked(1));
+        assert!(canvas.undo());
+        assert!(canvas.scene.is_effectively_visible(1));
+        assert!(!canvas.set_element_visible(99, false));
+        assert!(!canvas.set_element_locked(99, true));
     }
 
     #[test]

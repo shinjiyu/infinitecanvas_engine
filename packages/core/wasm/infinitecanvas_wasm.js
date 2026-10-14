@@ -707,6 +707,14 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 可见性或锁定的版本。图层面板用它重读眼睛和锁，不代表场景结构变了。
+     * @returns {bigint}
+     */
+    get_flags_epoch() {
+        const ret = wasm.infinitecanvas_get_flags_epoch(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
      * 获取帧计数
      * @returns {bigint}
      */
@@ -1472,9 +1480,17 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_set_camera_center(this.__wbg_ptr, x, y);
     }
     /**
-     * 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+     * 设置元素锁定，并记入一条撤销记录。
      *
-     * 锁定时会取消选中该元素和它的子孙，画布上不能再点选或拖动它们。
+     * 与图层面板的锁按钮、[`Self::toggle_selection_locked`] 共用 [`infinitecanvas_engine::SetLockedCommand`]。
+     * 锁定后组和平移、变换会拒绝修改它以及它的子孙。元素仍留在选择集里，图层面板可以继续选中它；
+     * 画布命中、框选和全选会跳过。元素不存在时返回 `false`。已经是目标值时不入栈，仍返回 `true`。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_element_locked(id, true);
+     * canvas.undo();
+     * ```
      * @param {bigint} id
      * @param {boolean} locked
      * @returns {boolean}
@@ -1484,7 +1500,16 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
-     * 设置元素可见性。
+     * 设置元素可见性，并记入一条撤销记录。
+     *
+     * 与图层面板的眼睛按钮、[`Self::toggle_selection_visible`] 共用 [`infinitecanvas_engine::SetVisibilityCommand`]。
+     * 隐藏组不改子孙自己的标志。元素不存在时返回 `false`。已经是目标值时不入栈，仍返回 `true`。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_element_visible(id, false);
+     * canvas.undo();
+     * ```
      * @param {bigint} id
      * @param {boolean} visible
      * @returns {boolean}
@@ -1619,6 +1644,47 @@ export class InfiniteCanvas {
     take_text_raster_jobs() {
         const ret = wasm.infinitecanvas_take_text_raster_jobs(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * 切换当前选中元素的锁定，并记入一条撤销记录。
+     *
+     * 可改的选中项里只要有一个未锁定，就把它们锁定；全部已锁定则解锁。
+     * 祖先已锁定、自己未锁定的元素跳过。锁定后仍保持选中，但不能平移或变换。
+     * 空选时不入栈。
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.toggle_selection_locked();
+     * canvas.undo();
+     * ```
+     * @returns {boolean}
+     */
+    toggle_selection_locked() {
+        const ret = wasm.infinitecanvas_toggle_selection_locked(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 切换当前选中元素的可见性，并记入一条撤销记录。
+     *
+     * 全部已经隐藏时改为显示，否则隐藏仍可见的选中项。选中组时只改组自己的标志，
+     * 子孙的命中和框选按有效可见性跳过。空选或不存在的 id 不入栈。
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.toggle_selection_visible();
+     * canvas.undo();
+     * ```
+     * @returns {boolean}
+     */
+    toggle_selection_visible() {
+        const ret = wasm.infinitecanvas_toggle_selection_visible(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * 平移一个元素。目标是组时，子孙的世界坐标一起移动。
@@ -3507,7 +3573,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2707, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2718, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },

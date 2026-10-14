@@ -200,6 +200,11 @@ pub struct Scene {
     ///
     /// 小地图用它判断缩略图要不要重画。不参与 [`PartialEq`]，也不写入 JSON。
     geometry_epoch: u64,
+    /// 元素自己的 `visible` 或 `locked` 发生变化时递增。
+    ///
+    /// 图层面板用它重读眼睛和锁。不推进 [`Self::structure_epoch`]，顶点缓存不会因此整表重排。
+    /// 不参与 [`PartialEq`]，也不写入 JSON。
+    flags_epoch: u64,
     /// 图片像素。同一张图多次使用只存一份。
     assets: AssetTable,
     /// [`Self::remove`] 把引用降到 0 的资源暂存在这里，等撤销栈取走。
@@ -252,6 +257,7 @@ impl Scene {
             dirty_ids: HashSet::new(),
             selection_epoch: 0,
             geometry_epoch: 0,
+            flags_epoch: 0,
             assets: AssetTable::new(),
             detached_assets: Vec::new(),
         }
@@ -298,6 +304,15 @@ impl Scene {
     /// 选择集发生变化（不涉及顶点几何）。
     pub fn bump_selection_epoch(&mut self) {
         self.selection_epoch = self.selection_epoch.wrapping_add(1);
+    }
+
+    /// 可见性或锁定的版本。只有标志真正变化时递增。
+    pub fn flags_epoch(&self) -> u64 {
+        self.flags_epoch
+    }
+
+    fn bump_flags_epoch(&mut self) {
+        self.flags_epoch = self.flags_epoch.wrapping_add(1);
     }
 
     /// 是否有元素在等待重生成顶点
@@ -383,6 +398,7 @@ impl Scene {
             dirty_ids: HashSet::new(),
             selection_epoch: 0,
             geometry_epoch: 0,
+            flags_epoch: 0,
             assets,
             detached_assets: Vec::new(),
         };
@@ -1126,25 +1142,41 @@ impl Scene {
     /// 设置可见性。隐藏组不会改子元素自己的标志，但命中和绘制会把子孙一并跳过。
     ///
     /// 子树会被标脏，这样隐藏或重新显示后顶点缓存会丢掉或写回子孙的三角形。
+    /// 标志有变化时推进 [`Self::flags_epoch`]，不推进 [`Self::structure_epoch`]。
     pub fn set_visible(&mut self, id: ElementId, visible: bool) -> bool {
         if !self.elements.contains_key(&id) {
             return false;
         }
+        let changed = self
+            .elements
+            .get(&id)
+            .is_some_and(|element| element.as_element().props().visible != visible);
         if let Some(element) = self.elements.get_mut(&id) {
             element.as_element_mut().props_mut().visible = visible;
+        }
+        if changed {
+            self.bump_flags_epoch();
         }
         self.mark_subtree_dirty(id);
         true
     }
 
     /// 设置锁定。解锁也走这里，因此不再检查当前是否已锁定。
+    ///
+    /// 只改这个元素自己的 `locked`。祖先已锁定时，子孙仍然 [`Self::is_effectively_locked`]。
+    /// 标志有变化时推进 [`Self::flags_epoch`]，不改几何，也不推进 [`Self::structure_epoch`]。
     pub fn set_locked(&mut self, id: ElementId, locked: bool) -> bool {
+        let changed = match self.elements.get(&id) {
+            Some(element) => element.as_element().props().locked != locked,
+            None => return false,
+        };
         if let Some(element) = self.elements.get_mut(&id) {
             element.as_element_mut().props_mut().locked = locked;
-            true
-        } else {
-            false
         }
+        if changed {
+            self.bump_flags_epoch();
+        }
+        true
     }
 
     /// 导出大纲面板用的场景树：根 → 组 → 叶子，带可见性和锁定。

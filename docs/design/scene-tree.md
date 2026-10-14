@@ -34,9 +34,9 @@ Scene
 
 `move_in_outline` 和 `arrange_siblings` 成功后按深度优先重写 `z_index`（越靠后的兄弟越大），并推进 `structure_epoch`。顶点缓存、PNG 和 SVG 都按这个 `z_index` 绘制。几何脏标记不置位，因为三角形没变。`ReorderOutlineCommand` 和 `ReorderSelectionCommand` 记下移动前的父指针、子列表和 `z_index`，撤销时写回。
 
-隐藏组时，子孙的命中和绘制会被跳过，但不会改写它们自己的 `visible`。锁定会沿着祖先链生效：被锁定的元素不能被点选、框选、全选或拖动。
+隐藏组时，子孙的命中、框选和绘制会被跳过，但不会改写它们自己的 `visible`。锁定会沿着祖先链生效：画布命中、框选、全选和拖动都会跳过，平移和变换会被拒绝。图层面板仍可选中锁定的行。`SetVisibilityCommand` / `SetLockedCommand` 把显隐和锁定记入撤销栈；标志变化只推进 `flags_epoch`，不推进 `structure_epoch`。
 
-Demo 的图层面板在 `www/layer-panel.js`。列表按视口虚拟滚动；点击和画布选中双向同步，拖拽走 `reorder_element`。
+Demo 的图层面板在 `www/layer-panel.js`。列表按视口虚拟滚动；点击和画布选中双向同步，拖拽走 `reorder_element`。眼睛和锁，以及 `Ctrl/Cmd+L`、`Ctrl/Cmd+Shift+H`，走上面两条命令。面板同时看 `structure_epoch` 和 `flags_epoch`。
 
 ## 和 CRDT
 

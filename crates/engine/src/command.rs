@@ -315,6 +315,280 @@ pub fn apply_nudge(
     true
 }
 
+/// 一个布尔标志修改前后的值。
+#[derive(Debug, Clone)]
+struct FlagChange {
+    id: ElementId,
+    before: bool,
+    after: bool,
+}
+
+/// 把 id 去重并按升序排列，撤销记录才稳定。
+fn sorted_unique(ids: &[ElementId]) -> Vec<ElementId> {
+    let mut ids: Vec<ElementId> = ids.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn own_flag(scene: &Scene, id: ElementId, locked: bool) -> Option<bool> {
+    let element = scene.get(id)?;
+    let props = element.as_element().props();
+    Some(if locked { props.locked } else { props.visible })
+}
+
+/// 修改一个或多个元素自己的 `visible`。
+///
+/// 不改子孙的标志。隐藏组之后，命中、框选和绘制仍按 [`Scene::is_effectively_visible`]
+/// 跳过整棵子树。没有实际变化时不构造命令。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::{Command, Rectangle, Scene, SetVisibilityCommand};
+/// use infinitecanvas_math::Vec2;
+///
+/// let mut scene = Scene::new();
+/// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0)));
+/// let mut cmd = SetVisibilityCommand::set_ids(&scene, &[1], false).unwrap();
+/// cmd.execute(&mut scene);
+/// assert!(!scene.is_effectively_visible(1));
+/// cmd.undo(&mut scene);
+/// assert!(scene.is_effectively_visible(1));
+/// ```
+#[derive(Debug)]
+pub struct SetVisibilityCommand {
+    changes: Vec<FlagChange>,
+}
+
+impl SetVisibilityCommand {
+    /// 把这些元素的 `visible` 设成同一个值。不存在或已经是目标值的 id 跳过。
+    ///
+    /// 没有任何变化时返回 `None`。
+    pub fn set_ids(scene: &Scene, ids: &[ElementId], visible: bool) -> Option<Self> {
+        flag_changes(scene, ids, |_| Some(visible), false).map(|changes| Self { changes })
+    }
+
+    /// 切换当前选择的可见性，合成一条尚未执行的命令。
+    ///
+    /// 只改选中元素自己的标志，不把组展开成子孙。全部已经隐藏时改为显示，
+    /// 否则把仍可见的隐藏。空选、缺失 id，或标志不会变化时返回 `None`。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene, SetVisibilityCommand};
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let scene = Scene::new();
+    /// assert!(SetVisibilityCommand::toggle_selection(&scene, &[]).is_none());
+    /// ```
+    pub fn toggle_selection(scene: &Scene, selected: &[ElementId]) -> Option<Self> {
+        let ids = sorted_unique(selected);
+        let known: Vec<(ElementId, bool)> = ids
+            .iter()
+            .filter_map(|id| own_flag(scene, *id, false).map(|visible| (*id, visible)))
+            .collect();
+        if known.is_empty() {
+            return None;
+        }
+        let show = known.iter().all(|(_, visible)| !*visible);
+        flag_changes(scene, &ids, |_| Some(show), false).map(|changes| Self { changes })
+    }
+}
+
+impl Command for SetVisibilityCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        for change in &self.changes {
+            scene.set_visible(change.id, change.after);
+        }
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        for change in &self.changes {
+            scene.set_visible(change.id, change.before);
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "SetVisibility"
+    }
+}
+
+/// 把当前选择的可见性写成一条撤销记录。
+///
+/// 空选或标志没有变化时不入栈，返回 `false`。
+pub fn apply_toggle_visibility(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    selected: &[ElementId],
+) -> bool {
+    let Some(command) = SetVisibilityCommand::toggle_selection(scene, selected) else {
+        return false;
+    };
+    history.execute(Box::new(command), scene);
+    true
+}
+
+/// 把指定元素的可见性设成 `visible`，并记入一条撤销记录。
+///
+/// 元素不存在，或已经是目标值时不入栈，返回 `false`。
+pub fn apply_set_visibility(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    ids: &[ElementId],
+    visible: bool,
+) -> bool {
+    let Some(command) = SetVisibilityCommand::set_ids(scene, ids, visible) else {
+        return false;
+    };
+    history.execute(Box::new(command), scene);
+    true
+}
+
+/// 修改一个或多个元素自己的 `locked`。
+///
+/// 祖先已经锁定、自己未锁定的元素，切换时会跳过：和图层面板的锁按钮一样，
+/// 不能越过祖先去锁自己。显式 [`Self::set_ids`] 仍按调用方给出的值写入。
+/// 锁定后元素仍可留在选择集里，但平移和变换会被场景拒绝。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::{Command, Rectangle, Scene, SetLockedCommand};
+/// use infinitecanvas_math::Vec2;
+///
+/// let mut scene = Scene::new();
+/// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0)));
+/// let mut cmd = SetLockedCommand::toggle_selection(&scene, &[1]).unwrap();
+/// cmd.execute(&mut scene);
+/// assert!(scene.is_effectively_locked(1));
+/// cmd.undo(&mut scene);
+/// assert!(!scene.is_effectively_locked(1));
+/// ```
+#[derive(Debug)]
+pub struct SetLockedCommand {
+    changes: Vec<FlagChange>,
+}
+
+impl SetLockedCommand {
+    /// 把这些元素的 `locked` 设成同一个值。不存在或已经是目标值的 id 跳过。
+    pub fn set_ids(scene: &Scene, ids: &[ElementId], locked: bool) -> Option<Self> {
+        flag_changes(scene, ids, |_| Some(locked), true).map(|changes| Self { changes })
+    }
+
+    /// 切换当前选择的锁定，合成一条尚未执行的命令。
+    ///
+    /// 可改的元素里只要有一个未锁定，就把它们锁定；全部已锁定则全部解锁。
+    /// 祖先已锁定且自己未锁定的 id 跳过。空选或没有变化时返回 `None`。
+    pub fn toggle_selection(scene: &Scene, selected: &[ElementId]) -> Option<Self> {
+        let ids = sorted_unique(selected);
+        let mut actionable = Vec::new();
+        for id in ids {
+            let Some(locked) = own_flag(scene, id, true) else {
+                continue;
+            };
+            if !locked && scene.is_effectively_locked(id) {
+                continue;
+            }
+            actionable.push((id, locked));
+        }
+        if actionable.is_empty() {
+            return None;
+        }
+        let unlock = actionable.iter().all(|(_, locked)| *locked);
+        let next = !unlock;
+        let changes = actionable
+            .into_iter()
+            .filter_map(|(id, before)| {
+                if before == next {
+                    None
+                } else {
+                    Some(FlagChange {
+                        id,
+                        before,
+                        after: next,
+                    })
+                }
+            })
+            .collect::<Vec<_>>();
+        if changes.is_empty() {
+            None
+        } else {
+            Some(Self { changes })
+        }
+    }
+}
+
+impl Command for SetLockedCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        for change in &self.changes {
+            scene.set_locked(change.id, change.after);
+        }
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        for change in &self.changes {
+            scene.set_locked(change.id, change.before);
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "SetLocked"
+    }
+}
+
+/// 把当前选择的锁定写成一条撤销记录。没有变化时返回 `false`。
+pub fn apply_toggle_locked(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    selected: &[ElementId],
+) -> bool {
+    let Some(command) = SetLockedCommand::toggle_selection(scene, selected) else {
+        return false;
+    };
+    history.execute(Box::new(command), scene);
+    true
+}
+
+/// 把指定元素的锁定设成 `locked`，并记入一条撤销记录。
+///
+/// 元素不存在，或已经是目标值时不入栈，返回 `false`。
+pub fn apply_set_locked(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    ids: &[ElementId],
+    locked: bool,
+) -> bool {
+    let Some(command) = SetLockedCommand::set_ids(scene, ids, locked) else {
+        return false;
+    };
+    history.execute(Box::new(command), scene);
+    true
+}
+
+fn flag_changes(
+    scene: &Scene,
+    ids: &[ElementId],
+    next: impl Fn(bool) -> Option<bool>,
+    locked_flag: bool,
+) -> Option<Vec<FlagChange>> {
+    let mut changes = Vec::new();
+    for id in sorted_unique(ids) {
+        let Some(before) = own_flag(scene, id, locked_flag) else {
+            continue;
+        };
+        let Some(after) = next(before) else {
+            continue;
+        };
+        if before != after {
+            changes.push(FlagChange { id, before, after });
+        }
+    }
+    if changes.is_empty() {
+        None
+    } else {
+        Some(changes)
+    }
+}
+
 /// 添加元素命令
 #[derive(Debug)]
 pub struct AddElementCommand {
@@ -2343,5 +2617,143 @@ mod tests {
         history.undo(&mut scene);
         assert_eq!(scene.children_of(group_id), vec![left, right]);
         assert_eq!(scene.parent_of(right), Some(group_id));
+    }
+
+    fn visible_of(scene: &Scene, id: u64) -> bool {
+        scene.get(id).unwrap().as_element().props().visible
+    }
+
+    fn locked_of(scene: &Scene, id: u64) -> bool {
+        scene.get(id).unwrap().as_element().props().locked
+    }
+
+    #[test]
+    fn toggle_visibility_hides_selection_and_undoes() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(20.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.set_visible(2, false);
+        let mut history = CommandHistory::new();
+        let epoch = scene.structure_epoch();
+        let flags = scene.flags_epoch();
+
+        assert!(!apply_toggle_visibility(&mut history, &mut scene, &[]));
+        assert!(!apply_set_visibility(&mut history, &mut scene, &[1], true));
+        assert_eq!(history.undo_count(), 0);
+        assert_eq!(scene.flags_epoch(), flags);
+
+        assert!(apply_toggle_visibility(
+            &mut history,
+            &mut scene,
+            &[1, 2, 99]
+        ));
+        assert!(!visible_of(&scene, 1));
+        assert!(!visible_of(&scene, 2));
+        assert_eq!(history.undo_count(), 1);
+        assert!(scene.flags_epoch() > flags);
+        assert_eq!(scene.structure_epoch(), epoch);
+        assert!(history.undo(&mut scene));
+        assert!(visible_of(&scene, 1));
+        assert!(!visible_of(&scene, 2));
+        assert!(history.redo(&mut scene));
+        assert!(!visible_of(&scene, 1));
+    }
+
+    #[test]
+    fn hiding_a_group_keeps_child_flags_but_skips_hit_testing() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let mut history = CommandHistory::new();
+
+        assert!(apply_toggle_visibility(
+            &mut history,
+            &mut scene,
+            &[group_id]
+        ));
+        assert!(!visible_of(&scene, group_id));
+        assert!(visible_of(&scene, 1));
+        assert!(visible_of(&scene, 2));
+        assert!(!scene.is_effectively_visible(1));
+        assert!(crate::hit_test::hit_test_point(
+            &scene,
+            Vec2::ZERO,
+            &crate::hit_test::HitTestOptions::default(),
+        )
+        .is_empty());
+
+        assert!(history.undo(&mut scene));
+        assert!(scene.is_effectively_visible(1));
+        assert_eq!(
+            crate::hit_test::hit_test_point(
+                &scene,
+                Vec2::ZERO,
+                &crate::hit_test::HitTestOptions::default(),
+            )
+            .first()
+            .map(|hit| hit.id),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn toggle_lock_round_trip_skips_ancestor_locked_children() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0)));
+        scene.add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::new(8.0, 8.0)));
+        scene.set_locked(1, true);
+        let mut history = CommandHistory::new();
+        let flags = scene.flags_epoch();
+        let epoch = scene.structure_epoch();
+
+        assert!(apply_toggle_locked(&mut history, &mut scene, &[1, 2]));
+        assert!(locked_of(&scene, 1));
+        assert!(locked_of(&scene, 2));
+        assert!(scene.translate_element(2, Vec2::new(4.0, 0.0)).is_err());
+        assert_eq!(scene.structure_epoch(), epoch);
+        assert!(scene.flags_epoch() > flags);
+
+        assert!(apply_toggle_locked(&mut history, &mut scene, &[1, 2]));
+        assert!(!locked_of(&scene, 1));
+        assert!(!locked_of(&scene, 2));
+        assert_eq!(history.undo_count(), 2);
+        assert!(history.undo(&mut scene));
+        assert!(locked_of(&scene, 1) && locked_of(&scene, 2));
+        assert!(history.undo(&mut scene));
+        assert!(locked_of(&scene, 1));
+        assert!(!locked_of(&scene, 2));
+    }
+
+    #[test]
+    fn lock_toggle_does_not_cross_a_locked_ancestor() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0)));
+        scene.add_rect(Rectangle::new(2, Vec2::new(24.0, 0.0), Vec2::new(8.0, 8.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene.set_locked(group_id, true);
+        let mut history = CommandHistory::new();
+        let flags = scene.flags_epoch();
+
+        assert!(!apply_toggle_locked(&mut history, &mut scene, &[1]));
+        assert!(!locked_of(&scene, 1));
+        assert!(scene.is_effectively_locked(1));
+        assert_eq!(history.undo_count(), 0);
+        assert_eq!(scene.flags_epoch(), flags);
+
+        assert!(apply_toggle_locked(&mut history, &mut scene, &[group_id]));
+        assert!(!locked_of(&scene, group_id));
+        assert!(!scene.is_effectively_locked(1));
+        assert!(visible_of(&scene, 1));
+        assert!(history.undo(&mut scene));
+        assert!(scene.is_effectively_locked(group_id));
     }
 }
