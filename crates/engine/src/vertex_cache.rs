@@ -12,6 +12,7 @@
 //! 直线、箭头和自由画笔路径的三角形带放进填充缓冲（与原先的收集器一致），
 //! 矩形/圆形的 1px 描边仍走线条缓冲。图片和文本走纹理缓冲；只有图片先画纯色底。
 
+use crate::blend::BlendMode;
 use crate::scene::{AnyElement, Scene};
 use crate::ElementId;
 use infinitecanvas_math::Vertex;
@@ -37,6 +38,32 @@ pub enum VertexBufferKind {
     Stroke,
     /// 三角形列表：图片
     Textured,
+}
+
+/// 一个叶子在持久缓冲里的绘制区间，以及它的混合模式。
+///
+/// 顶点仍按填充、描边、纹理分缓冲。混合模式不进顶点色；渲染器在有非 Normal
+/// 叶子时按这个区间逐个合成。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaintSpan {
+    /// 该叶子的混合模式。
+    pub blend: BlendMode,
+    /// 填充三角形起点。
+    pub fill_offset: u32,
+    /// 填充三角形数量。
+    pub fill_count: u32,
+    /// 细描边线段起点。
+    pub stroke_offset: u32,
+    /// 细描边线段数量。
+    pub stroke_count: u32,
+    /// 纹理三角形起点。
+    pub tex_offset: u32,
+    /// 纹理三角形数量。
+    pub tex_count: u32,
+    /// 纹理 id。没有纹理时为 `None`。
+    pub texture_id: Option<String>,
+    /// 图片先画纯色底。
+    pub underlay: bool,
 }
 
 /// 一次纹理绘制
@@ -86,6 +113,7 @@ struct Slot {
     tex_count: u32,
     texture_id: Option<String>,
     underlay: bool,
+    blend: BlendMode,
 }
 
 struct Mesh {
@@ -94,6 +122,7 @@ struct Mesh {
     textured: Vec<Vertex>,
     texture_id: Option<String>,
     underlay: bool,
+    blend: BlendMode,
 }
 
 impl Mesh {
@@ -104,6 +133,7 @@ impl Mesh {
             textured: Vec::new(),
             texture_id: None,
             underlay: false,
+            blend: BlendMode::Normal,
         }
     }
 }
@@ -183,6 +213,41 @@ impl VertexCache {
     /// 纹理绘制区间。无图片变化时保持不变。
     pub fn textured_draws(&self) -> &[TexturedDraw] {
         &self.textured_draws
+    }
+
+    /// 按 z 顺序返回有几何的叶子。隐藏叶子（空网格）不出现。
+    pub fn paint_spans(&self) -> Vec<PaintSpan> {
+        let mut spans = Vec::new();
+        for id in &self.order {
+            let Some(slot) = self.slots.get(id) else {
+                continue;
+            };
+            if slot.fill_count == 0 && slot.stroke_count == 0 && slot.tex_count == 0 {
+                continue;
+            }
+            spans.push(PaintSpan {
+                blend: slot.blend,
+                fill_offset: slot.fill_offset,
+                fill_count: slot.fill_count,
+                stroke_offset: slot.stroke_offset,
+                stroke_count: slot.stroke_count,
+                tex_offset: slot.tex_offset,
+                tex_count: slot.tex_count,
+                texture_id: slot.texture_id.clone(),
+                underlay: slot.underlay,
+            });
+        }
+        spans
+    }
+
+    /// 有可见叶子使用非 Normal 混合时，渲染器改走逐元素合成。
+    pub fn needs_blend_composite(&self) -> bool {
+        self.order.iter().any(|id| {
+            self.slots.get(id).is_some_and(|slot| {
+                slot.blend != BlendMode::Normal
+                    && (slot.fill_count > 0 || slot.stroke_count > 0 || slot.tex_count > 0)
+            })
+        })
     }
 
     /// 某个元素在填充缓冲中的顶点
@@ -326,6 +391,7 @@ impl VertexCache {
             tex_count: mesh.textured.len() as u32,
             texture_id: mesh.texture_id,
             underlay: mesh.underlay,
+            blend: mesh.blend,
         };
         self.fill.extend(mesh.fill);
         self.stroke.extend(mesh.stroke);
@@ -366,6 +432,7 @@ impl VertexCache {
         let texture_changed = slot.texture_id != mesh.texture_id || slot.underlay != mesh.underlay;
         slot.texture_id = mesh.texture_id;
         slot.underlay = mesh.underlay;
+        slot.blend = mesh.blend;
         self.slots.insert(id, slot);
         if texture_changed
             || writes
@@ -438,7 +505,9 @@ fn mesh_for(scene: &Scene, element: &AnyElement) -> Mesh {
     if !scene.is_effectively_visible(element.id()) {
         return Mesh::empty();
     }
-    generate_mesh(element)
+    let mut mesh = generate_mesh(element);
+    mesh.blend = element.blend_mode();
+    mesh
 }
 
 fn generate_mesh(element: &AnyElement) -> Mesh {
@@ -455,6 +524,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 textured: Vec::new(),
                 texture_id: None,
                 underlay: false,
+                blend: BlendMode::Normal,
             }
         }
         AnyElement::Circle(circle) => {
@@ -467,6 +537,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 textured: Vec::new(),
                 texture_id: None,
                 underlay: false,
+                blend: BlendMode::Normal,
             }
         }
         AnyElement::Polygon(polygon) => {
@@ -479,6 +550,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 textured: Vec::new(),
                 texture_id: None,
                 underlay: false,
+                blend: BlendMode::Normal,
             }
         }
         AnyElement::Image(image) => {
@@ -489,6 +561,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                     textured: Vec::new(),
                     texture_id: None,
                     underlay: false,
+                    blend: BlendMode::Normal,
                 };
             }
             Mesh {
@@ -497,6 +570,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 textured: image.generate_vertices(),
                 texture_id: Some(image.texture_id.clone()),
                 underlay: true,
+                blend: BlendMode::Normal,
             }
         }
         AnyElement::Line(line) => {
@@ -508,6 +582,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 textured: Vec::new(),
                 texture_id: None,
                 underlay: false,
+                blend: BlendMode::Normal,
             }
         }
         AnyElement::Path(path) => {
@@ -519,6 +594,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 textured: Vec::new(),
                 texture_id: None,
                 underlay: false,
+                blend: BlendMode::Normal,
             }
         }
         AnyElement::Text(text) => Mesh {
@@ -527,6 +603,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             textured: text.generate_vertices(),
             texture_id: text.texture_id.clone(),
             underlay: false,
+            blend: BlendMode::Normal,
         },
         AnyElement::Frame(frame) => {
             let rect = frame.shape_proxy();
@@ -539,6 +616,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 textured: Vec::new(),
                 texture_id: None,
                 underlay: false,
+                blend: BlendMode::Normal,
             }
         }
         AnyElement::Group(_) => Mesh::empty(),
@@ -1275,5 +1353,38 @@ mod tests {
             _ => panic!("text"),
         }
         assert!(cache.textured().is_empty());
+    }
+
+    #[test]
+    fn paint_spans_follow_z_order_and_skip_hidden_leaves() {
+        let mut scene = Scene::new();
+        let mut back = Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0));
+        back.props.z_index = 2;
+        back.style.blend_mode = BlendMode::Screen;
+        scene.add_rect(back);
+        let mut front = Rectangle::new(2, Vec2::new(4.0, 0.0), Vec2::new(10.0, 10.0));
+        front.props.z_index = 0;
+        front.style.blend_mode = BlendMode::Multiply;
+        scene.add_rect(front);
+        let mut hidden = Rectangle::new(3, Vec2::new(20.0, 0.0), Vec2::new(10.0, 10.0));
+        hidden.props.visible = false;
+        hidden.style.blend_mode = BlendMode::Overlay;
+        scene.add_rect(hidden);
+
+        let mut cache = VertexCache::new();
+        cache.sync(&mut scene);
+        let spans = cache.paint_spans();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].blend, BlendMode::Multiply);
+        assert_eq!(spans[1].blend, BlendMode::Screen);
+        assert!(cache.needs_blend_composite());
+
+        match scene.get_mut(3).unwrap() {
+            AnyElement::Rectangle(rect) => rect.props.visible = true,
+            _ => panic!("rect"),
+        }
+        scene.mark_dirty(3);
+        cache.sync(&mut scene);
+        assert_eq!(cache.paint_spans().len(), 3);
     }
 }

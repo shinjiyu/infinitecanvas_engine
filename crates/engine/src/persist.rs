@@ -14,6 +14,7 @@
 //! `#[serde(default)]`。新增元素种类时扩展解码分支；未知种类会报错，避免静默丢数据。
 
 use crate::asset::{AssetError, AssetRecord, AssetTable};
+use crate::blend::{composite_straight, BlendMode};
 use crate::element::shadow::{composite_over, feather_coverage};
 use crate::element::{Circle, DropShadow, Element, Image, Polygon, PolygonKind, Rectangle, Text};
 use crate::guides::{GuideStore, ManualGuide};
@@ -544,7 +545,7 @@ fn export_region_filtered(
                 let world = pixel_center_world(region, width, height, x, y);
                 if let Some(color) = sample_element(scene, element, world) {
                     let index = ((y as usize) * (width as usize) + (x as usize)) * 4;
-                    blend(&mut pixels[index..index + 4], color);
+                    blend(&mut pixels[index..index + 4], color, element.blend_mode());
                 }
             }
         }
@@ -960,28 +961,18 @@ fn try_local(transform: &Transform, world: Vec2) -> Option<Vec2> {
     }
 }
 
-fn blend(dst: &mut [u8], src: Color) {
-    let sa = src.a.clamp(0.0, 1.0);
-    if sa <= 0.0 {
-        return;
-    }
-    let sr = src.r.clamp(0.0, 1.0);
-    let sg = src.g.clamp(0.0, 1.0);
-    let sb = src.b.clamp(0.0, 1.0);
-    let da = dst[3] as f32 / 255.0;
-    let dr = dst[0] as f32 / 255.0;
-    let dg = dst[1] as f32 / 255.0;
-    let db = dst[2] as f32 / 255.0;
-    let out_a = sa + da * (1.0 - sa);
-    if out_a <= 1e-6 {
-        dst.copy_from_slice(&[0, 0, 0, 0]);
-        return;
-    }
-    let inv = 1.0 - sa;
-    dst[0] = channel((sr * sa + dr * da * inv) / out_a);
-    dst[1] = channel((sg * sa + dg * da * inv) / out_a);
-    dst[2] = channel((sb * sa + db * da * inv) / out_a);
-    dst[3] = channel(out_a);
+fn blend(dst: &mut [u8], src: Color, mode: BlendMode) {
+    let backdrop = Color::new(
+        dst[0] as f32 / 255.0,
+        dst[1] as f32 / 255.0,
+        dst[2] as f32 / 255.0,
+        dst[3] as f32 / 255.0,
+    );
+    let out = composite_straight(backdrop, src, mode);
+    dst[0] = channel(out.r);
+    dst[1] = channel(out.g);
+    dst[2] = channel(out.b);
+    dst[3] = channel(out.a);
 }
 
 fn channel(value: f32) -> u8 {
@@ -1017,7 +1008,7 @@ mod tests {
         Polygon, PolygonKind, Rectangle, Text, TextAlign,
     };
     use crate::snap::GuideAxis;
-    use crate::{AnyElement, Scene, Viewport};
+    use crate::{AnyElement, BlendMode, Scene, Viewport};
     use infinitecanvas_math::{Color, Rect, Transform, Vec2};
     use serde_json::{json, Value};
 
@@ -1867,5 +1858,57 @@ mod tests {
 
         scene.set_visible(2, false);
         assert_pixel(sample_pixel(&scene, Vec2::new(10.0, 0.0)), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn png_blend_respects_mode_opacity_visibility_and_paint_order() {
+        let mut scene = Scene::new();
+        scene.add_rect(
+            Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0))
+                .with_style(ElementStyle::fill_only(Color::new(1.0, 0.0, 0.0, 1.0))),
+        );
+        let mut top = Rectangle::new(2, Vec2::ZERO, Vec2::new(8.0, 8.0))
+            .with_style(ElementStyle::fill_only(Color::new(0.0, 0.0, 1.0, 1.0)));
+        top.props.z_index = 2;
+        top.style.blend_mode = BlendMode::Multiply;
+        scene.add_rect(top);
+
+        // 蓝乘红 = 黑。普通叠加上层应仍是蓝。
+        assert_pixel(sample_pixel(&scene, Vec2::ZERO), [0, 0, 0, 255]);
+
+        match scene.get_mut(2).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                rect.style.opacity = 0.5;
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        // 半透明正片叠底：0.5 * 黑 + 0.5 * 红 = 暗红。
+        assert_pixel(sample_pixel(&scene, Vec2::ZERO), [128, 0, 0, 255]);
+
+        match scene.get_mut(2).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                rect.props.visible = false;
+                rect.style.opacity = 1.0;
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        assert_pixel(sample_pixel(&scene, Vec2::ZERO), [255, 0, 0, 255]);
+
+        match scene.get_mut(1).unwrap() {
+            AnyElement::Rectangle(rect) => rect.props.z_index = 2,
+            other => panic!("rect, got {other:?}"),
+        }
+        match scene.get_mut(2).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                rect.props.visible = true;
+                rect.props.z_index = 0;
+                rect.style.opacity = 1.0;
+                rect.style.blend_mode = BlendMode::Multiply;
+                rect.style.fill = Some(Color::new(0.0, 0.0, 1.0, 1.0));
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        // 正片叠底在下层，上层不透明红盖住它。若按 id 而不是 z 绘制，这里会变成黑。
+        assert_pixel(sample_pixel(&scene, Vec2::ZERO), [255, 0, 0, 255]);
     }
 }

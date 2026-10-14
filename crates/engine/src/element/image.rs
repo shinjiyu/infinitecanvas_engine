@@ -8,6 +8,7 @@
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 
+use crate::blend::BlendMode;
 use crate::element::shadow::quad_shadow;
 use crate::element::{DropShadow, Element, ElementId, ElementProps};
 
@@ -86,6 +87,12 @@ pub struct Image {
     /// 按显示矩形画偏移羽化，不模糊纹理像素。
     #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
     pub shadow: DropShadow,
+    /// 混合模式。JSON 可省略，缺省 [`BlendMode::Normal`]。Normal 不写出。
+    #[serde(
+        default = "crate::blend::default_blend_mode",
+        skip_serializing_if = "crate::blend::blend_is_normal"
+    )]
+    pub blend_mode: BlendMode,
 }
 
 impl Image {
@@ -110,6 +117,7 @@ impl Image {
             uv_rect: None,
             alpha: 1.0,
             shadow: DropShadow::default(),
+            blend_mode: BlendMode::Normal,
         }
     }
 
@@ -196,6 +204,7 @@ impl Image {
             uv_rect: Some(uv_rect),
             alpha: 1.0,
             shadow: DropShadow::default(),
+            blend_mode: BlendMode::Normal,
         }
     }
 

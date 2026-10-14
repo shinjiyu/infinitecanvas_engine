@@ -636,6 +636,8 @@ export class InfiniteCanvas {
      * - `fillKind`：`solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
      *   `fillAngle` 为度，`fillCenter` 为 `{x, y}`，`fillRadius` 为局部半径（0 表示自动）。
      *   这几项只统计形状。多选不一致时对应的 `*Mixed` 为 true
+     * - `blendMode` 为 `normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。
+     *   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true
      *
      * # 示例（JavaScript）
      * ```js
@@ -1135,11 +1137,12 @@ export class InfiniteCanvas {
      * `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
      * `textColor` 是十六进制颜色。圆角只写到矩形上。
      * `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
-     * `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。空选择或没有变化时返回 false。
-     * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
+     * `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
+     * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` / `blendMode` 是小写名字。
      * `fillKind` 是 `solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
      * `fillAngle`、`fillRadius` 是数字。`fillCenter` 是 `{x, y}` 或 `[x, y]`。
-     * 也接受 `fill_kind`、`fill_stops`、`fill_angle`、`fill_center`、`fill_radius`。
+     * 也接受 `fill_kind`、`fill_stops`、`fill_angle`、`fill_center`、`fill_radius`、`blend_mode`。
+     * `blendMode` 也可以写成 `blend_mode`。空选、锁定或没有变化时返回 false，不入栈。
      * 渐变只改形状，描边保持纯色。线型和线帽线结只改形状，文本描边保持原来的光栅描边。
      * 没有任何变化时返回 false，也不入栈。
      */

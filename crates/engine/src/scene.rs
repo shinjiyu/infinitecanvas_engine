@@ -20,6 +20,7 @@
 //! 手动参考线在 `guides` 里，和元素一起进出 JSON，不参与绘制。
 //! 复制、粘贴和克隆在 [`self::clipboard`]：新 ID、子树重映射，图片引用一起带走，并走命令栈。
 use crate::asset::{AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
+use crate::blend::BlendMode;
 use crate::element::{
     Circle, Element, ElementId, Frame, Group, Image, Line, Path, Polygon, Rectangle, Text,
 };
@@ -129,6 +130,24 @@ impl AnyElement {
     /// 能否作为父节点。组和画板可以。
     pub fn is_container(&self) -> bool {
         self.container_children().is_some()
+    }
+
+    /// 叶子的混合模式。
+    ///
+    /// 组不参与混合，返回 [`BlendMode::Normal`]。画板用自己矩形的模式。
+    /// 子孙叶子各自带自己的模式。
+    pub fn blend_mode(&self) -> BlendMode {
+        match self {
+            AnyElement::Rectangle(rect) => rect.style.blend_mode,
+            AnyElement::Circle(circle) => circle.style.blend_mode,
+            AnyElement::Polygon(polygon) => polygon.style.blend_mode,
+            AnyElement::Line(line) => line.style.blend_mode,
+            AnyElement::Path(path) => path.style.blend_mode,
+            AnyElement::Text(text) => text.blend_mode,
+            AnyElement::Image(image) => image.blend_mode,
+            AnyElement::Frame(frame) => frame.style.blend_mode,
+            AnyElement::Group(_) => BlendMode::Normal,
+        }
     }
 
     /// 如果这是一个组，返回组数据。

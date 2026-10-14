@@ -1525,7 +1525,7 @@ function syncRange(id, labelId, value, mixed, format) {
 /**
  * 按当前选择显示或隐藏属性面板，并把公共样式填进控件。
  * 多选不一致时标成「多种」，下一次编辑会写到全部选中元素。
- * 只选中图片时只留下不透明度和投影；填充和描边仍只出现在形状或文本上。
+ * 只选中图片时只留下不透明度、投影和混合模式；填充和描边仍只出现在形状或文本上。
  *
  * @param {WasmCanvas} engine
  */
@@ -1581,6 +1581,9 @@ function syncPropertyPanel(engine) {
   syncPolygonFields(style);
   syncShadow(style);
   syncGradient(style);
+  const blendRow = document.getElementById('prop-blend-row');
+  if (blendRow) blendRow.hidden = !style.blendModeSupported;
+  syncChoice('prop-blend-mode', style.blendMode, style.blendModeMixed);
 
   const textFields = document.getElementById('prop-text-fields');
   if (textFields) textFields.hidden = !style.hasText;
@@ -1908,6 +1911,7 @@ function bindPropertyPanel(engine) {
   });
   bindChoice('prop-stroke-cap', 'strokeCap', (value) => value);
   bindChoice('prop-stroke-join', 'strokeJoin', (value) => value);
+  bindChoice('prop-blend-mode', 'blendMode', (value) => value);
   bindGradient(engine);
 }
 

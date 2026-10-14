@@ -155,7 +155,7 @@ export class InfiniteCanvas {
   /**
    * 读取当前选择的公共样式。多选不一致时对应字段为 mixed。
    *
-   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape`、`hasText`、`hasImage` 都是 false。图片参与 `opacity` 和投影。矩形另有 `cornerRadius`（多选不一致时 `cornerRadiusMixed`）。多边形和星形另有 `sides`，星形另有 `innerRadius`。形状、文本、图片还有 `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowColor` / `shadowOpacity`（多选不一致时为 mixed）和 `shadowSupported`
+   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape`、`hasText`、`hasImage` 都是 false。图片参与 `opacity`、投影和 `blendMode`。矩形另有 `cornerRadius`（多选不一致时 `cornerRadiusMixed`）。多边形和星形另有 `sides`，星形另有 `innerRadius`。形状、文本、图片还有 `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowColor` / `shadowOpacity`（多选不一致时为 mixed）和 `shadowSupported`。`blendMode` 为 `normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`
    */
   getSelectionStyle(): Record<string, unknown> {
     return this.requireWasm().get_selection_style() as Record<string, unknown>;
@@ -166,7 +166,7 @@ export class InfiniteCanvas {
    *
    * 只写需要改的字段。`fill` / `stroke` 传 `null` 表示清掉。
    *
-   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`、`strokeDash`、`strokeCap`、`strokeJoin`、`cornerRadius`（仅矩形）、`sides`、`innerRadius`（仅星形）、`shadowOffsetX`、`shadowOffsetY`、`shadowBlur`、`shadowColor`（只改 RGB）、`shadowOpacity`、`fillKind`（`solid` / `linear` / `radial`）、`fillStops`、`fillAngle`、`fillCenter`、`fillRadius`。未写出的字段保持原值。渐变和线型只作用于形状，文本描边不读这些字段
+   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`、`strokeDash`、`strokeCap`、`strokeJoin`、`cornerRadius`（仅矩形）、`sides`、`innerRadius`（仅星形）、`shadowOffsetX`、`shadowOffsetY`、`shadowBlur`、`shadowColor`（只改 RGB）、`shadowOpacity`、`fillKind`（`solid` / `linear` / `radial`）、`fillStops`、`fillAngle`、`fillCenter`、`fillRadius`、`blendMode`。未写出的字段保持原值。渐变和线型只作用于形状。`blendMode` 写到形状、文本、图片和画板
    * @returns 是否写入了撤销栈
    */
   setSelectionStyle(patch: Record<string, unknown>): boolean {

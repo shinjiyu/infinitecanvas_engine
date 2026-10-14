@@ -17,6 +17,7 @@
 //!   textured quad (world size stays stable)
 //! ```
 
+use crate::blend::BlendMode;
 use font8x8::UnicodeFonts;
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -280,6 +281,12 @@ pub struct Text {
     /// 世界单位描边宽度。JSON 中可省略，缺省为 0（不描边）。
     #[serde(default)]
     pub stroke_width: f32,
+    /// 混合模式。JSON 可省略，缺省 [`BlendMode::Normal`]。Normal 不写出。
+    #[serde(
+        default = "crate::blend::default_blend_mode",
+        skip_serializing_if = "crate::blend::blend_is_normal"
+    )]
+    pub blend_mode: BlendMode,
     /// 水平对齐。JSON 中可省略，缺省为左对齐。值为 `left` / `center` / `right`。
     #[serde(default)]
     pub align: TextAlign,
@@ -333,6 +340,7 @@ impl Text {
             opacity: 1.0,
             stroke: None,
             stroke_width: 0.0,
+            blend_mode: BlendMode::Normal,
             align: TextAlign::Left,
             font_family: DEFAULT_FONT_FAMILY.to_string(),
             texture_id: None,
