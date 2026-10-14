@@ -383,9 +383,25 @@ impl HandleGesture {
     /// - 旋转：绕选中框中心。`shift` 时把框的绝对角度吸附到 15°。
     /// - `min_half`: 半边下限，防止元素缩没。
     pub fn preview(&self, pointer: Vec2, shift: bool, min_half: f32) -> GesturePreview {
+        self.preview_with(pointer, shift, min_half, false)
+    }
+
+    /// 同 [`Self::preview`]。
+    ///
+    /// `lock_aspect` 为真时（图片选区）默认保持宽高比，按住 Shift 改为各轴自由缩放。
+    /// 为假时保持原来的行为：默认自由缩放，Shift 锁定比例。
+    pub fn preview_with(
+        &self,
+        pointer: Vec2,
+        shift: bool,
+        min_half: f32,
+        lock_aspect: bool,
+    ) -> GesturePreview {
         match self.kind {
             HandleKind::Rotate => self.preview_rotate(pointer, shift),
-            HandleKind::Resize(handle) => self.preview_resize(handle, pointer, shift, min_half),
+            HandleKind::Resize(handle) => {
+                self.preview_resize(handle, pointer, shift, min_half, lock_aspect)
+            }
         }
     }
 
@@ -416,6 +432,7 @@ impl HandleGesture {
         pointer: Vec2,
         shift: bool,
         min_half: f32,
+        lock_aspect: bool,
     ) -> GesturePreview {
         let (sign_x, sign_y) = handle.axis_signs();
         let half = self.origin.half_size;
@@ -451,7 +468,9 @@ impl HandleGesture {
             }
         }
 
-        if shift {
+        // 图片默认锁比例，Shift 放开；其他元素仍是 Shift 才锁。
+        let keep_aspect = lock_aspect != shift;
+        if keep_aspect {
             let uniform = if sign_x != 0 && sign_y != 0 {
                 let handle_local = Vec2::new((sign_x as f32) * half.x, (sign_y as f32) * half.y);
                 let origin_span = handle_local - anchor_local;
@@ -526,6 +545,22 @@ pub fn transforms_differ(
                 || (left.rotation - right.rotation).abs() > ROTATION_EPS
                 || (left.scale - right.scale).length() > SCALE_EPS
         })
+}
+
+/// 选区里全是图片时，缩放默认保持宽高比。
+///
+/// 空选区或混有其他元素时返回 `false`，手柄仍用 Shift 锁定比例。
+pub fn selection_locks_image_aspect<'a>(
+    elements: impl IntoIterator<Item = &'a dyn Element>,
+) -> bool {
+    let mut any = false;
+    for element in elements {
+        any = true;
+        if element.type_name() != "Image" {
+            return false;
+        }
+    }
+    any
 }
 
 fn min_axis_scale(half: f32, min_half: f32) -> f32 {
@@ -642,7 +677,7 @@ fn rotated_around(original: Transform, pivot: Vec2, delta: f32) -> Transform {
 mod tests {
     use super::*;
     use crate::command::{CommandHistory, TransformElementsCommand};
-    use crate::element::Rectangle;
+    use crate::element::{Image, Rectangle};
     use crate::Scene;
     use infinitecanvas_math::Vec2;
 
@@ -750,6 +785,35 @@ mod tests {
         let transform = preview.transforms[0].1;
         approx(transform.scale, Vec2::new(2.0, 2.0));
         assert!((transform.scale.x - transform.scale.y).abs() < 1e-4);
+    }
+
+    #[test]
+    fn image_aspect_lock_is_default_and_shift_frees_it() {
+        let element = rect(1, Vec2::ZERO, Vec2::new(80.0, 40.0));
+        let frame = SelectionFrame::from_element(&element);
+        let gesture = HandleGesture::start(
+            frame,
+            HandleKind::Resize(ResizeHandle::NorthEast),
+            Vec2::new(40.0, -20.0),
+            vec![(1, element.props().transform)],
+        );
+        let locked = gesture.preview_with(Vec2::new(120.0, -20.0), false, 1.0, true);
+        let scale = locked.transforms[0].1.scale;
+        assert!((scale.x - scale.y).abs() < 1e-4);
+        assert!(scale.x > 1.2);
+
+        let freed = gesture.preview_with(Vec2::new(120.0, -20.0), true, 1.0, true);
+        let free_scale = freed.transforms[0].1.scale;
+        assert!((free_scale.x - 2.0).abs() < 1e-3);
+        assert!((free_scale.y - 1.0).abs() < 1e-3);
+
+        let image = Image::from_asset(1, Vec2::ZERO, "img_a", 20, 10);
+        let rect = rect(2, Vec2::ZERO, Vec2::new(10.0, 10.0));
+        let images: [&dyn Element; 1] = [&image];
+        assert!(selection_locks_image_aspect(images));
+        let mixed: [&dyn Element; 2] = [&image, &rect];
+        assert!(!selection_locks_image_aspect(mixed));
+        assert!(!selection_locks_image_aspect(std::iter::empty()));
     }
 
     #[test]

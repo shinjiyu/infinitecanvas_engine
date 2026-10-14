@@ -51,6 +51,19 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
                                                       └─ mark_dirty
 ```
 
+## Issue #32: 图片元素
+
+- [x] Image：资源 id、原始像素尺寸、显示尺寸、变换
+- [x] 场景资源表：同一张图只存一份像素，最后一个引用释放
+- [x] 纹理四边形沿用现有管线；GPU 纹理随资源引用上传和释放
+- [x] 命中测试、选中框、变换手柄；图片默认锁定宽高比，Shift 自由缩放
+- [x] 移动或变换只 `mark_dirty` 该元素
+- [x] JSON 以 data URL 存一份资源，元素引用 asset id；PNG 导出采样像素
+- [x] SVG：有像素时嵌 `<image>` data URL（变换、透明度、UV 裁剪）；组的可见性与选区和其他叶子一致。没有字节的纹理仍跳过
+- [x] wasm `add_image_bytes`；Demo 拖放文件。Ctrl+V 有图片数据时粘贴图片，否则走 #33 的元素 JSON
+- [x] 边长超过 4096 先降采样
+- [x] 不透明度走 `SetStyle`（`Image::alpha`），和形状、文本一起改；资源表不因改透明度而变化
+
 ## Issue #29: 小地图
 
 - [x] 场景包围盒 → 小地图像素，以及像素反算世界坐标（空场景、单元素、极端宽高比）
@@ -68,19 +81,21 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] 滑块预览只在松手时入栈一条历史
 - [x] 样式经场景 JSON 往返；旧 JSON 用 `serde(default)` 导入
 - [x] Demo 右侧属性面板，未选中时隐藏
+- [x] 图片参与不透明度；填充、描边、线宽仍只作用于形状和文本
 
 ```text
 属性面板 ──preview / commit──► SetStyle ──► mark_dirty
                                     │
                                     ├─ 形状：ElementStyle → 顶点缓存
-                                    └─ 文本：字号/颜色/描边 → 重新光栅
+                                    ├─ 文本：字号/颜色/描边 → 重新光栅
+                                    └─ 图片：不透明度 → Image::alpha（资源表不动）
 ```
 
 ## Issue #33: 复制 / 粘贴 / 克隆
 
 - [x] `Scene::duplicate`：新 ID、样式和变换保留、z 整块高于现有元素
 - [x] 组子树一起复制，`parent` / `children` 按新 ID 重映射；子元素克隆仍挂在原组下
-- [x] 剪贴板复用 version 1 JSON；`paste_json` 可把包围盒中心对准焦点
+- [x] 剪贴板复用 version 1 JSON（含选中图片的 `assets[]`）；`paste_json` 可把包围盒中心对准焦点。粘贴和克隆增加资源引用，撤销归零时像素随命令暂存
 - [x] `DuplicateElementsCommand` / `PasteElementsCommand`：撤销删除，重做按原 ID 恢复
 - [x] 新元素进入 `Scene::mark_dirty`
 - [x] Demo：Ctrl+C / Ctrl+V / Ctrl+D；系统剪贴板失败退回内存，不抛错
@@ -224,7 +239,7 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 - [x] 默认导出全部可见叶子的包围盒；没有叶子时 viewBox 为 `0 0 1 1`
 - [x] `selected_only` 导出自身被选中的叶子，以及选中组下的全部可见子孙
 - [x] WASM `export_svg(selected_only)`，Demo「导出 SVG」/「选区 SVG」下载 `.svg`
-- [x] 图片无像素数据，SVG 中跳过并写注释。文本写成 `<text>` / `<tspan>`
+- [x] 有资源字节的图片写成 `<image>` data URL（#32）；没有字节的纹理跳过并写注释。文本写成 `<text>` / `<tspan>`
 - [x] 组不画几何；叶子保持世界变换。连成一段的组写成不带 transform 的 `<g id="eN">`。隐藏组通过 `is_effectively_visible` 藏住子孙，子孙不计入 viewBox
 
 **依赖**: #6 的元素遍历。#4 已合并，文本一并导出。#13 的可见性复用 `Scene::is_effectively_visible`。选区导出会展开选中组，这一点和 PNG 只看元素自身 `selected` 不同。
@@ -245,7 +260,7 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 Scene ── 事务 ──▶ Y.Doc elements ── SyncStep1/2 ──▶ 另一份 Y.Doc ──▶ Scene
 ```
 
-未接到 WASM、`www` 和 `packages/server`。Text 随场景 JSON v1 同步（内容、字号、颜色）；`texture_id` 不进文档，对端物化后为空。`CollabSession::group` / `ungroup` / `set_locked` / `set_world_transform` 把组的 `children`、元素的 `parent` / `locked` 和世界变换写进同一条整段 JSON。组 id 用 `allocate_id`。`peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`。未知种类仍会使物化失败。整场景重物化是 O(n)。
+未接到 WASM、`www` 和 `packages/server`。Text 随场景 JSON v1 同步（内容、字号、颜色）；`texture_id` 不进文档，对端物化后为空。图片的 `asset_id` 随元素 JSON 同步；`assets[]` 像素还不在 Y.Doc 里，对端没有字节。`CollabSession::group` / `ungroup` / `set_locked` / `set_world_transform` 把组的 `children`、元素的 `parent` / `locked` 和世界变换写进同一条整段 JSON。组 id 用 `allocate_id`。`peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`。未知种类仍会使物化失败。整场景重物化是 O(n)。
 
 ---
 

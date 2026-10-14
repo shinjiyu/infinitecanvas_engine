@@ -322,6 +322,8 @@ pub struct AddElementCommand {
     element: Option<AnyElement>,
     /// 元素 ID（用于撤销时删除）
     element_id: ElementId,
+    /// 撤销后暂存的图片资源。重做时放回场景。
+    parked: Vec<crate::asset::ImageAsset>,
 }
 
 impl AddElementCommand {
@@ -330,6 +332,7 @@ impl AddElementCommand {
         Self {
             element: Some(element),
             element_id,
+            parked: Vec::new(),
         }
     }
 }
@@ -337,12 +340,14 @@ impl AddElementCommand {
 impl Command for AddElementCommand {
     fn execute(&mut self, scene: &mut Scene) {
         if let Some(element) = self.element.take() {
+            scene.restore_assets(std::mem::take(&mut self.parked));
             scene.add(element);
         }
     }
 
     fn undo(&mut self, scene: &mut Scene) {
         if let Some(element) = scene.remove(self.element_id) {
+            self.parked = parked_asset_for(scene, &element);
             self.element = Some(element);
         }
     }
@@ -359,6 +364,8 @@ pub struct RemoveElementCommand {
     element: Option<AnyElement>,
     /// 元素 ID
     element_id: ElementId,
+    /// 删除后暂存的图片资源。撤销时放回场景。
+    parked: Vec<crate::asset::ImageAsset>,
 }
 
 impl RemoveElementCommand {
@@ -366,6 +373,7 @@ impl RemoveElementCommand {
         Self {
             element: None,
             element_id,
+            parked: Vec::new(),
         }
     }
 }
@@ -373,12 +381,14 @@ impl RemoveElementCommand {
 impl Command for RemoveElementCommand {
     fn execute(&mut self, scene: &mut Scene) {
         if let Some(element) = scene.remove(self.element_id) {
+            self.parked = parked_asset_for(scene, &element);
             self.element = Some(element);
         }
     }
 
     fn undo(&mut self, scene: &mut Scene) {
         if let Some(element) = self.element.take() {
+            scene.restore_assets(std::mem::take(&mut self.parked));
             scene.add(element);
         }
     }
@@ -885,11 +895,11 @@ impl Command for DuplicateElementsCommand {
             self.batch = capture_spawn(scene, &roots);
             return;
         }
-        scene.insert_copied(&self.batch.elements);
+        replay_spawn(scene, &mut self.batch);
     }
 
     fn undo(&mut self, scene: &mut Scene) {
-        remove_spawn(scene, &self.batch);
+        remove_spawn(scene, &mut self.batch);
     }
 
     fn name(&self) -> &'static str {
@@ -976,11 +986,11 @@ impl Command for PasteElementsCommand {
             }
             return;
         }
-        scene.insert_copied(&self.batch.elements);
+        replay_spawn(scene, &mut self.batch);
     }
 
     fn undo(&mut self, scene: &mut Scene) {
-        remove_spawn(scene, &self.batch);
+        remove_spawn(scene, &mut self.batch);
     }
 
     fn name(&self) -> &'static str {
@@ -992,6 +1002,8 @@ impl Command for PasteElementsCommand {
 struct SpawnBatch {
     elements: Vec<AnyElement>,
     roots: Vec<ElementId>,
+    /// 撤销后引用归零的图片像素。重做时先放回资源表，插入元素再加引用。
+    parked: Vec<crate::asset::ImageAsset>,
 }
 
 fn select_spawn_roots(scene: &mut Scene, roots: &[ElementId]) {
@@ -1020,13 +1032,57 @@ fn capture_spawn(scene: &Scene, roots: &[ElementId]) -> SpawnBatch {
     SpawnBatch {
         elements,
         roots: roots.to_vec(),
+        parked: Vec::new(),
     }
 }
 
-fn remove_spawn(scene: &mut Scene, batch: &SpawnBatch) {
+fn remove_spawn(scene: &mut Scene, batch: &mut SpawnBatch) {
     for root in batch.roots.iter().rev() {
         scene.remove(*root);
     }
+    batch.parked = parked_assets_for_spawn(scene, &batch.elements);
+}
+
+fn replay_spawn(scene: &mut Scene, batch: &mut SpawnBatch) {
+    scene.restore_assets(std::mem::take(&mut batch.parked));
+    scene.insert_copied(&batch.elements);
+}
+
+/// 克隆和粘贴撤销时，留下这棵新子树里引用已经归零的图片。
+///
+/// 与 [`parked_asset_for`] 不同：这里包含组里的子图片。删除组的命令仍只留根节点自己的像素。
+fn parked_assets_for_spawn(
+    scene: &mut Scene,
+    elements: &[AnyElement],
+) -> Vec<crate::asset::ImageAsset> {
+    let keep: std::collections::HashSet<String> = elements
+        .iter()
+        .filter_map(|element| match element {
+            AnyElement::Image(image) if !image.asset_id.is_empty() => Some(image.asset_id.clone()),
+            _ => None,
+        })
+        .collect();
+    scene
+        .take_detached_assets()
+        .into_iter()
+        .filter(|asset| keep.contains(&asset.id))
+        .collect()
+}
+
+/// 撤销栈只保留被存下来的那个元素自己的图片。
+///
+/// 删除组时子孙会离开场景，但命令只存根节点。它们的像素如果已经没有引用，就在这里丢掉，
+/// 避免撤销时把无人引用的资源塞回表里。
+fn parked_asset_for(scene: &mut Scene, element: &AnyElement) -> Vec<crate::asset::ImageAsset> {
+    let keep = match element {
+        AnyElement::Image(image) if !image.asset_id.is_empty() => Some(image.asset_id.clone()),
+        _ => None,
+    };
+    scene
+        .take_detached_assets()
+        .into_iter()
+        .filter(|asset| keep.as_ref() == Some(&asset.id))
+        .collect()
 }
 
 fn apply_text_visual(scene: &mut Scene, id: ElementId, visual: &TextVisual) {
@@ -1047,7 +1103,8 @@ struct StyleChange {
 
 /// 修改一个或多个元素的填充、描边、线宽和不透明度。
 ///
-/// 文本还会记录字号和文字颜色。执行和撤销都会 [`Scene::mark_dirty`]，
+/// 文本还会记录字号和文字颜色。图片只接受不透明度，写到 `Image::alpha`，
+/// 不改 `asset_id`，也不动资源表。执行和撤销都会 [`Scene::mark_dirty`]，
 /// 顶点缓存和文本光栅因此会刷新。拖动滑块时由调用方合成一条命令：
 /// 预览直接写场景，松手后用 [`SetStyleCommand::from_states`] 入栈。
 ///

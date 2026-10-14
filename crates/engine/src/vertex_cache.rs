@@ -194,6 +194,15 @@ impl VertexCache {
         })
     }
 
+    /// 某个元素在纹理缓冲中的顶点
+    pub fn textured_slice(&self, id: ElementId) -> Option<&[Vertex]> {
+        self.slots.get(&id).map(|slot| {
+            let start = slot.tex_offset as usize;
+            let end = start + slot.tex_count as usize;
+            &self.textured[start..end]
+        })
+    }
+
     /// 某个元素在描边缓冲中的顶点
     pub fn stroke_slice(&self, id: ElementId) -> Option<&[Vertex]> {
         self.slots.get(&id).map(|slot| {
@@ -1019,6 +1028,36 @@ mod tests {
             _ => panic!("image"),
         };
         assert_eq!(cache.textured(), expected.as_slice());
+    }
+
+    #[test]
+    fn moving_one_image_does_not_rebuild_the_other() {
+        let mut scene = Scene::new();
+        scene.add_image(Image::new(
+            1,
+            Vec2::ZERO,
+            Vec2::new(20.0, 10.0),
+            "a".to_string(),
+        ));
+        scene.add_image(Image::new(
+            2,
+            Vec2::new(40.0, 0.0),
+            Vec2::new(20.0, 10.0),
+            "b".to_string(),
+        ));
+        let mut cache = sync_clean(&mut scene);
+        let untouched = cache.textured_slice(2).unwrap().to_vec();
+        let mut command = MoveCommand::new(vec![1], Vec2::new(5.0, 0.0));
+        command.execute(&mut scene);
+        let sync = cache.sync(&mut scene);
+        assert_eq!(sync.regenerated, 1);
+        assert!(!sync.full_upload);
+        assert_eq!(cache.textured_slice(2).unwrap(), untouched.as_slice());
+        let expected = match scene.get(1).unwrap() {
+            AnyElement::Image(image) => image.generate_vertices(),
+            _ => panic!("image"),
+        };
+        assert_eq!(cache.textured_slice(1).unwrap(), expected.as_slice());
     }
 
     #[test]

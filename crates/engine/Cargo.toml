@@ -11,9 +11,15 @@ glam = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 png = "0.17"
+jpeg-decoder = "0.3"
+base64 = "0.22"
+sha2 = "0.10"
 log = { workspace = true }
 web-time = "1.1.0"
 font8x8 = "0.3.1"
+
+[dev-dependencies]
+jpeg-encoder = "0.6"
 
 [[bench]]
 name = "vertex_cache"

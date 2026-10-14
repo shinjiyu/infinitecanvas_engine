@@ -117,8 +117,8 @@ export class InfiniteCanvas {
   /**
    * 把场景导出为 SVG。
    *
-   * 默认包含全部可见元素，viewBox 是它们的包围盒。图片没有像素数据时会被跳过，
-   * 文档里会有说明。文本导出为 `<text>`。
+   * 默认包含全部可见元素，viewBox 是它们的包围盒。有像素的图片嵌成 `<image>` data URL。
+   * 只有 GPU 纹理、没有字节的图片会被跳过，文档里会有说明。文本导出为 `<text>`。
    *
    * @param selectedOnly - 为 true 时只导出选中元素
    * @returns SVG 文档
@@ -135,7 +135,7 @@ export class InfiniteCanvas {
   /**
    * 读取当前选择的公共样式。多选不一致时对应字段为 mixed。
    *
-   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape` 和 `hasText` 都是 false
+   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape`、`hasText`、`hasImage` 都是 false。图片只参与 `opacity`
    */
   getSelectionStyle(): Record<string, unknown> {
     return this.requireWasm().get_selection_style() as Record<string, unknown>;

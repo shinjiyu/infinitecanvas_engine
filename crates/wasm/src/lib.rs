@@ -38,7 +38,8 @@ use infinitecanvas_engine::{
     math::{Color, Rect, Transform, Vec2},
     snap::{bounds_union, snap_drag, AlignmentGuide, DragSnap, SnapSettings},
     transform_handles::{
-        cursor_for, transforms_differ, HandleGesture, HandleMetrics, SelectionFrame,
+        cursor_for, selection_locks_image_aspect, transforms_differ, HandleGesture, HandleMetrics,
+        SelectionFrame,
     },
     AddElementCommand, AlignMode, AnyElement, Circle, CommandHistory, DistributeAxis,
     DuplicateElementsCommand, Element, ElementId, ElementStyle, Event, EventQueue, Image, Line,
@@ -50,6 +51,8 @@ use infinitecanvas_engine::{
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
 const MIN_STROKE_LENGTH: f32 = 2.0;
+/// 粘贴图片时显示尺寸的长边上限（世界单位）。像素尺寸仍记在资源上。
+const MAX_PASTED_DISPLAY_EDGE: f32 = 512.0;
 /// 画笔采样的最小间距，避免点过密
 const PEN_SAMPLE_SPACING: f32 = 1.5;
 use input::{
@@ -163,6 +166,8 @@ pub struct InfiniteCanvas {
     style_preview: Option<style_api::StylePreview>,
     /// 小地图缩略图。几何版本或尺寸变了才重算，平移缩放不扫描元素。
     minimap_cache: Option<MinimapCache>,
+    /// 已经上传到 GPU 的图片资源 id。和场景引用比较，多退少补。
+    gpu_image_assets: HashSet<String>,
 }
 
 /// 已映射到像素的小地图外框。`epoch` 来自 [`infinitecanvas_engine::Scene::geometry_epoch`]。
@@ -218,6 +223,7 @@ impl InfiniteCanvas {
             snap: SnapSettings::default(),
             style_preview: None,
             minimap_cache: None,
+            gpu_image_assets: HashSet::new(),
         })
     }
 
@@ -299,6 +305,7 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn render(&mut self) -> Result<(), JsValue> {
         self.dispatch_pending_events();
+        self.sync_image_textures();
         let selection_box = self.selection_box.bounds();
         let transform_frame = self.display_selection_frame();
         if let Some(renderer) = &mut self.webgpu_renderer {
@@ -620,6 +627,7 @@ impl InfiniteCanvas {
         let undone = self.command_history.undo(&mut self.scene);
         if undone {
             self.release_text_textures_except(textures);
+            self.sync_image_textures();
             self.sync_selection_after_history();
         }
         undone
@@ -637,6 +645,7 @@ impl InfiniteCanvas {
         let redone = self.command_history.redo(&mut self.scene);
         if redone {
             self.release_text_textures_except(textures);
+            self.sync_image_textures();
             self.sync_selection_after_history();
         }
         redone
@@ -1184,7 +1193,9 @@ impl InfiniteCanvas {
         }
         let removed = self.scene.remove(id).is_some();
         if removed {
+            let _ = self.scene.take_detached_assets();
             self.release_text_textures_except(textures);
+            self.sync_image_textures();
             log::info!("Removed element {} (subtree {})", id, subtree.len());
         }
         removed
@@ -1202,6 +1213,7 @@ impl InfiniteCanvas {
         self.pending_text_edit = None;
         self.scene.clear();
         self.release_text_textures_except(textures);
+        self.sync_image_textures();
         log::info!("Scene cleared");
     }
 
@@ -1257,6 +1269,7 @@ impl InfiniteCanvas {
         self.command_history.clear();
         self.drag_state = DragState::default();
         self.release_text_textures_except(textures);
+        self.sync_image_textures();
         if let Some(renderer) = &mut self.webgpu_renderer {
             renderer.invalidate_geometry();
         }
@@ -1267,7 +1280,8 @@ impl InfiniteCanvas {
     /// 把当前选中元素写成剪贴板 JSON。
     ///
     /// 格式与 [`export_json`](Self::export_json) 相同，只含选中根和它们的子孙。
-    /// 组会带上整棵子树，父子 ID 仍指向这份文档里的元素。没有选中元素时返回空字符串。
+    /// 组会带上整棵子树，父子 ID 仍指向这份文档里的元素。图片会带上它们的 `assets[]`。
+    /// 没有选中元素时返回空字符串。
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -1318,6 +1332,7 @@ impl InfiniteCanvas {
                 &self.scene,
             )));
         log::info!("Duplicated selection into {} roots", roots.len());
+        self.sync_image_textures();
         selection_ids_to_js_array(roots)
     }
 
@@ -1379,6 +1394,7 @@ impl InfiniteCanvas {
                 &self.scene,
             )));
         log::info!("Pasted {} roots", roots.len());
+        self.sync_image_textures();
         Ok(selection_ids_to_js_array(roots))
     }
 
@@ -1389,8 +1405,8 @@ impl InfiniteCanvas {
     ///
     /// # 返回
     /// RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
-    /// 没有点阵的字符画方框。图片纹理不在场景文件里，导出为纯色占位。
-    /// 分组本身不绘制；隐藏的组会连同子孙一起跳过。
+    /// 没有点阵的字符画方框。资源表里有像素的图片按显示矩形采样；只有 GPU 纹理
+    /// id 的图片仍是纯色占位。分组本身不绘制；隐藏的组会连同子孙一起跳过。
     ///
     /// # 错误
     /// 没有选中元素、区域为空或编码失败
@@ -1406,15 +1422,15 @@ impl InfiniteCanvas {
 
     /// 把场景导出为 SVG 文本。
     ///
-    /// 矩形、圆、直线（含箭头）、自由路径和文本按绘制顺序写入。变换使用与画布相同的
-    /// `matrix`（缩放、旋转、平移）。`viewBox` 默认是全部可见元素的包围盒。
+    /// 矩形、圆、直线（含箭头）、自由路径、文本，以及带像素的图片按绘制顺序写入。
+    /// 变换使用与画布相同的 `matrix`（缩放、旋转、平移）。`viewBox` 默认是全部可见元素的包围盒。
     ///
     /// # 参数
-    /// - `selected_only`: `true` 时只导出当前选中元素，包围盒也只包住这些元素
+    /// - `selected_only`: `true` 时只导出当前选中元素，以及选中组下的可见子孙。包围盒也只包住这些元素
     ///
     /// # 返回
-    /// SVG 文档。图片纹理不在场景里，对应元素会被跳过并在文档中注明。
-    /// 文本写成 `<text>`，锚点与对齐方式一致。
+    /// SVG 文档。有资源字节的图片写成 `<image>`，`href` 是 data URL。
+    /// 没有字节的纹理会被跳过并在文档中注明。文本写成 `<text>`，锚点与对齐方式一致。
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -1758,6 +1774,72 @@ impl InfiniteCanvas {
         id
     }
 
+    /// 从 PNG 或 JPEG 字节创建图片元素。
+    ///
+    /// 像素进入场景资源表：同一份字节多次调用只存一份。边长超过 4096 时先降采样。
+    /// 显示尺寸默认等于像素尺寸；长边超过 512 世界单位时等比缩小，避免一张照片铺满视口。
+    /// 元素进入撤销栈，并成为当前选择。
+    ///
+    /// # 参数
+    /// - `bytes`: 文件字节
+    /// - `mime`: `image/png` 或 `image/jpeg`。空字符串时按文件头识别
+    /// - `x`, `y`: 左上角（世界坐标）
+    ///
+    /// # 返回
+    /// 元素 ID
+    ///
+    /// # 错误
+    /// 格式不支持或解码失败
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const bytes = new Uint8Array(await file.arrayBuffer());
+    /// const id = canvas.add_image_bytes(bytes, file.type, worldX, worldY);
+    /// ```
+    #[wasm_bindgen]
+    pub fn add_image_bytes(
+        &mut self,
+        bytes: &[u8],
+        mime: &str,
+        x: f32,
+        y: f32,
+    ) -> Result<u64, JsValue> {
+        let asset_id = self
+            .scene
+            .insert_image_bytes(bytes, mime)
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        let (width, height) = {
+            let asset = self.scene.image_asset(&asset_id).ok_or_else(|| {
+                JsValue::from_str("image asset disappeared before the element was created")
+            })?;
+            (asset.width, asset.height)
+        };
+        let id = self.scene.next_id();
+        let mut image = Image::from_asset(id, Vec2::new(x, y), &asset_id, width, height);
+        let longest = image.size.x.max(image.size.y);
+        if longest > MAX_PASTED_DISPLAY_EDGE {
+            let scale = MAX_PASTED_DISPLAY_EDGE / longest;
+            image.size.x *= scale;
+            image.size.y *= scale;
+        }
+        self.command_history.execute(
+            Box::new(AddElementCommand::new(AnyElement::Image(image))),
+            &mut self.scene,
+        );
+        self.scene.mark_dirty(id);
+        let _ = self.selection.select_element(&mut self.scene, id, false);
+        self.sync_image_textures();
+        log::info!(
+            "Added image {} from {} bytes at ({}, {}) asset {}",
+            id,
+            bytes.len(),
+            x,
+            y,
+            asset_id
+        );
+        Ok(id)
+    }
+
     /// 设置图片透明度
     ///
     /// # 参数
@@ -1800,6 +1882,7 @@ impl InfiniteCanvas {
         self.pending_text_edit = None;
         self.scene.clear();
         self.release_text_textures_except(textures);
+        self.sync_image_textures();
         log::info!("Cleared scene ({} elements removed)", count);
     }
 
@@ -2145,6 +2228,16 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn get_zoom(&self) -> f32 {
         self.viewport.zoom()
+    }
+
+    /// 屏幕坐标转世界坐标。拖放和粘贴图片时用它定位左上角。
+    ///
+    /// # 返回
+    /// `[x, y]`
+    #[wasm_bindgen]
+    pub fn screen_to_world(&self, x: f32, y: f32) -> Vec<f32> {
+        let world = self.viewport.screen_to_world(Vec2::new(x, y));
+        vec![world.x, world.y]
     }
 
     /// 获取视口中心 X
@@ -2750,6 +2843,9 @@ impl InfiniteCanvas {
         let Some(element) = self.scene.remove(id) else {
             return;
         };
+        // 预览元素离开场景时引用可能降到 0。立刻放回，再由添加命令重新计数。
+        let parked = self.scene.take_detached_assets();
+        self.scene.restore_assets(parked);
         self.command_history
             .execute(Box::new(AddElementCommand::new(element)), &mut self.scene);
         self.selection.select_element(&mut self.scene, id, false);
@@ -2759,6 +2855,7 @@ impl InfiniteCanvas {
     fn discard_preview(&mut self) {
         if let Some(id) = self.drag_state.preview_id.take() {
             self.scene.remove(id);
+            let _ = self.scene.take_detached_assets();
         }
         self.drag_state.pen_points.clear();
     }
@@ -3105,6 +3202,7 @@ impl InfiniteCanvas {
     }
 
     fn update_handle_gesture(&mut self, event: &PointerEvent) -> bool {
+        let lock_aspect = self.image_selection_locks_aspect();
         let preview = {
             let Some(drag) = &self.handle_drag else {
                 return false;
@@ -3113,10 +3211,11 @@ impl InfiniteCanvas {
                 return false;
             }
             let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
-            drag.gesture.preview(
+            drag.gesture.preview_with(
                 event.world_position,
                 event.modifiers.shift,
                 metrics.min_half,
+                lock_aspect,
             )
         };
         self.apply_transform_list(&preview.transforms);
@@ -3229,6 +3328,52 @@ fn polyline_length(points: &[Vec2]) -> f32 {
 }
 
 impl InfiniteCanvas {
+    fn image_selection_locks_aspect(&self) -> bool {
+        selection_locks_image_aspect(self.selected_element_refs())
+    }
+
+    /// 按场景资源表上传或释放 GPU 纹理。
+    ///
+    /// 纹理 id 就是资源 id。最后一个元素引用消失后，GPU 纹理一起删掉。
+    /// 渲染器还没初始化时先不动，等下一帧再传。
+    fn sync_image_textures(&mut self) {
+        if self.webgpu_renderer.is_none() {
+            return;
+        }
+        let needed = self.scene.referenced_asset_ids();
+        if needed == self.gpu_image_assets {
+            return;
+        }
+        let uploads: Vec<(String, u32, u32, Vec<u8>)> = needed
+            .iter()
+            .filter(|id| !self.gpu_image_assets.contains(*id))
+            .filter_map(|id| {
+                let asset = self.scene.image_asset(id)?;
+                Some((
+                    asset.id.clone(),
+                    asset.width,
+                    asset.height,
+                    asset.rgba.clone(),
+                ))
+            })
+            .collect();
+        let stale: Vec<String> = self.gpu_image_assets.difference(&needed).cloned().collect();
+        if let Some(renderer) = self.webgpu_renderer.as_mut() {
+            for id in &stale {
+                renderer.remove_texture(id);
+            }
+            for (id, width, height, rgba) in &uploads {
+                if renderer.has_texture(id) {
+                    continue;
+                }
+                if let Err(err) = renderer.upload_texture(id.clone(), *width, *height, rgba) {
+                    log::error!("Failed to upload image texture {id}: {err}");
+                }
+            }
+        }
+        self.gpu_image_assets = needed;
+    }
+
     fn snapshot_text_textures(&self) -> HashSet<String> {
         self.scene
             .iter()
@@ -3368,6 +3513,7 @@ mod tests {
             snap: SnapSettings::default(),
             style_preview: None,
             minimap_cache: None,
+            gpu_image_assets: HashSet::new(),
         }
     }
 

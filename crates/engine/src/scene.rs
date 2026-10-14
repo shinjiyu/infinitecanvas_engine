@@ -1,21 +1,24 @@
 //! 场景容器
 //!
-//! 管理无限画布上的所有元素，以及组的父子关系。
+//! 管理无限画布上的所有元素、组的父子关系，以及这些元素共享的图片资源。
 //!
 //! ```text
 //! Scene
 //!   ├─ roots（parent = None，按 z_index 排序）
+//!   ├─ AssetTable（同一张图只存一份像素）
 //!   └─ Group
-//!        ├─ leaf（世界变换，含矩形和文本）
+//!        ├─ leaf（世界变换，含矩形、文本和图片）
 //!        └─ Group
 //!             └─ leaf
 //! ```
 //!
 //! 叶子和组的 `transform` 都是世界变换。移动、旋转或缩放组时，增量写到每个后代上
-//! （文本和矩形同一条路径），并把子树标脏，顶点缓存重写文本纹理四边形。
+//! （文本、矩形和图片同一条路径），并把子树标脏，顶点缓存重写纹理四边形。
 //! 场景 JSON 用 `{"type":"group","data":{...}}` 和 `{"type":"text","data":{...}}`。
 //! `parent` / `locked` 在 `props` 里，缺省为根节点和未锁定。文本的光栅字段不进 JSON。
-//! 复制、粘贴和克隆在 [`self::clipboard`]：新 ID、子树重映射，并走命令栈。
+//! 图片像素在 `assets` 里，元素只存 `asset_id`。
+//! 复制、粘贴和克隆在 [`self::clipboard`]：新 ID、子树重映射，图片引用一起带走，并走命令栈。
+use crate::asset::{AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
 use crate::element::{Circle, Element, ElementId, Group, Image, Line, Path, Rectangle, Text};
 use crate::scene_tree::{SceneTree, SceneTreeNode};
 use infinitecanvas_math::{Transform, Vec2};
@@ -175,6 +178,12 @@ pub struct Scene {
     ///
     /// 小地图用它判断缩略图要不要重画。不参与 [`PartialEq`]，也不写入 JSON。
     geometry_epoch: u64,
+    /// 图片像素。同一张图多次使用只存一份。
+    assets: AssetTable,
+    /// [`Self::remove`] 把引用降到 0 的资源暂存在这里，等撤销栈取走。
+    ///
+    /// 不参与 [`PartialEq`]，也不写入 JSON。
+    detached_assets: Vec<ImageAsset>,
 }
 
 /// 重排前的父子关系、组内顺序和 `z_index`。
@@ -205,7 +214,9 @@ struct OutlinePlan {
 
 impl PartialEq for Scene {
     fn eq(&self, other: &Self) -> bool {
-        self.next_id == other.next_id && self.elements == other.elements
+        self.next_id == other.next_id
+            && self.elements == other.elements
+            && self.assets == other.assets
     }
 }
 
@@ -219,6 +230,8 @@ impl Scene {
             dirty_ids: HashSet::new(),
             selection_epoch: 0,
             geometry_epoch: 0,
+            assets: AssetTable::new(),
+            detached_assets: Vec::new(),
         }
     }
 
@@ -333,10 +346,14 @@ impl Scene {
         }
     }
 
-    /// 用已经校验过的元素表恢复场景
+    /// 用已经校验过的元素表和资源表恢复场景
     ///
     /// `next_id` 是下一次 [`Scene::next_id`] 的返回值。
-    pub(crate) fn from_parts(elements: HashMap<ElementId, AnyElement>, next_id: ElementId) -> Self {
+    pub(crate) fn from_parts(
+        elements: HashMap<ElementId, AnyElement>,
+        next_id: ElementId,
+        assets: AssetTable,
+    ) -> Self {
         let mut scene = Self {
             elements,
             next_id,
@@ -344,6 +361,8 @@ impl Scene {
             dirty_ids: HashSet::new(),
             selection_epoch: 0,
             geometry_epoch: 0,
+            assets,
+            detached_assets: Vec::new(),
         };
         scene.invalidate_geometry();
         scene
@@ -372,7 +391,10 @@ impl Scene {
     }
 
     /// 添加图片元素
+    ///
+    /// 若 `asset_id` 在资源表里，引用计数加一。
     pub fn add_image(&mut self, image: Image) -> ElementId {
+        self.assets.retain(&image.asset_id);
         self.insert_element(AnyElement::Image(image))
     }
 
@@ -400,7 +422,12 @@ impl Scene {
     }
 
     /// 添加任意类型元素
+    ///
+    /// 图片元素会增加对应资源的引用计数。
     pub fn add(&mut self, element: AnyElement) -> ElementId {
+        if let AnyElement::Image(image) = &element {
+            self.assets.retain(&image.asset_id);
+        }
         self.insert_element(element)
     }
 
@@ -408,6 +435,8 @@ impl Scene {
     ///
     /// 只想去掉组、留下子元素时用 [`Scene::ungroup`]。
     /// 返回被删除的根元素；子孙从场景中丢弃。
+    /// 每个被删掉的图片都会减少资源引用。降到 0 时资源离开表，
+    /// 暂存在 [`Self::take_detached_assets`]。
     pub fn remove(&mut self, id: ElementId) -> Option<AnyElement> {
         if !self.elements.contains_key(&id) {
             return None;
@@ -419,6 +448,7 @@ impl Scene {
         for (index, element_id) in ids.into_iter().enumerate() {
             self.dirty_ids.remove(&element_id);
             if let Some(element) = self.elements.remove(&element_id) {
+                self.release_image_element(&element);
                 if index == 0 {
                     root = Some(element);
                 }
@@ -432,6 +462,81 @@ impl Scene {
             self.recompute_group_bounds(parent_id);
         }
         root
+    }
+
+    /// 图片进入场景时增加引用。没有 `asset_id`，或资源不在表里时什么都不做。
+    fn retain_image_element(&mut self, element: &AnyElement) {
+        let AnyElement::Image(image) = element else {
+            return;
+        };
+        self.assets.retain(&image.asset_id);
+    }
+
+    /// 图片离开场景时减少引用。最后一份引用把像素移到 [`Self::detached_assets`]。
+    fn release_image_element(&mut self, element: &AnyElement) {
+        let AnyElement::Image(image) = element else {
+            return;
+        };
+        if let Some(asset) = self.assets.release(&image.asset_id) {
+            self.detached_assets.push(asset);
+        }
+    }
+
+    /// 取走引用已经降到 0 的资源。
+    ///
+    /// 撤销命令把它们放进历史；直接删除时丢掉返回值即释放像素。
+    pub fn take_detached_assets(&mut self) -> Vec<ImageAsset> {
+        std::mem::take(&mut self.detached_assets)
+    }
+
+    /// 把撤销栈暂存的资源放回表中（引用计数为 0，随后的 [`Self::add`] 会加一）。
+    pub fn restore_assets(&mut self, assets: Vec<ImageAsset>) {
+        for asset in assets {
+            self.assets.reinsert(asset);
+        }
+    }
+
+    /// 解码 PNG/JPEG 并放进资源表。
+    ///
+    /// 同一份字节只存一次。边长超过 [`MAX_IMAGE_EDGE`] 时先降采样。
+    /// 新资源的引用计数为 0，直到有 [`Image`] 元素引用它。
+    ///
+    /// # 参数
+    /// - `bytes`: 文件字节
+    /// - `mime`: `image/png` 或 `image/jpeg`。空字符串时按文件头识别。
+    ///
+    /// # 返回
+    /// 资源 id。元素的 `asset_id` 和 GPU 纹理 id 都用它。
+    ///
+    /// # 错误
+    /// 格式不支持或解码失败。
+    pub fn insert_image_bytes(&mut self, bytes: &[u8], mime: &str) -> Result<String, AssetError> {
+        self.assets.insert_encoded(bytes, mime, MAX_IMAGE_EDGE)
+    }
+
+    /// 按 id 取图片资源。
+    pub fn image_asset(&self, id: &str) -> Option<&ImageAsset> {
+        self.assets.get(id)
+    }
+
+    /// 资源表里的条目数。
+    pub fn image_asset_count(&self) -> usize {
+        self.assets.len()
+    }
+
+    /// 某个资源当前被多少个元素引用。
+    pub fn asset_refcount(&self, id: &str) -> usize {
+        self.assets.refs(id)
+    }
+
+    /// 仍被元素引用、需要上传 GPU 的资源 id。
+    pub fn referenced_asset_ids(&self) -> HashSet<String> {
+        self.assets.referenced_ids()
+    }
+
+    /// 写入场景 JSON 的资源记录。只包含仍被引用的资源，按 id 排序。
+    pub fn image_asset_records(&self) -> Vec<crate::asset::AssetRecord> {
+        self.assets.to_records()
     }
 
     /// 获取元素
@@ -457,6 +562,8 @@ impl Scene {
         }
         self.elements.clear();
         self.dirty_ids.clear();
+        self.assets.clear();
+        self.detached_assets.clear();
     }
 
     /// 获取元素数量

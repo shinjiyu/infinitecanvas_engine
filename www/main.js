@@ -9,6 +9,7 @@
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，面板上有同样的四个按钮。
  * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。
+ * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
  * @example
  * ```html
@@ -50,6 +51,13 @@ let pointerInsideCanvas = false;
 const pasteSession = createPasteSession();
 /** 剪贴板读写串行，避免连续 Ctrl+V 抢同一份计数。 */
 let clipboardQueue = Promise.resolve();
+/**
+ * Ctrl+V 的序号。paste 事件若已经按图片处理，就把已消费序号抬到这里，
+ * 元素 JSON 路径不再跑。
+ */
+let imagePasteSerial = 0;
+/** 已经被图片粘贴占用的最大 Ctrl+V 序号。 */
+let imagePasteConsumed = 0;
 let autosaveTimer = 0;
 /** @type {{ id: bigint | number, node: HTMLTextAreaElement } | null} */
 let textEditor = null;
@@ -168,6 +176,85 @@ function canvasPoint(event, canvas) {
     x: (event.clientX - rect.left) * scaleX,
     y: (event.clientY - rect.top) * scaleY,
   };
+}
+
+/**
+ * 把屏幕上的点换成世界坐标。拖放和图片粘贴用它当图片左上角。
+ *
+ * 元素 JSON 粘贴用 `clipboard.js` 的 `screenToWorld`，这里走引擎视口，避免同名。
+ *
+ * @param {WasmCanvas} engine
+ * @param {number} x
+ * @param {number} y
+ * @returns {{ x: number, y: number }}
+ */
+function engineScreenToWorld(engine, x, y) {
+  const world = engine.screen_to_world(x, y);
+  return { x: world[0], y: world[1] };
+}
+
+/**
+ * 把 PNG/JPEG 文件放进场景。同一张图多次放入只存一份像素。
+ *
+ * @param {WasmCanvas} engine
+ * @param {HTMLCanvasElement} canvas
+ * @param {File[]} files
+ * @param {{ x: number, y: number }} screen
+ * @returns {Promise<number>}
+ */
+async function placeImageFiles(engine, canvas, files, screen) {
+  const origin = engineScreenToWorld(engine, screen.x, screen.y);
+  let placed = 0;
+  for (const file of files) {
+    const mime = file.type || '';
+    if (mime && !mime.startsWith('image/png') && !mime.startsWith('image/jpeg') && mime !== 'image/jpg') {
+      continue;
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const offset = placed * 24;
+      engine.add_image_bytes(bytes, mime, origin.x + offset, origin.y + offset);
+      placed += 1;
+    } catch (error) {
+      setStatus(`图片导入失败：${errorText(error)}`, true);
+    }
+  }
+  if (placed > 0) {
+    scheduleAutosave(engine);
+    setStatus(placed === 1 ? '已添加图片' : `已添加 ${placed} 张图片`);
+  }
+  return placed;
+}
+
+/**
+ * 画布接受拖入的图片文件。
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {WasmCanvas} engine
+ */
+function bindImageDrop(canvas, engine) {
+  const stage = canvas.parentElement ?? canvas;
+  stage.addEventListener('dragover', (event) => {
+    const items = event.dataTransfer?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === 'file') {
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+        return;
+      }
+    }
+  });
+  stage.addEventListener('drop', (event) => {
+    const files = [...(event.dataTransfer?.files ?? [])].filter((file) => {
+      if (!file.type) return true;
+      return file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/jpg';
+    });
+    if (files.length === 0) return;
+    event.preventDefault();
+    const point = canvasPoint(event, canvas);
+    placeImageFiles(engine, canvas, files, point);
+  });
 }
 
 /**
@@ -749,6 +836,7 @@ function syncRange(id, labelId, value, mixed, format) {
 /**
  * 按当前选择显示或隐藏属性面板，并把公共样式填进控件。
  * 多选不一致时标成「多种」，下一次编辑会写到全部选中元素。
+ * 只选中图片时只留下不透明度；填充和描边仍只出现在形状或文本上。
  *
  * @param {WasmCanvas} engine
  */
@@ -756,13 +844,17 @@ function syncPropertyPanel(engine) {
   const panel = document.getElementById('property-panel');
   if (!panel || typeof engine.get_selection_style !== 'function') return;
   const style = engine.get_selection_style();
-  const visible = Boolean(style && (style.hasShape || style.hasText));
+  const visible = Boolean(style && (style.hasShape || style.hasText || style.hasImage));
   panel.hidden = !visible;
   if (!visible || !style) return;
 
   setText('prop-count', style.count ?? 0);
   const fillRow = document.getElementById('prop-fill-row');
   if (fillRow) fillRow.hidden = !style.hasShape;
+  const strokeRow = document.getElementById('prop-stroke-row');
+  if (strokeRow) strokeRow.hidden = !style.strokeSupported;
+  const strokeWidthRow = document.getElementById('prop-stroke-width-row');
+  if (strokeWidthRow) strokeWidthRow.hidden = !style.strokeWidthSupported;
   syncColorRow(
     'prop-fill',
     'prop-fill-enabled',
@@ -999,6 +1091,7 @@ function bindInput(canvas, engine) {
   });
 
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+  bindImageDrop(canvas, engine);
 
   const editor = document.getElementById('text-editor');
   if (editor instanceof HTMLTextAreaElement) {
@@ -1118,6 +1211,32 @@ function bindInput(canvas, engine) {
     });
   }
 
+  document.addEventListener('paste', (event) => {
+    if (event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) {
+      return;
+    }
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    const files = [];
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+    }
+    if (files.length > 0) {
+      event.preventDefault();
+      imagePasteConsumed = imagePasteSerial;
+      const point = lastPointer ?? { x: canvas.width / 2, y: canvas.height / 2 };
+      placeImageFiles(engine, canvas, files, point);
+      return;
+    }
+    // 没有图片：这次 Ctrl+V 留给元素 JSON。阻止浏览器把文本写进页面。
+    if (imagePasteSerial > imagePasteConsumed) {
+      event.preventDefault();
+    }
+  });
+
   document.addEventListener('keydown', (event) => {
     const inField = event.target instanceof HTMLElement
       && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA');
@@ -1149,8 +1268,19 @@ function bindInput(canvas, engine) {
       return;
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v') {
-      event.preventDefault();
-      enqueueClipboard(() => pasteSelection(engine));
+      // 不 preventDefault：paste 事件要先看到剪贴板里的图片。
+      // 有图片则粘贴图片；否则在下一拍走元素 JSON。
+      const serial = ++imagePasteSerial;
+      enqueueClipboard(() => new Promise((resolve) => {
+        setTimeout(async () => {
+          try {
+            if (imagePasteConsumed >= serial) return;
+            await pasteSelection(engine);
+          } finally {
+            resolve();
+          }
+        }, 0);
+      }));
       return;
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'd') {
