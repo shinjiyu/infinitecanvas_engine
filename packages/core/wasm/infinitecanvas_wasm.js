@@ -803,9 +803,10 @@ export class InfiniteCanvas {
      * - `fillMixed` 等：多选不一致
      * - `fillNone`：大家都没有填充或描边
      * - `fillSupported`：选择里有这个字段
-     * - `strokeWidth` / `opacity` / `fontSize`：统一数值，混合或不支持时为 null
+     * - `strokeWidth` / `opacity` / `fontSize` / `cornerRadius`：统一数值，混合或不支持时为 null
      * - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
      *   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
+     * - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
      *
      * # 示例（JavaScript）
      * ```js
@@ -1505,7 +1506,8 @@ export class InfiniteCanvas {
      * 把补丁写进当前选择并记一条撤销记录。
      *
      * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
-     * `strokeWidth`、`opacity`、`fontSize` 是数字。`textColor` 是十六进制颜色。
+     * `strokeWidth`、`opacity`、`fontSize`、`cornerRadius` 是数字。`cornerRadius` 也可以写成 `corner_radius`。
+     * `textColor` 是十六进制颜色。圆角只写到矩形上。
      * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
      * 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
      * 没有任何变化时返回 false，也不入栈。
@@ -3475,12 +3477,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2690, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2707, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 434, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 450, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

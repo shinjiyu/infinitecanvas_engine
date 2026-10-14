@@ -478,6 +478,18 @@ fn sample_element(scene: &Scene, element: &AnyElement, world: Vec2) -> Option<Co
     }
 }
 
+/// 圆角矩形的有符号距离。负值在内部。半径为 0 时退化为直角盒。
+fn rounded_box_sdf(point: Vec2, half: Vec2, radius: f32) -> f32 {
+    let radius = radius.max(0.0).min(half.x).min(half.y);
+    let q = Vec2::new(
+        point.x.abs() - half.x + radius,
+        point.y.abs() - half.y + radius,
+    );
+    let outside = Vec2::new(q.x.max(0.0), q.y.max(0.0)).length();
+    let inside = q.x.max(q.y).min(0.0);
+    outside + inside - radius
+}
+
 fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
     if !rect.props.visible {
         return None;
@@ -485,13 +497,22 @@ fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
     let local = try_local(&rect.props.transform, world)?;
     let half = rect.size * 0.5;
     let stroke = rect.style.stroke_width.max(0.0) * 0.5;
-    let ax = local.x.abs();
-    let ay = local.y.abs();
-    let in_fill = ax <= half.x && ay <= half.y;
-    let in_stroke = stroke > 0.0
-        && ax <= half.x + stroke
-        && ay <= half.y + stroke
-        && (ax >= (half.x - stroke).max(0.0) || ay >= (half.y - stroke).max(0.0));
+    let radius = rect.effective_corner_radius();
+    let (in_fill, in_stroke) = if radius > 0.0 {
+        let half_abs = Vec2::new(half.x.abs(), half.y.abs());
+        let sdf = rounded_box_sdf(local, half_abs, radius);
+        (sdf <= 1.0e-4, stroke > 0.0 && sdf.abs() <= stroke + 1.0e-4)
+    } else {
+        let ax = local.x.abs();
+        let ay = local.y.abs();
+        (
+            ax <= half.x && ay <= half.y,
+            stroke > 0.0
+                && ax <= half.x + stroke
+                && ay <= half.y + stroke
+                && (ax >= (half.x - stroke).max(0.0) || ay >= (half.y - stroke).max(0.0)),
+        )
+    };
     if in_stroke {
         if let Some(color) = rect.style.stroke {
             return with_opacity(color, rect.style.opacity);
@@ -821,6 +842,7 @@ mod tests {
                 assert_eq!(rect.style.opacity, 1.0);
                 assert_eq!(rect.style.stroke_width, 1.0);
                 assert_eq!(rect.style.fill, Some(Color::BLACK));
+                assert_eq!(rect.corner_radius(), 0.0);
             }
             other => panic!("expected rectangle, got {other:?}"),
         }
@@ -1114,6 +1136,19 @@ mod tests {
             255,
         ];
         assert_pixel(sample_pixel(&scene, Vec2::new(5.0, 5.0)), placeholder);
+    }
+
+    #[test]
+    fn png_rounded_rect_leaves_the_outer_corner_empty() {
+        let mut scene = Scene::new();
+        scene.add_rect(
+            Rectangle::new(1, Vec2::ZERO, Vec2::new(20.0, 20.0))
+                .with_style(ElementStyle::fill_only(Color::BLUE))
+                .with_corner_radius(10.0),
+        );
+        assert_pixel(sample_pixel(&scene, Vec2::ZERO), [0, 0, 255, 255]);
+        assert_pixel(sample_pixel(&scene, Vec2::new(9.5, 0.0)), [0, 0, 255, 255]);
+        assert_pixel(sample_pixel(&scene, Vec2::new(9.0, 9.0)), [0, 0, 0, 0]);
     }
 
     #[test]

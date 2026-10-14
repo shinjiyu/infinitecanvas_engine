@@ -353,6 +353,14 @@ fn write_rectangle(rect: &Rectangle) -> String {
         fmt_num(width),
         fmt_num(height),
     );
+    let radius = rect.effective_corner_radius();
+    if radius > 0.0 {
+        shape.push_str(&format!(
+            " rx=\"{}\" ry=\"{}\"",
+            fmt_num(radius),
+            fmt_num(radius)
+        ));
+    }
     push_fill_stroke(
         &mut shape,
         rect.style.fill,
@@ -784,6 +792,30 @@ mod tests {
                 "</svg>\n",
             )
         );
+    }
+
+    #[test]
+    fn rounded_rectangle_writes_rx_and_ry() {
+        let mut scene = Scene::new();
+        scene.add_rect(
+            rect(
+                1,
+                Vec2::ZERO,
+                Vec2::new(40.0, 20.0),
+                ElementStyle::fill_only(Color::BLACK),
+            )
+            .with_corner_radius(6.0),
+        );
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains("rx=\"6\" ry=\"6\""));
+        let mut sharp = Scene::new();
+        sharp.add_rect(rect(
+            1,
+            Vec2::ZERO,
+            Vec2::new(40.0, 20.0),
+            ElementStyle::fill_only(Color::BLACK),
+        ));
+        assert!(!export_svg(&sharp, false).contains("rx="));
     }
 
     #[test]

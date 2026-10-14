@@ -30,9 +30,10 @@ impl InfiniteCanvas {
     /// - `fillMixed` 等：多选不一致
     /// - `fillNone`：大家都没有填充或描边
     /// - `fillSupported`：选择里有这个字段
-    /// - `strokeWidth` / `opacity` / `fontSize`：统一数值，混合或不支持时为 null
+    /// - `strokeWidth` / `opacity` / `fontSize` / `cornerRadius`：统一数值，混合或不支持时为 null
     /// - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
     ///   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
+    /// - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -46,6 +47,7 @@ impl InfiniteCanvas {
         let obj = Object::new();
         js_set(&obj, "count", JsValue::from(ids.len() as u32));
         js_set(&obj, "hasShape", JsValue::from(style.has_shape));
+        js_set(&obj, "hasRect", JsValue::from(style.has_rect));
         js_set(&obj, "hasText", JsValue::from(style.has_text));
         js_set(&obj, "hasImage", JsValue::from(style.has_image));
         write_optional_color(&obj, "fill", &style.fill);
@@ -53,6 +55,7 @@ impl InfiniteCanvas {
         write_number(&obj, "strokeWidth", &style.stroke_width);
         write_number(&obj, "opacity", &style.opacity);
         write_number(&obj, "fontSize", &style.font_size);
+        write_number(&obj, "cornerRadius", &style.corner_radius);
         write_color(&obj, "textColor", &style.text_color);
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
@@ -63,7 +66,8 @@ impl InfiniteCanvas {
     /// 把补丁写进当前选择并记一条撤销记录。
     ///
     /// 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
-    /// `strokeWidth`、`opacity`、`fontSize` 是数字。`textColor` 是十六进制颜色。
+    /// `strokeWidth`、`opacity`、`fontSize`、`cornerRadius` 是数字。`cornerRadius` 也可以写成 `corner_radius`。
+    /// `textColor` 是十六进制颜色。圆角只写到矩形上。
     /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
     /// 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
     /// 没有任何变化时返回 false，也不入栈。
@@ -297,6 +301,7 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         stroke_dash: read_dash(value, "strokeDash"),
         stroke_cap: read_label(value, "strokeCap", StrokeCap::parse),
         stroke_join: read_label(value, "strokeJoin", StrokeJoin::parse),
+        corner_radius: read_f32(value, "cornerRadius").or_else(|| read_f32(value, "corner_radius")),
     })
 }
 

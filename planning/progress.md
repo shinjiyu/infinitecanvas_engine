@@ -2,6 +2,21 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #50: 圆角矩形
+
+- [x] `Rectangle::corner_radius`，默认 0，`serde(default)`；0 不写出。超过短边一半时钳制
+- [x] WebGPU 填充和描边走圆角轮廓；半径 0 仍是原来的 6 个填充顶点。虚线细描边沿同一轮廓切开，不盖一条实线
+- [x] 命中保持轴对齐外接矩形；包围盒不随圆角缩小
+- [x] `SetStyle` 补丁 `corner_radius`，一条撤销记录，并 `mark_dirty`
+- [x] `selection_style` / `set_selection_style` 暴露 `cornerRadius`；多选不一致为 mixed；非矩形为 absent
+- [x] Demo 属性面板：选中矩形时显示圆角滑条和数字框，否则隐藏
+
+```text
+属性面板圆角 ── preview / commit ──► SetStyle.corner_radius
+                                          ├─ 只写矩形，钳到短边一半
+                                          └─ mark_dirty ──► 圆角轮廓顶点
+```
+
 ## Issue #49: 翻转与 90° 旋转
 
 - [x] `OrientSelectionCommand`：水平/垂直翻转，顺时针/逆时针 90°，各一条历史

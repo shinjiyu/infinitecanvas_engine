@@ -2,7 +2,7 @@
  * InfiniteCanvas 首页 Demo。
  *
  * 把选择、直线、画笔、压力测试、纹理和小地图放在同一张画布上。
- * 选中元素后右侧属性面板可改填充、描边、线宽、线型、线帽、线结和不透明度，文本还可改字号和颜色。文本描边暂不支持线型。
+ * 选中元素后右侧属性面板可改填充、描边、线宽、线型、线帽、线结和不透明度，矩形还可改圆角，文本还可改字号和颜色。文本描边暂不支持线型。
  * 键盘操作只读 `www/shortcuts.js`：方向键按世界单位微调（Shift 为 10 倍），
  * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。输入框、下拉框内不触发。
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
@@ -1241,6 +1241,7 @@ function syncPropertyPanel(engine) {
     style.opacityMixed,
     (value) => `${Math.round(value * 100)}%`,
   );
+  syncCornerRadius(style);
 
   const textFields = document.getElementById('prop-text-fields');
   if (textFields) textFields.hidden = !style.hasText;
@@ -1410,6 +1411,7 @@ function bindPropertyPanel(engine) {
   };
   bindRange('prop-stroke-width', 'strokeWidth', 'prop-stroke-width-label', (value) => String(value));
   bindRange('prop-opacity', 'opacity', 'prop-opacity-label', (value) => `${Math.round(value * 100)}%`);
+  bindCornerRadius(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
 
   const bindColor = (id, key) => {
@@ -1471,6 +1473,55 @@ function bindPropertyPanel(engine) {
   });
   bindChoice('prop-stroke-cap', 'strokeCap', (value) => value);
   bindChoice('prop-stroke-join', 'strokeJoin', (value) => value);
+}
+
+/**
+ * 圆角只在选中矩形时出现。滑块和数字框写同一个 `cornerRadius`，松手收成一条历史。
+ *
+ * @param {Record<string, unknown>} style
+ */
+function syncCornerRadius(style) {
+  const row = document.getElementById('prop-corner-radius-row');
+  if (row) row.hidden = !style.cornerRadiusSupported;
+  const mixedEl = document.getElementById('prop-corner-radius-mixed');
+  if (mixedEl) mixedEl.hidden = !style.cornerRadiusMixed;
+  const active =
+    activeStyleControl === 'prop-corner-radius' ||
+    activeStyleControl === 'prop-corner-radius-number';
+  if (active) return;
+  const range = document.getElementById('prop-corner-radius');
+  const number = document.getElementById('prop-corner-radius-number');
+  if (typeof style.cornerRadius === 'number' && Number.isFinite(style.cornerRadius)) {
+    if (range instanceof HTMLInputElement) range.value = String(style.cornerRadius);
+    if (number instanceof HTMLInputElement) number.value = String(style.cornerRadius);
+  }
+}
+
+/**
+ * @param {WasmCanvas} engine
+ */
+function bindCornerRadius(engine) {
+  const range = document.getElementById('prop-corner-radius');
+  const number = document.getElementById('prop-corner-radius-number');
+  const preview = (source, value) => {
+    if (!Number.isFinite(value) || value < 0) return;
+    activeStyleControl = source;
+    if (range instanceof HTMLInputElement && source !== 'prop-corner-radius') {
+      range.value = String(Math.min(value, Number(range.max)));
+    }
+    if (number instanceof HTMLInputElement && source !== 'prop-corner-radius-number') {
+      number.value = String(value);
+    }
+    engine.preview_selection_style({ cornerRadius: value });
+  };
+  if (range instanceof HTMLInputElement) {
+    range.addEventListener('input', () => preview('prop-corner-radius', Number(range.value)));
+    range.addEventListener('change', () => finishStyleEdit(engine));
+  }
+  if (number instanceof HTMLInputElement) {
+    number.addEventListener('input', () => preview('prop-corner-radius-number', Number(number.value)));
+    number.addEventListener('change', () => finishStyleEdit(engine));
+  }
 }
 
 function bindInput(canvas, engine) {
