@@ -135,7 +135,7 @@ export class InfiniteCanvas {
   /**
    * 读取当前选择的公共样式。多选不一致时对应字段为 mixed。
    *
-   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape`、`hasText`、`hasImage` 都是 false。图片只参与 `opacity`
+   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape`、`hasText`、`hasImage` 都是 false。图片只参与 `opacity`。矩形另有 `cornerRadius`（多选不一致时 `cornerRadiusMixed`）
    */
   getSelectionStyle(): Record<string, unknown> {
     return this.requireWasm().get_selection_style() as Record<string, unknown>;
@@ -146,7 +146,7 @@ export class InfiniteCanvas {
    *
    * 只写需要改的字段。`fill` / `stroke` 传 `null` 表示清掉。
    *
-   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`、`strokeDash`、`strokeCap`、`strokeJoin`。线型只作用于形状，文本描边不读这些字段
+   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`、`strokeDash`、`strokeCap`、`strokeJoin`、`cornerRadius`（仅矩形）。线型只作用于形状，文本描边不读这些字段
    * @returns 是否写入了撤销栈
    */
   setSelectionStyle(patch: Record<string, unknown>): boolean {

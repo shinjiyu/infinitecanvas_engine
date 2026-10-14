@@ -11,10 +11,11 @@
 //!                 └─ StylePatch ──► SetStyleCommand ──► mark_dirty
 //!                                      │
 //!                                      ├─ 文本字号 / 颜色 / 描边变化时丢掉光栅
+//!                                      ├─ 矩形圆角（其它元素忽略该字段）
 //!                                      └─ 图片只改 alpha
 //! ```
 
-use crate::element::{ElementId, ElementStyle, StrokeCap, StrokeJoin};
+use crate::element::{ElementId, ElementStyle, Rectangle, StrokeCap, StrokeJoin};
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::Color;
 
@@ -47,8 +48,15 @@ pub struct TextPaint {
 /// 一个元素上可撤销的样式快照。
 #[derive(Debug, Clone, PartialEq)]
 pub enum StyleSnapshot {
-    /// 矩形、圆、直线或路径。
+    /// 圆、直线或路径。矩形用 [`StyleSnapshot::Rectangle`]，以便带上圆角。
     Shape(ElementStyle),
+    /// 矩形的画笔和圆角。一次补丁同时改这两项，撤销仍是一条记录。
+    Rectangle {
+        /// 填充、描边、线宽、不透明度。
+        style: ElementStyle,
+        /// 四角相同的半径。0 为直角。
+        corner_radius: f32,
+    },
     /// 文本。
     Text(TextPaint),
     /// 图片。只有不透明度，对应 [`crate::element::Image::alpha`]。
@@ -78,6 +86,8 @@ pub struct StylePatch {
     pub stroke_cap: Option<StrokeCap>,
     /// 形状线结。文本描边不读这个字段。
     pub stroke_join: Option<StrokeJoin>,
+    /// 矩形圆角半径，单位与矩形尺寸相同。只写到矩形上，并钳到短边一半。
+    pub corner_radius: Option<f32>,
 }
 
 /// 当前选择的公共样式。
@@ -101,8 +111,12 @@ pub struct SelectionStyle {
     pub stroke_cap: StyleField<StrokeCap>,
     /// 形状线结。文本不参与。
     pub stroke_join: StyleField<StrokeJoin>,
+    /// 矩形圆角。选择里没有矩形时为 [`StyleField::Absent`]。
+    pub corner_radius: StyleField<f32>,
     /// 选择里有形状（含组内的形状）。
     pub has_shape: bool,
+    /// 选择里有矩形（含组内的矩形）。圆角只对它们生效。
+    pub has_rect: bool,
     /// 选择里有文本（含组内的文本）。
     pub has_text: bool,
     /// 选择里有图片（含组内的图片）。图片只贡献不透明度。
@@ -124,27 +138,14 @@ impl StyleSnapshot {
     pub fn apply_patch(&mut self, patch: &StylePatch) -> bool {
         let original = self.clone();
         match self {
-            Self::Shape(style) => {
-                if let Some(fill) = patch.fill {
-                    style.fill = fill;
-                }
-                if let Some(stroke) = patch.stroke {
-                    style.stroke = stroke;
-                }
-                if let Some(width) = finite_width(patch.stroke_width) {
-                    style.stroke_width = width;
-                }
-                if let Some(opacity) = finite_opacity(patch.opacity) {
-                    style.opacity = opacity;
-                }
-                if let Some(dash) = &patch.stroke_dash {
-                    style.stroke_dash = sanitize_dash(dash);
-                }
-                if let Some(cap) = patch.stroke_cap {
-                    style.stroke_cap = cap;
-                }
-                if let Some(join) = patch.stroke_join {
-                    style.stroke_join = join;
+            Self::Shape(style) => apply_shape_paint(style, patch),
+            Self::Rectangle {
+                style,
+                corner_radius,
+            } => {
+                apply_shape_paint(style, patch);
+                if let Some(radius) = patch.corner_radius.filter(|value| value.is_finite()) {
+                    *corner_radius = radius.max(0.0);
                 }
             }
             Self::Text(text) => {
@@ -171,6 +172,19 @@ impl StyleSnapshot {
             }
         }
         *self != original
+    }
+
+    /// 按矩形当前尺寸把圆角钳到短边一半。其它快照不动。
+    ///
+    /// [`SetStyleCommand::from_patch`] 在入栈前调用，撤销记录里不留下超限半径。
+    pub fn clamp_corner_radius(&mut self, scene: &Scene, id: ElementId) {
+        let Self::Rectangle { corner_radius, .. } = self else {
+            return;
+        };
+        let Some(AnyElement::Rectangle(rect)) = scene.get(id) else {
+            return;
+        };
+        *corner_radius = Rectangle::clamp_radius(rect.size, *corner_radius);
     }
 }
 
@@ -205,7 +219,10 @@ pub fn style_locked(scene: &Scene, id: ElementId) -> bool {
 /// 读取一个元素的样式。组返回 `None`，图片只返回不透明度。
 pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
     match scene.get(id)? {
-        AnyElement::Rectangle(rect) => Some(StyleSnapshot::Shape(rect.style.clone())),
+        AnyElement::Rectangle(rect) => Some(StyleSnapshot::Rectangle {
+            style: rect.style.clone(),
+            corner_radius: rect.effective_corner_radius(),
+        }),
         AnyElement::Circle(circle) => Some(StyleSnapshot::Shape(circle.style.clone())),
         AnyElement::Line(line) => Some(StyleSnapshot::Shape(line.style.clone())),
         AnyElement::Path(path) => Some(StyleSnapshot::Shape(path.style.clone())),
@@ -226,7 +243,7 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
 /// 文本的字号、颜色或描边变化会丢掉光栅纹理。不透明度只改 tint，不重新光栅化。
 pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSnapshot) {
     let applied = match scene.get_mut(id) {
-        Some(AnyElement::Rectangle(rect)) => assign_shape(&mut rect.style, snapshot),
+        Some(AnyElement::Rectangle(rect)) => assign_rectangle(rect, snapshot),
         Some(AnyElement::Circle(circle)) => assign_shape(&mut circle.style, snapshot),
         Some(AnyElement::Line(line)) => assign_shape(&mut line.style, snapshot),
         Some(AnyElement::Path(path)) => assign_shape(&mut path.style, snapshot),
@@ -270,7 +287,9 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut dashes = Vec::new();
     let mut caps = Vec::new();
     let mut joins = Vec::new();
+    let mut radii = Vec::new();
     let mut has_shape = false;
+    let mut has_rect = false;
     let mut has_text = false;
     let mut has_image = false;
 
@@ -278,13 +297,34 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         match capture_style(scene, id) {
             Some(StyleSnapshot::Shape(style)) => {
                 has_shape = true;
-                fills.push(style.fill);
-                strokes.push(style.stroke);
-                widths.push(style.stroke_width);
-                opacities.push(style.opacity);
+                push_shape_paint(
+                    &mut fills,
+                    &mut strokes,
+                    &mut widths,
+                    &mut opacities,
+                    &style,
+                );
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
+            }
+            Some(StyleSnapshot::Rectangle {
+                style,
+                corner_radius,
+            }) => {
+                has_shape = true;
+                has_rect = true;
+                push_shape_paint(
+                    &mut fills,
+                    &mut strokes,
+                    &mut widths,
+                    &mut opacities,
+                    &style,
+                );
+                dashes.push(style.stroke_dash);
+                caps.push(style.stroke_cap);
+                joins.push(style.stroke_join);
+                radii.push(corner_radius);
             }
             Some(StyleSnapshot::Text(text)) => {
                 has_text = true;
@@ -312,7 +352,9 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         stroke_dash: fold(dashes),
         stroke_cap: fold(caps),
         stroke_join: fold(joins),
+        corner_radius: fold(radii),
         has_shape,
+        has_rect,
         has_text,
         has_image,
     }
@@ -330,6 +372,61 @@ fn sanitize_dash(dash: &[f32]) -> Vec<f32> {
         Vec::new()
     } else {
         values
+    }
+}
+
+fn push_shape_paint(
+    fills: &mut Vec<Option<Color>>,
+    strokes: &mut Vec<Option<Color>>,
+    widths: &mut Vec<f32>,
+    opacities: &mut Vec<f32>,
+    style: &ElementStyle,
+) {
+    fills.push(style.fill);
+    strokes.push(style.stroke);
+    widths.push(style.stroke_width);
+    opacities.push(style.opacity);
+}
+
+fn apply_shape_paint(style: &mut ElementStyle, patch: &StylePatch) {
+    if let Some(fill) = patch.fill {
+        style.fill = fill;
+    }
+    if let Some(stroke) = patch.stroke {
+        style.stroke = stroke;
+    }
+    if let Some(width) = finite_width(patch.stroke_width) {
+        style.stroke_width = width;
+    }
+    if let Some(opacity) = finite_opacity(patch.opacity) {
+        style.opacity = opacity;
+    }
+    if let Some(dash) = &patch.stroke_dash {
+        style.stroke_dash = sanitize_dash(dash);
+    }
+    if let Some(cap) = patch.stroke_cap {
+        style.stroke_cap = cap;
+    }
+    if let Some(join) = patch.stroke_join {
+        style.stroke_join = join;
+    }
+}
+
+fn assign_rectangle(rect: &mut Rectangle, snapshot: &StyleSnapshot) -> bool {
+    match snapshot {
+        StyleSnapshot::Rectangle {
+            style,
+            corner_radius,
+        } => {
+            rect.style = style.clone();
+            rect.set_corner_radius(*corner_radius);
+            true
+        }
+        StyleSnapshot::Shape(style) => {
+            rect.style = style.clone();
+            true
+        }
+        _ => false,
     }
 }
 
@@ -380,9 +477,14 @@ mod tests {
     use infinitecanvas_math::Vec2;
 
     fn shape_fill(scene: &Scene, id: ElementId) -> Option<Color> {
+        shape_style(scene, id).fill
+    }
+
+    /// 圆、直线、路径是 [`StyleSnapshot::Shape`]，矩形是 [`StyleSnapshot::Rectangle`]。
+    fn shape_style(scene: &Scene, id: ElementId) -> ElementStyle {
         match capture_style(scene, id) {
-            Some(StyleSnapshot::Shape(style)) => style.fill,
-            _ => panic!("shape"),
+            Some(StyleSnapshot::Shape(style) | StyleSnapshot::Rectangle { style, .. }) => style,
+            other => panic!("shape {id}, got {other:?}"),
         }
     }
 
@@ -403,6 +505,8 @@ mod tests {
         assert_eq!(style.opacity, StyleField::Uniform(1.0));
         assert_eq!(style.stroke_width, StyleField::Uniform(1.0));
         assert!(style.has_shape);
+        assert!(style.has_rect);
+        assert_eq!(style.corner_radius, StyleField::Uniform(0.0));
         assert!(!style.has_text);
         assert!(!style.has_image);
         assert_eq!(style.font_size, StyleField::Absent);
@@ -476,6 +580,7 @@ mod tests {
             opacity: Some(0.5),
             font_size: Some(20.0),
             text_color: Some(Color::GREEN),
+            corner_radius: Some(3.0),
             ..StylePatch::default()
         };
         let mut command = SetStyleCommand::from_patch(&scene, &[1, 2, 3, 4], &patch).unwrap();
@@ -489,6 +594,7 @@ mod tests {
                 assert_eq!(rect.style.stroke, Some(Color::BLUE));
                 assert_eq!(rect.style.stroke_width, 6.0);
                 assert_eq!(rect.style.opacity, 0.5);
+                assert_eq!(rect.corner_radius(), 3.0);
             }
             other => panic!("rect, got {other:?}"),
         }
@@ -527,7 +633,10 @@ mod tests {
         });
         let legacy_scene = Scene::from_json(&legacy.to_string()).unwrap();
         match legacy_scene.get(1).unwrap() {
-            AnyElement::Rectangle(rect) => assert_eq!(rect.style, ElementStyle::new()),
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style, ElementStyle::new());
+                assert_eq!(rect.corner_radius(), 0.0);
+            }
             other => panic!("rect, got {other:?}"),
         }
         match legacy_scene.get(2).unwrap() {
@@ -602,6 +711,7 @@ mod tests {
         assert_eq!(image_only.stroke_dash, StyleField::Absent);
         assert_eq!(image_only.stroke_cap, StyleField::Absent);
         assert_eq!(image_only.stroke_join, StyleField::Absent);
+        assert_eq!(image_only.corner_radius, StyleField::Absent);
         assert!(!image_only.is_empty());
 
         let together = selection_style(&scene, &[group_id]);
@@ -696,41 +806,32 @@ mod tests {
         assert!(json.contains("\"stroke_join\":\"bevel\""));
         let restored = Scene::from_json(&json).unwrap();
         for id in [1, 2, 3, 4] {
-            match capture_style(&restored, id) {
-                Some(StyleSnapshot::Shape(style)) => {
-                    assert_eq!(style.stroke_dash, vec![8.0, 4.0]);
-                    assert_eq!(style.stroke_cap, StrokeCap::Round);
-                    assert_eq!(style.stroke_join, StrokeJoin::Bevel);
-                    assert_eq!(style.stroke_width, 6.0);
-                    assert!((style.opacity - 0.5).abs() < 1e-5);
-                }
-                other => panic!("shape {id}, got {other:?}"),
-            }
+            let style = shape_style(&restored, id);
+            assert_eq!(style.stroke_dash, vec![8.0, 4.0]);
+            assert_eq!(style.stroke_cap, StrokeCap::Round);
+            assert_eq!(style.stroke_join, StrokeJoin::Bevel);
+            assert_eq!(style.stroke_width, 6.0);
+            assert!((style.opacity - 0.5).abs() < 1e-5);
         }
+        assert_eq!(shape_style(&restored, 1).fill, Some(Color::RED));
         match capture_style(&restored, 1) {
-            Some(StyleSnapshot::Shape(style)) => assert_eq!(style.fill, Some(Color::RED)),
+            Some(StyleSnapshot::Rectangle { corner_radius, .. }) => {
+                assert_eq!(corner_radius, 0.0);
+            }
             other => panic!("rect, got {other:?}"),
         }
 
         assert!(history.undo(&mut scene));
-        match capture_style(&scene, 2) {
-            Some(StyleSnapshot::Shape(style)) => {
-                assert!(style.stroke_dash.is_empty());
-                assert_eq!(style.stroke_cap, StrokeCap::Butt);
-                assert_eq!(style.stroke_join, StrokeJoin::Miter);
-                assert_eq!(style.stroke_width, 4.0);
-            }
-            other => panic!("line, got {other:?}"),
-        }
+        let line = shape_style(&scene, 2);
+        assert!(line.stroke_dash.is_empty());
+        assert_eq!(line.stroke_cap, StrokeCap::Butt);
+        assert_eq!(line.stroke_join, StrokeJoin::Miter);
+        assert_eq!(line.stroke_width, 4.0);
         assert!(history.redo(&mut scene));
-        match capture_style(&scene, 3) {
-            Some(StyleSnapshot::Shape(style)) => {
-                assert_eq!(style.stroke_dash, vec![8.0, 4.0]);
-                assert_eq!(style.stroke_cap, StrokeCap::Round);
-                assert_eq!(style.stroke_join, StrokeJoin::Bevel);
-            }
-            other => panic!("path, got {other:?}"),
-        }
+        let path = shape_style(&scene, 3);
+        assert_eq!(path.stroke_dash, vec![8.0, 4.0]);
+        assert_eq!(path.stroke_cap, StrokeCap::Round);
+        assert_eq!(path.stroke_join, StrokeJoin::Bevel);
 
         let mixed = StylePatch {
             stroke_cap: Some(StrokeCap::Square),
@@ -745,6 +846,7 @@ mod tests {
         assert_eq!(summary.stroke_dash, StyleField::Uniform(vec![8.0, 4.0]));
         assert_eq!(summary.stroke_join, StyleField::Uniform(StrokeJoin::Bevel));
         assert_eq!(summary.opacity, StyleField::Uniform(0.5));
+        assert_eq!(summary.corner_radius, StyleField::Uniform(0.0));
 
         let size = serde_json::to_value(Vec2::new(8.0, 6.0)).unwrap();
         let start = serde_json::to_value(Vec2::ZERO).unwrap();
@@ -760,14 +862,97 @@ mod tests {
         });
         let legacy_scene = Scene::from_json(&legacy.to_string()).unwrap();
         for id in [1, 2, 3, 4] {
-            match capture_style(&legacy_scene, id) {
-                Some(StyleSnapshot::Shape(style)) => {
-                    assert!(style.stroke_dash.is_empty(), "id {id} dash");
-                    assert_eq!(style.stroke_cap, StrokeCap::Butt);
-                    assert_eq!(style.stroke_join, StrokeJoin::Miter);
-                }
-                other => panic!("legacy {id}, got {other:?}"),
-            }
+            let style = shape_style(&legacy_scene, id);
+            assert!(style.stroke_dash.is_empty(), "id {id} dash");
+            assert_eq!(style.stroke_cap, StrokeCap::Butt);
+            assert_eq!(style.stroke_join, StrokeJoin::Miter);
         }
+        match capture_style(&legacy_scene, 1) {
+            Some(StyleSnapshot::Rectangle { corner_radius, .. }) => {
+                assert_eq!(corner_radius, 0.0);
+            }
+            other => panic!("legacy rect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn corner_radius_is_one_undo_entry_and_mixed_only_among_rects() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(40.0, 20.0)));
+        scene.add_rect(
+            Rectangle::new(2, Vec2::new(80.0, 0.0), Vec2::new(40.0, 10.0)).with_corner_radius(2.0),
+        );
+        scene.add_circle(Circle::new(3, Vec2::new(140.0, 0.0), 8.0));
+
+        let rects = selection_style(&scene, &[1, 2]);
+        assert!(rects.has_rect);
+        assert_eq!(rects.corner_radius, StyleField::Mixed);
+        let circle = selection_style(&scene, &[3]);
+        assert!(!circle.has_rect);
+        assert_eq!(circle.corner_radius, StyleField::Absent);
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[3],
+            &StylePatch {
+                corner_radius: Some(4.0),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(
+                SetStyleCommand::from_patch(
+                    &scene,
+                    &[1, 3],
+                    &StylePatch {
+                        corner_radius: Some(100.0),
+                        ..StylePatch::default()
+                    },
+                )
+                .unwrap(),
+            ),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert!(scene.has_dirty_elements());
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => assert_eq!(rect.corner_radius(), 10.0),
+            other => panic!("rect, got {other:?}"),
+        }
+        match scene.get(3).unwrap() {
+            AnyElement::Circle(circle) => assert_eq!(circle.radius, 8.0),
+            other => panic!("circle, got {other:?}"),
+        }
+
+        let mut cache = VertexCache::new();
+        let _ = cache.sync(&mut scene);
+        assert!(cache.fill_slice(1).unwrap().len() > 6);
+        assert!(!scene.has_dirty_elements());
+
+        assert!(history.undo(&mut scene));
+        assert!(scene.has_dirty_elements());
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.corner_radius(), 0.0);
+                assert_eq!(rect.generate_fill_vertices().len(), 6);
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        let _ = cache.sync(&mut scene);
+        assert!(!scene.has_dirty_elements());
+
+        assert!(history.redo(&mut scene));
+        assert!(scene.has_dirty_elements());
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.corner_radius(), 10.0);
+                assert!(rect.generate_fill_vertices().len() > 6);
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        let together = selection_style(&scene, &[1, 2]);
+        assert_eq!(together.corner_radius, StyleField::Mixed);
     }
 }

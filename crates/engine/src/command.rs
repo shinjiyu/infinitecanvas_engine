@@ -1200,7 +1200,8 @@ struct StyleChange {
 
 /// 修改一个或多个元素的填充、描边、线宽和不透明度。
 ///
-/// 文本还会记录字号和文字颜色。图片只接受不透明度，写到 `Image::alpha`，
+/// 矩形还可以改 `corner_radius`（钳到短边一半）。文本还会记录字号和文字颜色。
+/// 图片只接受不透明度，写到 `Image::alpha`，
 /// 不改 `asset_id`，也不动资源表。执行和撤销都会 [`Scene::mark_dirty`]，
 /// 顶点缓存和文本光栅因此会刷新。拖动滑块时由调用方合成一条命令：
 /// 预览直接写场景，松手后用 [`SetStyleCommand::from_states`] 入栈。
@@ -1240,7 +1241,10 @@ impl SetStyleCommand {
             };
             let mut after = before.clone();
             if after.apply_patch(patch) {
-                changes.push(StyleChange { id, before, after });
+                after.clamp_corner_radius(scene, id);
+                if after != before {
+                    changes.push(StyleChange { id, before, after });
+                }
             }
         }
         if changes.is_empty() {
@@ -1603,11 +1607,15 @@ mod tests {
         assert!(scene.has_dirty_elements());
         assert_eq!(history.undo_count(), 1);
         match capture_style(&scene, 1) {
-            Some(StyleSnapshot::Shape(style)) => {
+            Some(StyleSnapshot::Rectangle {
+                style,
+                corner_radius,
+            }) => {
                 assert_eq!(style.fill, Some(Color::RED));
                 assert_eq!(style.stroke, Some(Color::BLUE));
                 assert_eq!(style.stroke_width, 5.0);
                 assert_eq!(style.opacity, 0.4);
+                assert_eq!(corner_radius, 0.0);
             }
             other => panic!("shape, got {other:?}"),
         }
@@ -1624,10 +1632,14 @@ mod tests {
 
         assert!(history.undo(&mut scene));
         match capture_style(&scene, 1) {
-            Some(StyleSnapshot::Shape(style)) => {
+            Some(StyleSnapshot::Rectangle {
+                style,
+                corner_radius,
+            }) => {
                 assert_eq!(style.fill, Some(Color::BLACK));
                 assert_eq!(style.stroke, None);
                 assert_eq!(style.opacity, 1.0);
+                assert_eq!(corner_radius, 0.0);
             }
             other => panic!("shape, got {other:?}"),
         }
