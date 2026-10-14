@@ -67,3 +67,18 @@ jobs:
       - name: npm run build
         working-directory: www
         run: npm run build
+
+      - name: Benchmark stats tests
+        run: node --test scripts/bench-stats.test.mjs
+
+      - name: Ensure Chrome for the performance smoke
+        run: |
+          if ! command -v google-chrome >/dev/null 2>&1 && ! command -v google-chrome-stable >/dev/null 2>&1; then
+            wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get update
+            sudo apt-get install -y /tmp/chrome.deb
+          fi
+          google-chrome --version || google-chrome-stable --version
+
+      - name: Performance smoke (1k rectangles, no 60 FPS gate)
+        run: node scripts/bench.mjs --smoke

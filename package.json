@@ -10,7 +10,10 @@
     "build:ts": "pnpm --recursive --filter './packages/**' build",
     "test": "pnpm test:rust && pnpm test:ts",
     "test:rust": "cargo test --all",
-    "test:ts": "pnpm --recursive test"
+    "test:ts": "pnpm --recursive test",
+    "bench": "node scripts/bench.mjs",
+    "bench:smoke": "node scripts/bench.mjs --smoke",
+    "test:bench-stats": "node --test scripts/bench-stats.test.mjs"
   },
   "packageManager": "pnpm@8.15.0"
 }
