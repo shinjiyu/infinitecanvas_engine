@@ -6,7 +6,7 @@
 //! Scene ── to_json ──▶ { version, next_id, assets[], elements[], guides[] }
 //!                          │  type + data          │ data URL，同一张图只写一次
 //!                          ▼                       ▼
-//!                     rectangle / circle / polygon / image / line / path / text / group
+//!                     rectangle / circle / polygon / image / line / path / text / group / frame
 //! Scene ◀─ from_json ── 缺省字段用 serde default，未知字段忽略
 //! ```
 //!
@@ -23,7 +23,7 @@ use crate::{ElementId, Viewport};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 当前场景 JSON 版本。不兼容的结构必须递增。
 pub const SCENE_FORMAT_VERSION: u32 = 1;
@@ -86,6 +86,8 @@ pub enum PersistError {
     InvalidScale,
     /// PNG 编码失败
     Encode(String),
+    /// 导出目标不是画板
+    NotAFrame,
 }
 
 impl std::fmt::Display for PersistError {
@@ -108,6 +110,7 @@ impl std::fmt::Display for PersistError {
                 write!(f, "pixels per unit must be a positive finite number")
             }
             PersistError::Encode(message) => write!(f, "png encode failed: {message}"),
+            PersistError::NotAFrame => write!(f, "element is not a frame"),
         }
     }
 }
@@ -288,6 +291,9 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
         "group" => serde_json::from_value(data)
             .map(AnyElement::Group)
             .map_err(|err| PersistError::Json(err.to_string())),
+        "frame" => serde_json::from_value(data)
+            .map(AnyElement::Frame)
+            .map_err(|err| PersistError::Json(err.to_string())),
         other => Err(PersistError::UnknownElementType(other.to_string())),
     }
 }
@@ -362,6 +368,10 @@ pub fn export_selection_png(scene: &Scene, pixels_per_unit: f32) -> Result<Vec<u
     if !pixels_per_unit.is_finite() || pixels_per_unit <= 0.0 {
         return Err(PersistError::InvalidScale);
     }
+    if let Some(bounds) = selected_frame_crop(scene) {
+        let allow = selected_frame_ids(scene);
+        return export_region_filtered(scene, bounds, pixels_per_unit, false, Some(&allow));
+    }
     let bounds = selected_bounds(scene).ok_or(PersistError::NothingSelected)?;
     export_region_png(
         scene,
@@ -369,6 +379,104 @@ pub fn export_selection_png(scene: &Scene, pixels_per_unit: f32) -> Result<Vec<u
         pixels_per_unit,
         false,
     )
+}
+
+/// 把一张画板栅格化成 PNG。区域就是画板的世界包围盒，不含额外留白。
+///
+/// 只绘制这张画板和它的子孙。空画板仍导出矩形尺寸。
+/// 画布上子元素可以画出边界；导出时超出部分被裁掉。
+///
+/// # 错误
+/// 元素不存在、不是画板、尺寸无效或编码失败。
+pub fn export_frame_png(
+    scene: &Scene,
+    frame_id: ElementId,
+    pixels_per_unit: f32,
+) -> Result<Vec<u8>, PersistError> {
+    let bounds = frame_export_bounds(scene, frame_id)?;
+    let allow: HashSet<ElementId> = scene.subtree_ids(frame_id).into_iter().collect();
+    export_region_filtered(scene, bounds, pixels_per_unit, false, Some(&allow))
+}
+
+/// 画板的轴对齐世界包围盒。零尺寸或非有限值返回 [`PersistError::EmptyRegion`]。
+pub(crate) fn frame_export_bounds(
+    scene: &Scene,
+    frame_id: ElementId,
+) -> Result<Rect, PersistError> {
+    let Some(element) = scene.get(frame_id) else {
+        return Err(PersistError::NotAFrame);
+    };
+    let AnyElement::Frame(frame) = element else {
+        return Err(PersistError::NotAFrame);
+    };
+    let bounds = frame.world_bounds();
+    if !bounds.x.is_finite()
+        || !bounds.y.is_finite()
+        || !bounds.width.is_finite()
+        || !bounds.height.is_finite()
+        || bounds.width <= 0.0
+        || bounds.height <= 0.0
+    {
+        return Err(PersistError::EmptyRegion);
+    }
+    Ok(bounds)
+}
+
+/// 选区根全是画板时，返回这些画板世界包围盒的并集。混有其它根元素时返回 `None`。
+pub(crate) fn selected_frame_crop(scene: &Scene) -> Option<Rect> {
+    let roots = selected_frame_roots(scene)?;
+    let mut combined: Option<Rect> = None;
+    for id in roots {
+        let bounds = frame_export_bounds(scene, id).ok()?;
+        combined = Some(match combined {
+            Some(existing) => existing.union(&bounds),
+            None => bounds,
+        });
+    }
+    combined
+}
+
+fn selected_frame_roots(scene: &Scene) -> Option<Vec<ElementId>> {
+    let mut frames = Vec::new();
+    for element in scene.iter() {
+        if !element.as_element().props().selected || has_selected_ancestor(scene, element.id()) {
+            continue;
+        }
+        if matches!(element, AnyElement::Frame(_)) {
+            frames.push(element.id());
+        } else {
+            return None;
+        }
+    }
+    if frames.is_empty() {
+        None
+    } else {
+        Some(frames)
+    }
+}
+
+fn has_selected_ancestor(scene: &Scene, id: ElementId) -> bool {
+    let mut current = scene.parent_of(id);
+    while let Some(parent_id) = current {
+        if scene
+            .get(parent_id)
+            .is_some_and(|element| element.as_element().props().selected)
+        {
+            return true;
+        }
+        current = scene.parent_of(parent_id);
+    }
+    false
+}
+
+pub(crate) fn selected_frame_ids(scene: &Scene) -> HashSet<ElementId> {
+    let mut allow = HashSet::new();
+    if let Some(roots) = selected_frame_roots(scene) {
+        for id in roots {
+            allow.extend(scene.subtree_ids(id));
+        }
+    }
+    allow
 }
 
 /// 按绘制顺序返回元素。
@@ -405,6 +513,16 @@ fn export_region_png(
     pixels_per_unit: f32,
     include_guides: bool,
 ) -> Result<Vec<u8>, PersistError> {
+    export_region_filtered(scene, region, pixels_per_unit, include_guides, None)
+}
+
+fn export_region_filtered(
+    scene: &Scene,
+    region: Rect,
+    pixels_per_unit: f32,
+    include_guides: bool,
+    allow: Option<&HashSet<ElementId>>,
+) -> Result<Vec<u8>, PersistError> {
     let (width, height) = raster_size(region, pixels_per_unit)?;
     let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
     let ordered = elements_in_paint_order(scene);
@@ -412,6 +530,9 @@ fn export_region_png(
     for element in ordered {
         // 组不绘制。隐藏的组会把它的子孙一并跳过。
         if matches!(element, AnyElement::Group(_)) || !scene.is_effectively_visible(element.id()) {
+            continue;
+        }
+        if allow.is_some_and(|ids| !ids.contains(&element.id())) {
             continue;
         }
         let Some((x0, y0, x1, y1)) = pixel_span(paint_bounds(element), region, width, height)
@@ -510,6 +631,9 @@ fn paint_bounds(element: &AnyElement) -> Rect {
         AnyElement::Polygon(polygon) => {
             polygon.style.stroke_width.abs() * scale_extent(&polygon.props.transform)
         }
+        AnyElement::Frame(frame) => {
+            frame.style.stroke_width.abs() * scale_extent(&frame.props.transform)
+        }
         AnyElement::Line(_)
         | AnyElement::Path(_)
         | AnyElement::Image(_)
@@ -529,6 +653,7 @@ fn element_shadow(element: &AnyElement) -> (DropShadow, &Transform) {
         AnyElement::Path(path) => (path.style.shadow, &path.props.transform),
         AnyElement::Text(text) => (text.shadow, &text.props.transform),
         AnyElement::Image(image) => (image.shadow, &image.props.transform),
+        AnyElement::Frame(frame) => (frame.style.shadow, &frame.props.transform),
         AnyElement::Group(group) => (DropShadow::default(), &group.props.transform),
     }
 }
@@ -584,6 +709,7 @@ fn sample_element(scene: &Scene, element: &AnyElement, world: Vec2) -> Option<Co
         AnyElement::Rectangle(rect) => sample_rectangle(rect, world),
         AnyElement::Circle(circle) => sample_circle(circle, world),
         AnyElement::Polygon(polygon) => sample_polygon(polygon, world),
+        AnyElement::Frame(frame) => sample_rectangle(&frame.shape_proxy(), world),
         AnyElement::Image(image) => sample_image(scene, image, world),
         AnyElement::Line(line) => sample_line(line, world),
         AnyElement::Path(path) => sample_path(path, world),

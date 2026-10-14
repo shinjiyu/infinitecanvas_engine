@@ -67,6 +67,44 @@ pub fn hit_test_point(scene: &Scene, point: Vec2, options: &HitTestOptions) -> V
     results
 }
 
+/// 单击要选中的元素。
+///
+/// 默认子元素优先：返回最上层命中。画板矩形本身可命中，所以点在空白画板上会选中画板。
+/// `prefer_frame` 为 true（按住 Alt）时，若光标下有画板，返回最上层的那张画板，
+/// 而不是盖在它上面的子元素。没有画板时仍返回原来的命中。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::hit_test::click_target;
+/// use infinitecanvas_engine::{
+///     apply_reparent_into_frame, CommandHistory, Frame, Rectangle, Scene,
+/// };
+/// use infinitecanvas_math::Vec2;
+///
+/// let mut scene = Scene::new();
+/// let frame_id = scene.add_frame(Frame::new(1, Vec2::ZERO, Vec2::new(40.0, 40.0)));
+/// scene.add_rect(Rectangle::new(2, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+/// apply_reparent_into_frame(&mut CommandHistory::new(), &mut scene, &[2], frame_id);
+/// assert_eq!(click_target(&scene, Vec2::ZERO, false), Some(2));
+/// assert_eq!(click_target(&scene, Vec2::ZERO, true), Some(frame_id));
+/// ```
+pub fn click_target(scene: &Scene, point: Vec2, prefer_frame: bool) -> Option<ElementId> {
+    let hits = hit_test_point(
+        scene,
+        point,
+        &HitTestOptions {
+            max_results: usize::MAX,
+            ..HitTestOptions::default()
+        },
+    );
+    if prefer_frame {
+        if let Some(frame) = hits.iter().find(|hit| hit.element_type == "Frame") {
+            return Some(frame.id);
+        }
+    }
+    hits.first().map(|hit| hit.id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

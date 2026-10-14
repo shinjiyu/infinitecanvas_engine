@@ -63,6 +63,29 @@ export class InfiniteCanvas {
         return BigInt.asUintN(64, ret);
     }
     /**
+     * 添加画板，并记入撤销栈。
+     *
+     * 中心是 `(x, y)`。空名称写成 `"画板"`。宽或高不是正数时返回 0，不入栈。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const id = canvas.add_frame(40, 30, 80, 60, "封面");
+     * canvas.rename_frame(id, "内页");
+     * ```
+     * @param {number} x
+     * @param {number} y
+     * @param {number} width
+     * @param {number} height
+     * @param {string | null} [name]
+     * @returns {bigint}
+     */
+    add_frame(x, y, width, height, name) {
+        var ptr0 = isLikeNone(name) ? 0 : passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_add_frame(this.__wbg_ptr, x, y, width, height, ptr0, len0);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
      * 添加图片元素
      *
      * # 参数
@@ -651,6 +674,45 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 把一张画板导出为 PNG。区域是画板的世界包围盒，不含额外留白。
+     *
+     * 只绘制这张画板和它的子孙。空画板仍按矩形尺寸导出。
+     * @param {bigint} frame_id
+     * @returns {Uint8Array}
+     */
+    export_frame_png(frame_id) {
+        const ret = wasm.infinitecanvas_export_frame_png(this.__wbg_ptr, frame_id);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * 把一张画板导出为 SVG。`viewBox` 是画板包围盒，超出部分隐藏。
+     * @param {bigint} frame_id
+     * @returns {string}
+     */
+    export_frame_svg(frame_id) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.infinitecanvas_export_frame_svg(this.__wbg_ptr, frame_id);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * 导出场景为版本化 JSON
      *
      * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）、
@@ -778,6 +840,20 @@ export class InfiniteCanvas {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.infinitecanvas_flip_selection(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
+    }
+    /**
+     * 画板名称。不是画板时返回 `null`。
+     * @param {bigint} id
+     * @returns {string | undefined}
+     */
+    frame_name(id) {
+        const ret = wasm.infinitecanvas_frame_name(this.__wbg_ptr, id);
+        let v1;
+        if (ret[0] !== 0) {
+            v1 = getStringFromWasm0(ret[0], ret[1]);
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        }
+        return v1;
     }
     /**
      * 当前生效的对齐参考线。
@@ -1538,6 +1614,18 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 重命名画板。不是画板，或名称没变时返回 false，不入栈。
+     * @param {bigint} id
+     * @param {string} name
+     * @returns {boolean}
+     */
+    rename_frame(id, name) {
+        const ptr0 = passStringToWasm0(name, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_rename_frame(this.__wbg_ptr, id, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
      * 渲染一帧
      *
      * # 返回
@@ -1595,6 +1683,25 @@ export class InfiniteCanvas {
         const ptr0 = passStringToWasm0(action, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.infinitecanvas_reorder_selection(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+     * 把元素移进画板。空列表、目标不是画板、或没有元素移动时返回 false，不入栈。
+     * @param {Array<any>} ids
+     * @param {bigint} frame_id
+     * @returns {boolean}
+     */
+    reparent_into_frame(ids, frame_id) {
+        const ret = wasm.infinitecanvas_reparent_into_frame(this.__wbg_ptr, ids, frame_id);
+        return ret !== 0;
+    }
+    /**
+     * 把当前选择移进画板。空选返回 false，不入栈。
+     * @param {bigint} frame_id
+     * @returns {boolean}
+     */
+    reparent_selection_into_frame(frame_id) {
+        const ret = wasm.infinitecanvas_reparent_selection_into_frame(this.__wbg_ptr, frame_id);
         return ret !== 0;
     }
     /**
@@ -3899,12 +4006,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2828, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2867, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 475, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 488, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

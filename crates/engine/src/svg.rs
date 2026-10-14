@@ -67,19 +67,64 @@ pub fn export_svg(scene: &Scene, selected_only: bool) -> String {
     export_svg_with_guides(scene, selected_only, false)
 }
 
+/// 把一张画板写成 SVG。`viewBox` 就是画板的世界包围盒，并带 `overflow="hidden"`。
+///
+/// 只包含这张画板和它的子孙。空画板仍写出矩形尺寸。
+/// 交互画布不裁剪子元素；导出时超出 viewBox 的部分被隐藏。
+///
+/// # 错误
+/// 元素不存在、不是画板，或尺寸无效。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::math::Vec2;
+/// use infinitecanvas_engine::{export_frame_svg, Frame, Scene};
+///
+/// let mut scene = Scene::new();
+/// let id = scene.add_frame(Frame::new(1, Vec2::new(40.0, 30.0), Vec2::new(80.0, 60.0)));
+/// let svg = export_frame_svg(&scene, id).unwrap();
+/// assert!(svg.contains("overflow=\"hidden\""));
+/// assert!(svg.contains("viewBox=\"0 0 80 60\""));
+/// ```
+pub fn export_frame_svg(scene: &Scene, frame_id: ElementId) -> Result<String, crate::PersistError> {
+    let bounds = crate::persist::frame_export_bounds(scene, frame_id)?;
+    let allow: HashSet<ElementId> = scene.subtree_ids(frame_id).into_iter().collect();
+    Ok(write_svg(scene, false, false, Some(&allow), Some(bounds)))
+}
+
 /// 同 [`export_svg`]。`include_guides` 为 true 时在 viewBox 内画出参考线。
 ///
 /// 默认不画。参考线不改变 viewBox。标尺不进 SVG。
+/// 选区根全是画板时，viewBox 改成这些画板的世界包围盒，并隐藏超出部分。
 ///
 /// # 参数
 /// - `scene`: 要导出的场景
 /// - `selected_only`: 为 true 时只导出选中叶子
 /// - `include_guides`: 为 true 时追加参考线
 pub fn export_svg_with_guides(scene: &Scene, selected_only: bool, include_guides: bool) -> String {
+    let crop = if selected_only {
+        crate::persist::selected_frame_crop(scene)
+    } else {
+        None
+    };
+    let allow = crop.map(|_| crate::persist::selected_frame_ids(scene));
+    write_svg(scene, selected_only, include_guides, allow.as_ref(), crop)
+}
+
+fn write_svg(
+    scene: &Scene,
+    selected_only: bool,
+    include_guides: bool,
+    allow: Option<&HashSet<ElementId>>,
+    crop: Option<Rect>,
+) -> String {
     let mut bounds: Option<Rect> = None;
     let mut items: Vec<(Vec<ElementId>, String)> = Vec::new();
 
     for element in elements_in_paint_order(scene) {
+        if allow.is_some_and(|ids| !ids.contains(&element.id())) {
+            continue;
+        }
         if !export_this_leaf(scene, element, selected_only) {
             continue;
         }
@@ -102,15 +147,23 @@ pub fn export_svg_with_guides(scene: &Scene, selected_only: bool, include_guides
     write_with_group_wrappers(&mut body, &items);
 
     // 空文档给 1×1，部分查看器拒绝 0×0 的 viewBox。
-    let view = match bounds {
-        Some(bounds) => bounds.inflate(VIEW_PADDING),
-        None => Rect::new(0.0, 0.0, 1.0, 1.0),
+    // 画板导出用精确包围盒，不再外扩，超出部分由 overflow 裁掉。
+    let (view, clip) = match crop {
+        Some(crop) => (crop, true),
+        None => (
+            match bounds {
+                Some(bounds) => bounds.inflate(VIEW_PADDING),
+                None => Rect::new(0.0, 0.0, 1.0, 1.0),
+            },
+            false,
+        ),
     };
 
     let mut svg = String::new();
     svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let overflow = if clip { " overflow=\"hidden\"" } else { "" };
     svg.push_str(&format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\">\n",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"{overflow} width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\">\n",
         fmt_num(view.width),
         fmt_num(view.height),
         fmt_num(view.x),
@@ -380,6 +433,7 @@ fn write_element(element: &AnyElement) -> Option<String> {
         AnyElement::Line(line) => Some(write_line(line)),
         AnyElement::Path(path) => write_path(path),
         AnyElement::Text(text) => write_text(text),
+        AnyElement::Frame(frame) => Some(write_rectangle(&frame.shape_proxy())),
         AnyElement::Image(_) | AnyElement::Group(_) => None,
     }
 }
@@ -828,6 +882,11 @@ fn stroke_overflow(element: &AnyElement) -> f32 {
             polygon.style.stroke,
             polygon.style.stroke_width,
             &polygon.props.transform,
+        ),
+        AnyElement::Frame(frame) => half_stroke(
+            frame.style.stroke,
+            frame.style.stroke_width,
+            &frame.props.transform,
         ),
         AnyElement::Line(line) if line.arrow() => arrow_overflow(line),
         AnyElement::Line(_)

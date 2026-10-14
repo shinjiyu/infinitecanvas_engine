@@ -2,6 +2,7 @@
 //!
 //! 提供无限画布上的各种图形元素
 pub mod circle;
+pub mod frame;
 mod gradient;
 pub mod group;
 pub mod image;
@@ -14,6 +15,7 @@ mod stroke;
 pub mod text;
 
 pub use circle::Circle;
+pub use frame::Frame;
 pub use gradient::{FillKind, GradientStop};
 pub use group::Group;
 pub use image::Image;
@@ -169,7 +171,7 @@ pub struct ElementProps {
     /// 层级（z-index）
     #[serde(default)]
     pub z_index: i32,
-    /// 父元素。`None` 表示挂在场景根上。只有 [`crate::Group`] 会成为父节点。
+    /// 父元素。`None` 表示挂在场景根上。[`crate::Group`] 和 [`crate::Frame`] 会成为父节点。
     ///
     /// `serde(default)` 让还没有层级字段的旧 JSON 仍能反序列化。
     #[serde(default)]

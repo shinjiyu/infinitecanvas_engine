@@ -35,7 +35,32 @@ const TYPE_LABELS = {
   Path: '路径',
   Text: '文本',
   Group: '分组',
+  Frame: '画板',
 };
+
+/**
+ * 组和画板都能收纳子元素。解组仍然只针对组。
+ *
+ * @param {string | undefined} elementType
+ * @returns {boolean}
+ */
+function isContainerType(elementType) {
+  return elementType === 'Group' || elementType === 'Frame';
+}
+
+/**
+ * 画板显示名称。其它元素显示类型和 id。
+ *
+ * @param {{ elementType?: string, name?: string }} node
+ * @param {string} id
+ * @returns {string}
+ */
+function rowLabel(node, id) {
+  const name = typeof node.name === 'string' ? node.name.trim() : '';
+  if (node.elementType === 'Frame' && name) return name;
+  const type = TYPE_LABELS[node.elementType] || node.elementType;
+  return `${type} ${id}`;
+}
 
 /**
  * 把元素 ID 收成稳定的字符串键。WASM 的 u64 在 JS 里是 bigint。
@@ -111,11 +136,11 @@ export function flattenTree(roots, collapsed) {
         ancestorLocked: Boolean(ancestorLocked),
         storageIndex: count - 1 - visualIndex,
         siblingCount: count,
-        label: `${TYPE_LABELS[node.elementType] || node.elementType} ${id}`,
+        label: rowLabel(node, id),
       });
       const childLocked = ancestorLocked || Boolean(node.locked);
       if (
-        node.elementType === 'Group'
+        isContainerType(node.elementType)
         && node.children
         && node.children.length
         && !(collapsed && collapsed.has(id))
@@ -176,7 +201,7 @@ export function dropIndex(rows, rowIndex, place, sourceId, tree) {
 
   const row = rows[rowIndex];
   if (place === 'into') {
-    if (row.elementType !== 'Group' || row.locked || row.ancestorLocked) return null;
+    if (!isContainerType(row.elementType) || row.locked || row.ancestorLocked) return null;
     if (row.id === sourceId || isInside(tree, sourceId, row.id)) return null;
     const kids = Array.from(tree.byId.get(row.id)?.children || []);
     const removed = kids.some((child) => idKey(child.id) === sourceId);
@@ -619,7 +644,7 @@ export function attachLayerPanel(engine, hooks = {}) {
     const label = element.querySelector('.label');
     const eye = element.querySelector('[data-act="visible"]');
     const lock = element.querySelector('[data-act="lock"]');
-    const expandable = row.elementType === 'Group' && tree.byId.get(row.id)?.children?.length;
+    const expandable = isContainerType(row.elementType) && tree.byId.get(row.id)?.children?.length;
     if (twist instanceof HTMLButtonElement) {
       twist.hidden = !expandable;
       twist.textContent = collapsed.has(row.id) ? '▸' : '▾';
@@ -683,7 +708,7 @@ export function attachLayerPanel(engine, hooks = {}) {
     const row = rows[rowIndex];
     if (offset < 8) return { rowIndex, place: 'before' };
     if (offset > ROW_HEIGHT - 8) return { rowIndex, place: 'after' };
-    if (row?.elementType === 'Group') return { rowIndex, place: 'into' };
+    if (isContainerType(row?.elementType)) return { rowIndex, place: 'into' };
     return { rowIndex, place: offset < ROW_HEIGHT / 2 ? 'before' : 'after' };
   }
 

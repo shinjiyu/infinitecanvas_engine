@@ -55,6 +55,7 @@ export const TOOL_LABELS = {
   pan: '平移',
   text: '文本',
   eyedropper: '吸管',
+  frame: '画板',
   canvas: '画布',
 };
 
@@ -69,9 +70,10 @@ export const TOOL_LABELS = {
  * Shift+1 缩放到适合，Shift+2 缩放到选中，Shift+0 为 100%。数字键用 `code`，避开 Shift 改写 `key`。
  * Ctrl/Cmd+L 切换锁定，Ctrl/Cmd+Shift+H 切换隐藏。不带修饰键的 L / H 仍是直线和平移。
  * Ctrl/Cmd+= 或 Ctrl/Cmd++ 放大，Ctrl/Cmd+- 缩小，Ctrl/Cmd+0 回到 100%。倍数来自引擎的 `zoom_step`。
- * `I` 是吸管，而且必须不带 Shift、Ctrl 和 Alt。V / L / P / R / O / T / H / M / G / N / K 都不是 I，互不占用。
+ * `I` 是吸管，而且必须不带 Shift、Ctrl 和 Alt。V / L / P / R / O / T / H / M / G / N / K / F 都不是 I，互不占用。
  * Shift+I、Ctrl/Cmd+I、Alt+I 不触发，避免以后的组合键和浏览器快捷键被吸管吃掉。
  * N 是多边形，K 是星形。不占用 V/L/P/R/O/T/H/I。
+ * F 是画板，而且必须不带 Shift、Ctrl 和 Alt。不占用 V/L/P/R/O/T/H/I/M/G/N/K，也不占用 Ctrl+' 和 Ctrl+L。
  *
  * @type {Shortcut[]}
  */
@@ -131,6 +133,16 @@ export const SHORTCUTS = [
     handler: 'tool',
     label: 'K',
     keys: ['k'],
+  },
+  {
+    id: 'tool-frame',
+    action: '切换到画板工具',
+    tool: 'frame',
+    handler: 'tool',
+    label: 'F',
+    keys: ['f'],
+    shift: false,
+    allowRepeat: false,
   },
   {
     id: 'tool-text',

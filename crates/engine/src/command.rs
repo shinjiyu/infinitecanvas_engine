@@ -614,11 +614,11 @@ impl AddElementCommand {
 impl Command for AddElementCommand {
     fn execute(&mut self, scene: &mut Scene) {
         if let Some(element) = self.element.take() {
-            let mark_polygon = matches!(element, AnyElement::Polygon(_));
+            let mark_geometry = matches!(element, AnyElement::Polygon(_) | AnyElement::Frame(_));
             let id = element.id();
             scene.restore_assets(std::mem::take(&mut self.parked));
             scene.add(element);
-            if mark_polygon {
+            if mark_geometry {
                 scene.mark_dirty(id);
             }
         }
@@ -634,6 +634,145 @@ impl Command for AddElementCommand {
     fn name(&self) -> &'static str {
         "AddElement"
     }
+}
+
+/// 重命名画板。名称没变或目标不是画板时不要入栈。
+#[derive(Debug)]
+pub struct RenameFrameCommand {
+    id: ElementId,
+    before: String,
+    after: String,
+}
+
+impl RenameFrameCommand {
+    /// 记录一次已经写进场景的改名，配合 [`CommandHistory::push_executed`]。
+    pub fn applied(id: ElementId, before: String, after: String) -> Self {
+        Self { id, before, after }
+    }
+
+    fn write(scene: &mut Scene, id: ElementId, name: &str) {
+        if let Some(AnyElement::Frame(frame)) = scene.get_mut(id) {
+            frame.name = name.to_string();
+            scene.mark_dirty(id);
+        }
+    }
+}
+
+impl Command for RenameFrameCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        Self::write(scene, self.id, &self.after);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        Self::write(scene, self.id, &self.before);
+    }
+
+    fn name(&self) -> &'static str {
+        "RenameFrame"
+    }
+}
+
+/// 把名称写到画板。空操作（不是画板，或名称相同）返回 false，不入栈。
+///
+/// 成功时 [`Scene::mark_dirty`]。
+pub fn apply_rename_frame(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    id: ElementId,
+    name: &str,
+) -> bool {
+    let Some(AnyElement::Frame(frame)) = scene.get(id) else {
+        return false;
+    };
+    if frame.name == name {
+        return false;
+    }
+    let before = frame.name.clone();
+    let after = name.to_string();
+    RenameFrameCommand::write(scene, id, &after);
+    history.push_executed(Box::new(RenameFrameCommand::applied(id, before, after)));
+    true
+}
+
+/// 把元素移进画板。世界坐标不变。空列表、目标不是画板、或没有元素改变父节点时不入栈。
+#[derive(Debug)]
+pub struct ReparentIntoFrameCommand {
+    frame_id: ElementId,
+    ids: Vec<ElementId>,
+    before: OutlineSnapshot,
+    refresh: Vec<ElementId>,
+}
+
+impl Command for ReparentIntoFrameCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        self.refresh.clear();
+        for id in &self.ids {
+            if let Ok(Some(groups)) = scene.move_in_outline(*id, Some(self.frame_id), usize::MAX) {
+                for group_id in groups {
+                    if !self.refresh.contains(&group_id) {
+                        self.refresh.push(group_id);
+                    }
+                }
+                scene.mark_dirty(*id);
+            }
+        }
+        scene.mark_dirty(self.frame_id);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        scene.restore_outline(&self.before, &self.refresh);
+        scene.mark_dirty(self.frame_id);
+        for id in &self.ids {
+            scene.mark_dirty(*id);
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "ReparentIntoFrame"
+    }
+}
+
+/// 把 `ids` 收进 `frame_id`。
+///
+/// 已经在这张画板里的、画板自己、以及会成环或锁定的 id 会被跳过。
+/// 一个都没移成时返回 false，不入栈。成功时给画板和被移动的元素 [`Scene::mark_dirty`]。
+pub fn apply_reparent_into_frame(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    ids: &[ElementId],
+    frame_id: ElementId,
+) -> bool {
+    if ids.is_empty() || !matches!(scene.get(frame_id), Some(AnyElement::Frame(_))) {
+        return false;
+    }
+    let targets: Vec<ElementId> = ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            *id != frame_id && scene.contains(*id) && scene.parent_of(*id) != Some(frame_id)
+        })
+        .collect();
+    if targets.is_empty() {
+        return false;
+    }
+    let before = scene.outline_snapshot();
+    let mut command = ReparentIntoFrameCommand {
+        frame_id,
+        ids: targets,
+        before,
+        refresh: Vec::new(),
+    };
+    command.execute(scene);
+    let moved = command
+        .ids
+        .iter()
+        .any(|id| scene.parent_of(*id) == Some(frame_id));
+    if !moved {
+        scene.restore_outline(&command.before, &command.refresh);
+        return false;
+    }
+    history.push_executed(Box::new(command));
+    true
 }
 
 /// 删除元素命令

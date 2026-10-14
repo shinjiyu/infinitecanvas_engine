@@ -3,12 +3,13 @@
 //! 矩形、圆、多边形、星形、直线、路径共用 [`ElementStyle`]。文本另外记录字号、文字颜色、
 //! 不透明度和可选描边。图片参与不透明度（[`crate::element::Image::alpha`]）和投影，
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
+//! 画板有自己的填充和描边；选中画板只改画板，不把样式写到子元素上。
 //!
 //! 投影和渐变都是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
 //! 吸管只写填充和描边，并把渐变收成纯色。混合模式以后也可以加同样的可选字段。
 //!
 //! ```text
-//! 选中 id ──► style_target_ids（组展开为子孙）
+//! 选中 id ──► style_target_ids（组展开为子孙，画板不展开）
 //!                 │
 //!                 ├─ selection_style  多选不一致 → StyleField::Mixed
 //!                 └─ StylePatch ──► SetStyleCommand ──► mark_dirty
@@ -290,10 +291,20 @@ impl StyleSnapshot {
     }
 }
 
-/// 选择里要改样式的元素。组会展开成自己和全部子孙，重复 id 只保留第一次。
+/// 选择里要改样式的元素。组会展开成自己和全部子孙。
+/// 画板只改自己，不把填充写到子元素上。重复 id 只保留第一次。
 pub fn style_target_ids(scene: &Scene, ids: &[ElementId]) -> Vec<ElementId> {
     let mut out = Vec::new();
     for id in ids {
+        if scene
+            .get(*id)
+            .is_some_and(|element| matches!(element, AnyElement::Frame(_)))
+        {
+            if !out.contains(id) {
+                out.push(*id);
+            }
+            continue;
+        }
         for node in scene.subtree_ids(*id) {
             if !out.contains(&node) {
                 out.push(node);
@@ -319,6 +330,7 @@ pub fn style_locked(scene: &Scene, id: ElementId) -> bool {
 }
 
 /// 读取一个元素的样式。组返回 `None`，图片只返回不透明度。
+/// 画板按形状读取，这样填充和描边面板可以改画板矩形。
 pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
     match scene.get(id)? {
         AnyElement::Rectangle(rect) => Some(StyleSnapshot::Rectangle {
@@ -346,6 +358,7 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             alpha: image.alpha,
             shadow: image.shadow,
         }),
+        AnyElement::Frame(frame) => Some(StyleSnapshot::Shape(frame.style.clone())),
         AnyElement::Group(_) => None,
     }
 }
@@ -385,6 +398,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                 false
             }
         }
+        Some(AnyElement::Frame(frame)) => assign_shape(&mut frame.style, snapshot),
         _ => false,
     };
     if applied {

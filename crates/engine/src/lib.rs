@@ -55,17 +55,18 @@ pub use camera_fit::{
     zoom_viewport_to_selection, CameraPose, DEFAULT_FIT_PADDING,
 };
 pub use command::{
-    apply_nudge, apply_set_locked, apply_set_visibility, apply_stack_reorder, apply_toggle_locked,
-    apply_toggle_visibility, AddElementCommand, Command, CommandHistory, DuplicateElementsCommand,
-    EditGuidesCommand, MoveCommand, NudgeDirection, NudgeElementsCommand, PasteElementsCommand,
-    RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand, ReorderSelectionCommand,
-    SetLockedCommand, SetStyleCommand, SetVisibilityCommand, StackOrderAction,
-    TransformElementsCommand, UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
+    apply_nudge, apply_rename_frame, apply_reparent_into_frame, apply_set_locked,
+    apply_set_visibility, apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility,
+    AddElementCommand, Command, CommandHistory, DuplicateElementsCommand, EditGuidesCommand,
+    MoveCommand, NudgeDirection, NudgeElementsCommand, PasteElementsCommand, RemoveElementCommand,
+    RemoveElementsCommand, RenameFrameCommand, ReorderOutlineCommand, ReorderSelectionCommand,
+    ReparentIntoFrameCommand, SetLockedCommand, SetStyleCommand, SetVisibilityCommand,
+    StackOrderAction, TransformElementsCommand, UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{
-    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, GradientStop,
-    Group, Image, Line, Path, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin, Text,
-    TextAlign, TextClickResolver, TextPlacement, TextVisual,
+    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, Frame,
+    GradientStop, Group, Image, Line, Path, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin,
+    Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };
 pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,
@@ -81,7 +82,7 @@ pub use guides::{
     ruler_ticks, GuideSnapshot, GuideStore, ManualGuide, RulerBand, RulerOrientation, RulerTick,
     GUIDE_HIT_PX, RULER_THICKNESS_PX,
 };
-pub use hit_test::{hit_test_point, HitTestOptions, HitTestResult};
+pub use hit_test::{click_target, hit_test_point, HitTestOptions, HitTestResult};
 pub use infinitecanvas_math as math;
 pub use minimap::{
     build_overview, drag_camera_center, fit_minimap, minimap_to_world, scene_bounds,
@@ -89,8 +90,8 @@ pub use minimap::{
 };
 pub use orient::{apply_flip, apply_rotate_quarter, FlipAxis, OrientSelectionCommand, QuarterTurn};
 pub use persist::{
-    export_selection_png, export_viewport_png, export_viewport_png_with_guides, PersistError,
-    SceneFile, SCENE_FORMAT_VERSION,
+    export_frame_png, export_selection_png, export_viewport_png, export_viewport_png_with_guides,
+    PersistError, SceneFile, SCENE_FORMAT_VERSION,
 };
 pub use quadtree::QuadTree;
 pub use scene::OutlineSnapshot;
@@ -106,7 +107,7 @@ pub use style::{
     apply_style_snapshot, capture_style, selection_style, style_locked, style_target_ids,
     SelectionStyle, StyleField, StylePatch, StyleSnapshot, TextPaint,
 };
-pub use svg::{export_svg, export_svg_with_guides};
+pub use svg::{export_frame_svg, export_svg, export_svg_with_guides};
 pub use svg_import::{apply_svg_import, import_svg, ImportSvgCommand, SvgImportError};
 pub use tool::{Tool, ToolManager};
 pub use vertex_cache::{

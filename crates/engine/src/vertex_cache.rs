@@ -528,6 +528,19 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             texture_id: text.texture_id.clone(),
             underlay: false,
         },
+        AnyElement::Frame(frame) => {
+            let rect = frame.shape_proxy();
+            let mut fill = rect.shadow_vertices();
+            fill.extend(rect.generate_fill_vertices());
+            fill.extend(rect.stroke_ribbon_vertices());
+            Mesh {
+                fill,
+                stroke: rect.generate_stroke_vertices(),
+                textured: Vec::new(),
+                texture_id: None,
+                underlay: false,
+            }
+        }
         AnyElement::Group(_) => Mesh::empty(),
     }
 }

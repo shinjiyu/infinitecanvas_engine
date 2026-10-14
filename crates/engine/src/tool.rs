@@ -27,12 +27,16 @@ pub enum Tool {
     /// 吸管 - 单击采样最上层可见叶子的填充和描边，写到当前选择
     ///
     /// 快捷键是不带修饰键的 `I`。`Shift+I`、`Ctrl/Cmd+I`、`Alt+I` 不进入这个工具，
-    /// 也不占用 V / L / P / R / O / T / H / N / K。
+    /// 也不占用 V / L / P / R / O / T / H / N / K / F。
     Eyedropper,
     /// 正多边形工具 - 拖拽外接圆，默认六边形
     Polygon,
     /// 星形工具 - 拖拽外接圆，默认五角星
     Star,
+    /// 画板工具 - 拖拽放置命名画板
+    ///
+    /// 快捷键是不带修饰键的 `F`。不占用 V / L / P / R / O / T / H / I / M / G / N / K。
+    Frame,
 }
 
 impl std::str::FromStr for Tool {
@@ -53,6 +57,7 @@ impl std::str::FromStr for Tool {
             "eyedropper" | "dropper" | "i" => Ok(Tool::Eyedropper),
             "polygon" | "hexagon" | "n" => Ok(Tool::Polygon),
             "star" | "k" => Ok(Tool::Star),
+            "frame" | "artboard" | "f" => Ok(Tool::Frame),
             _ => Err(()),
         }
     }
@@ -73,6 +78,7 @@ impl Tool {
             Tool::Eyedropper => "eyedropper",
             Tool::Polygon => "polygon",
             Tool::Star => "star",
+            Tool::Frame => "frame",
         }
     }
 
@@ -88,7 +94,7 @@ impl Tool {
             Tool::Pen => "crosshair",
             Tool::Text => "text",
             Tool::Eyedropper => "crosshair",
-            Tool::Polygon | Tool::Star => "crosshair",
+            Tool::Polygon | Tool::Star | Tool::Frame => "crosshair",
         }
     }
 
@@ -96,7 +102,13 @@ impl Tool {
     pub fn is_drawing_tool(&self) -> bool {
         matches!(
             self,
-            Tool::Rectangle | Tool::Circle | Tool::Line | Tool::Pen | Tool::Polygon | Tool::Star
+            Tool::Rectangle
+                | Tool::Circle
+                | Tool::Line
+                | Tool::Pen
+                | Tool::Polygon
+                | Tool::Star
+                | Tool::Frame
         )
     }
 }
@@ -219,6 +231,11 @@ mod tests {
         assert_eq!(Tool::from_str("k"), Ok(Tool::Star));
         assert!(Tool::Polygon.is_drawing_tool());
         assert_eq!(Tool::Star.cursor(), "crosshair");
+        assert_eq!(Tool::from_str("frame"), Ok(Tool::Frame));
+        assert_eq!(Tool::from_str("artboard"), Ok(Tool::Frame));
+        assert_eq!(Tool::from_str("f"), Ok(Tool::Frame));
+        assert_eq!(Tool::Frame.name(), "frame");
+        assert!(Tool::Frame.is_drawing_tool());
         assert_eq!(Tool::Text.cursor(), "text");
         assert!(!Tool::Text.is_drawing_tool());
         assert!(Tool::from_str("unknown").is_err());
