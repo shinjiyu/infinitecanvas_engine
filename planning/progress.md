@@ -35,6 +35,23 @@
                                           └─ mark_dirty ──► 圆角轮廓顶点
 ```
 
+## Issue #54: 缩放到选中 / 适应全部
+
+- [x] `camera_for_bounds`：每边留视口 10%，缩放限制在 0.1×–10×
+- [x] `zoom_to_selection`：可见、未锁定；组用组根包围盒。空选不改相机
+- [x] `zoom_to_fit` / `fit_scene`：可见叶子，与小地图 `scene_bounds` 相同。空场景回到原点、缩放 1
+- [x] 只改相机，不改几何，不进撤销栈，不推进 `geometry_epoch`
+- [x] Demo：工具栏「适应全部」「缩放到选中」
+- [x] `Shift+1`（`zoomFit`）和 `Shift+2`（`zoomSelection`）在 `SHORTCUTS` 里，`?` 帮助面板列出
+- [x] `zoomFit` 调用 `zoom_to_fit` / `fit_scene`；`zoomSelection` 调用 `zoom_to_selection`
+- [x] `Shift+0` 仍是 100%。`Shift+H` / `Shift+V` / `Shift+R` / `Shift+Alt+R` 仍是翻转和 90° 旋转
+
+```text
+选中 / 可见叶子 ──► camera_for_bounds ──► Viewport center + zoom
+空选 ──► 不动
+空场景 ──► 原点，1×
+```
+
 ## Issue #49: 翻转与 90° 旋转
 
 - [x] `OrientSelectionCommand`：水平/垂直翻转，顺时针/逆时针 90°，各一条历史

@@ -621,6 +621,14 @@ export class InfiniteCanvas {
         }
     }
     /**
+     * [`Self::zoom_to_fit`] 的别名。
+     * @returns {boolean}
+     */
+    fit_scene() {
+        const ret = wasm.infinitecanvas_fit_scene(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 水平或垂直翻转当前选中元素，并记入一条撤销记录。
      *
      * 绕选区中心镜像。只有一个目标时，中心是该元素的世界包围盒中心。
@@ -1691,12 +1699,14 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_zoom_at(this.__wbg_ptr, anchor_x, anchor_y, delta_zoom);
     }
     /**
-     * 缩放并平移，使全部元素落入画布，四周留出 48 像素。
+     * 把相机对准全部可见叶子，使整张场景落在视口内并留出 10% 边距。
      *
-     * 场景为空时不改变视口。
+     * 包围盒与 [`Self::scene_bounds`] 相同。不改元素几何，也不写入撤销栈。
+     * 没有可见叶子时把相机放回默认姿态（原点、缩放 1）并返回 `false`。
+     * [`Self::fit_scene`] 是同一个命令。
      *
      * # 返回
-     * 场景里有元素并且已经调整视口时为 true
+     * 有内容并完成适应时为 `true`；场景为空（相机已回到默认）时为 `false`。
      *
      * # 示例（JavaScript）
      * ```js
@@ -1706,6 +1716,26 @@ export class InfiniteCanvas {
      */
     zoom_to_fit() {
         const ret = wasm.infinitecanvas_zoom_to_fit(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 把相机对准当前选中内容。
+     *
+     * 只用可见、未锁定的选中元素。选中组时用组根的世界包围盒，不把子元素再展开。
+     * 每边留出视口的 10%，然后设置中心和缩放。不改元素几何，也不写入撤销栈。
+     * 空选，或过滤后没有可用包围盒时不改相机。
+     *
+     * # 返回
+     * 已经对准选中内容时为 `true`；没有可对准的内容时为 `false`。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.zoom_to_selection();
+     * ```
+     * @returns {boolean}
+     */
+    zoom_to_selection() {
+        const ret = wasm.infinitecanvas_zoom_to_selection(this.__wbg_ptr);
         return ret !== 0;
     }
 }

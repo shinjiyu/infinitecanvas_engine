@@ -60,6 +60,7 @@ export const TOOL_LABELS = {
  * 已有的 V/L/P/R/O/H、空格临时平移、撤销重做、保存打开、复制粘贴克隆和方向键微调都留在这里。
  * 字母工具不要求 Shift 的状态。Shift+H / Shift+V / Shift+R 比工具键更具体，分别翻转或顺时针转 90°；
  * Shift+Alt+R 逆时针转 90°。不带 Shift 的 H / V / R 仍是平移、选择、矩形。
+ * Shift+1 缩放到适合，Shift+2 缩放到选中，Shift+0 为 100%。数字键用 `code`，避开 Shift 改写 `key`。
  *
  * @type {Shortcut[]}
  */
@@ -475,6 +476,16 @@ export const SHORTCUTS = [
     label: '1',
     keys: ['1', '!'],
     code: 'Digit1',
+    shift: true,
+  },
+  {
+    id: 'zoom-selection',
+    action: '缩放到选中',
+    tool: 'canvas',
+    handler: 'zoomSelection',
+    label: '2',
+    keys: ['2', '@'],
+    code: 'Digit2',
     shift: true,
   },
   {

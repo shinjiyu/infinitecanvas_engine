@@ -19,6 +19,7 @@
 
 pub mod align;
 pub mod asset;
+pub mod camera_fit;
 pub mod command;
 pub mod element;
 pub mod event;
@@ -45,6 +46,10 @@ pub use align::{
     DistributeElementsCommand,
 };
 pub use asset::{fitted_size, AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
+pub use camera_fit::{
+    camera_for_bounds, selection_content_bounds, zoom_viewport_to_scene,
+    zoom_viewport_to_selection, CameraPose, DEFAULT_FIT_PADDING,
+};
 pub use command::{
     apply_nudge, apply_stack_reorder, AddElementCommand, Command, CommandHistory,
     DuplicateElementsCommand, MoveCommand, NudgeDirection, NudgeElementsCommand,

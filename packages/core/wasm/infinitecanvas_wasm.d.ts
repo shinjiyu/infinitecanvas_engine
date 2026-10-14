@@ -354,6 +354,10 @@ export class InfiniteCanvas {
      */
     export_svg(selected_only: boolean): string;
     /**
+     * [`Self::zoom_to_fit`] 的别名。
+     */
+    fit_scene(): boolean;
+    /**
      * 水平或垂直翻转当前选中元素，并记入一条撤销记录。
      *
      * 绕选区中心镜像。只有一个目标时，中心是该元素的世界包围盒中心。
@@ -972,12 +976,14 @@ export class InfiniteCanvas {
      */
     zoom_at(anchor_x: number, anchor_y: number, delta_zoom: number): void;
     /**
-     * 缩放并平移，使全部元素落入画布，四周留出 48 像素。
+     * 把相机对准全部可见叶子，使整张场景落在视口内并留出 10% 边距。
      *
-     * 场景为空时不改变视口。
+     * 包围盒与 [`Self::scene_bounds`] 相同。不改元素几何，也不写入撤销栈。
+     * 没有可见叶子时把相机放回默认姿态（原点、缩放 1）并返回 `false`。
+     * [`Self::fit_scene`] 是同一个命令。
      *
      * # 返回
-     * 场景里有元素并且已经调整视口时为 true
+     * 有内容并完成适应时为 `true`；场景为空（相机已回到默认）时为 `false`。
      *
      * # 示例（JavaScript）
      * ```js
@@ -985,6 +991,22 @@ export class InfiniteCanvas {
      * ```
      */
     zoom_to_fit(): boolean;
+    /**
+     * 把相机对准当前选中内容。
+     *
+     * 只用可见、未锁定的选中元素。选中组时用组根的世界包围盒，不把子元素再展开。
+     * 每边留出视口的 10%，然后设置中心和缩放。不改元素几何，也不写入撤销栈。
+     * 空选，或过滤后没有可用包围盒时不改相机。
+     *
+     * # 返回
+     * 已经对准选中内容时为 `true`；没有可对准的内容时为 `false`。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.zoom_to_selection();
+     * ```
+     */
+    zoom_to_selection(): boolean;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -1022,6 +1044,7 @@ export interface InitOutput {
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
     readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
     readonly infinitecanvas_export_svg: (a: number, b: number) => [number, number];
+    readonly infinitecanvas_fit_scene: (a: number) => number;
     readonly infinitecanvas_flip_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_get_alignment_guides: (a: number) => any;
     readonly infinitecanvas_get_current_tool: (a: number) => [number, number];
@@ -1100,6 +1123,7 @@ export interface InitOutput {
     readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
     readonly infinitecanvas_zoom_to_fit: (a: number) => number;
+    readonly infinitecanvas_zoom_to_selection: (a: number) => number;
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_: (a: number, b: number, c: any) => void;
