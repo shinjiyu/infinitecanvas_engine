@@ -128,6 +128,24 @@ export class InfiniteCanvas {
      */
     add_text(x: number, y: number, content: string, font_size: number, color?: string | null, align?: string | null): bigint;
     /**
+     * 按包围盒对齐当前选择，并记入一条撤销记录。
+     *
+     * 至少两个顶层可见、未锁定的选中元素才生效。选中组时用组的世界包围盒，只平移组根。
+     * 单选、空选或已经贴齐时不入栈。不经过拖拽吸附。
+     *
+     * # 参数
+     * - `mode`: `left` / `center` / `right` / `top` / `middle` / `bottom`
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.align_selection("left");
+     * ```
+     */
+    align_selection(mode: string): boolean;
+    /**
      * 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
      *
      * # 参数
@@ -204,6 +222,25 @@ export class InfiniteCanvas {
     debug_clear_events(): void;
     debug_pending_event_count(): number;
     deselect_element(element_id: bigint): boolean;
+    /**
+     * 按包围盒间隙均匀分布当前选择，并记入一条撤销记录。
+     *
+     * 至少三个顶层可见、未锁定的选中元素才生效。两端元素不动。
+     * 选中组时移动组根，不拆开子树。单选、空选或只有两个目标时不入栈。
+     * 不经过拖拽吸附。
+     *
+     * # 参数
+     * - `axis`: `horizontal` / `vertical`（也接受 `x` / `y`）
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.distribute_selection("horizontal");
+     * ```
+     */
+    distribute_selection(axis: string): boolean;
     /**
      * 原地克隆当前选中元素，并让新元素成为选中。
      *
@@ -808,6 +845,7 @@ export interface InitOutput {
     readonly infinitecanvas_add_path: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
     readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
     readonly infinitecanvas_add_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
+    readonly infinitecanvas_align_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_begin_text_edit_at: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_can_redo: (a: number) => number;
     readonly infinitecanvas_can_undo: (a: number) => number;
@@ -822,6 +860,7 @@ export interface InitOutput {
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
+    readonly infinitecanvas_distribute_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_duplicate_selection: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_enter_group: (a: number, b: bigint, c: bigint) => number;
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];

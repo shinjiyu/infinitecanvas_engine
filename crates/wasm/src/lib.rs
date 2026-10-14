@@ -28,7 +28,7 @@ mod texture_manager;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
-    apply_nudge,
+    apply_align, apply_distribute, apply_nudge,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
@@ -40,12 +40,12 @@ use infinitecanvas_engine::{
     transform_handles::{
         cursor_for, transforms_differ, HandleGesture, HandleMetrics, SelectionFrame,
     },
-    AddElementCommand, AnyElement, Circle, CommandHistory, DuplicateElementsCommand, Element,
-    ElementId, ElementStyle, Event, EventQueue, Image, Line, MoveCommand, NudgeDirection,
-    OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent, Rectangle,
-    RemoveElementCommand, ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox,
-    SelectionManager, Text, TextAlign, TextClickResolver, TextPlacement, Tool, ToolManager,
-    TransformElementsCommand, UpdateTextCommand, Viewport,
+    AddElementCommand, AlignMode, AnyElement, Circle, CommandHistory, DistributeAxis,
+    DuplicateElementsCommand, Element, ElementId, ElementStyle, Event, EventQueue, Image, Line,
+    MoveCommand, NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton,
+    PointerEvent, Rectangle, RemoveElementCommand, ReorderOutlineCommand, Scene, SceneTreeNode,
+    SelectionBox, SelectionManager, Text, TextAlign, TextClickResolver, TextPlacement, Tool,
+    ToolManager, TransformElementsCommand, UpdateTextCommand, Viewport,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -545,6 +545,65 @@ impl InfiniteCanvas {
             direction,
             shift,
         )
+    }
+
+    /// 按包围盒对齐当前选择，并记入一条撤销记录。
+    ///
+    /// 至少两个顶层可见、未锁定的选中元素才生效。选中组时用组的世界包围盒，只平移组根。
+    /// 单选、空选或已经贴齐时不入栈。不经过拖拽吸附。
+    ///
+    /// # 参数
+    /// - `mode`: `left` / `center` / `right` / `top` / `middle` / `bottom`
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.align_selection("left");
+    /// ```
+    #[wasm_bindgen]
+    pub fn align_selection(&mut self, mode: &str) -> bool {
+        let Some(mode) = AlignMode::parse(mode) else {
+            return false;
+        };
+        if self.drag_state.is_dragging {
+            self.finish_drag();
+        }
+        self.commit_handle_gesture();
+        self.commit_style_preview();
+        let selected = self.selection.selected_ids();
+        apply_align(&mut self.command_history, &mut self.scene, &selected, mode)
+    }
+
+    /// 按包围盒间隙均匀分布当前选择，并记入一条撤销记录。
+    ///
+    /// 至少三个顶层可见、未锁定的选中元素才生效。两端元素不动。
+    /// 选中组时移动组根，不拆开子树。单选、空选或只有两个目标时不入栈。
+    /// 不经过拖拽吸附。
+    ///
+    /// # 参数
+    /// - `axis`: `horizontal` / `vertical`（也接受 `x` / `y`）
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.distribute_selection("horizontal");
+    /// ```
+    #[wasm_bindgen]
+    pub fn distribute_selection(&mut self, axis: &str) -> bool {
+        let Some(axis) = DistributeAxis::parse(axis) else {
+            return false;
+        };
+        if self.drag_state.is_dragging {
+            self.finish_drag();
+        }
+        self.commit_handle_gesture();
+        self.commit_style_preview();
+        let selected = self.selection.selected_ids();
+        apply_distribute(&mut self.command_history, &mut self.scene, &selected, axis)
     }
 
     // ========== 撤销/重做 API ==========
@@ -3466,5 +3525,71 @@ mod tests {
         canvas.clear_selection();
         assert!(!canvas.nudge_selection("down", false));
         assert_eq!(canvas.get_undo_count(), undo_count);
+    }
+
+    /// 对齐和分布走当前选择。空选、单选和未知参数不入栈，撤销恢复平移。
+    #[test]
+    fn align_and_distribute_selection_round_trip() {
+        let mut canvas = blank_canvas();
+        canvas.scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        canvas.scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(40.0, 20.0),
+            Vec2::new(20.0, 10.0),
+        ));
+        canvas.scene.add_rect(Rectangle::new(
+            3,
+            Vec2::new(90.0, -10.0),
+            Vec2::new(10.0, 40.0),
+        ));
+
+        assert!(!canvas.align_selection("left"));
+        assert!(!canvas.distribute_selection("horizontal"));
+        assert_eq!(canvas.get_undo_count(), 0);
+
+        assert!(canvas.select_element(1, false));
+        assert!(!canvas.align_selection("center"));
+        assert!(!canvas.distribute_selection("vertical"));
+        assert!(canvas.select_element(2, true));
+        assert!(canvas.select_element(3, true));
+        assert!(!canvas.align_selection("nope"));
+        assert!(!canvas.distribute_selection("both"));
+
+        assert!(canvas.align_selection("left"));
+        let left = |canvas: &InfiniteCanvas, id| {
+            canvas
+                .scene
+                .get(id)
+                .unwrap()
+                .as_element()
+                .world_bounds()
+                .left()
+        };
+        assert!((left(&canvas, 1) - left(&canvas, 2)).abs() < 1e-3);
+        assert!((left(&canvas, 2) - left(&canvas, 3)).abs() < 1e-3);
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.undo());
+        assert!((translation(&canvas.scene, 2).x - 40.0).abs() < 1e-3);
+        assert!(canvas.redo());
+        assert!(canvas.undo());
+
+        assert!(canvas.distribute_selection("vertical"));
+        let mut bands = [1u64, 2, 3].map(|id| {
+            let bounds = canvas.scene.get(id).unwrap().as_element().world_bounds();
+            (bounds.top(), bounds.bottom())
+        });
+        bands.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let gap_ab = bands[1].0 - bands[0].1;
+        let gap_bc = bands[2].0 - bands[1].1;
+        assert!((gap_ab - gap_bc).abs() < 1e-3);
+        assert!((translation(&canvas.scene, 1).x).abs() < 1e-3);
+        assert!(canvas.undo());
+        assert!((translation(&canvas.scene, 1).y).abs() < 1e-3);
+        assert!((translation(&canvas.scene, 3).y + 10.0).abs() < 1e-3);
+        assert_eq!(canvas.get_undo_count(), 0);
     }
 }

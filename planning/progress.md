@@ -2,6 +2,23 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #40: 多选对齐与分布
+
+- [x] `AlignElementsCommand`：左 / 水平居中 / 右 / 顶 / 垂直居中 / 底，参考框是目标世界包围盒的并集
+- [x] `DistributeElementsCommand`：水平、垂直均匀间隙，两端不动
+- [x] 只改平移；选中组移动组根；标脏；一条撤销记录。单选、空选、不足目标数不入栈
+- [x] WASM：`align_selection(mode)`、`distribute_selection(axis)`
+- [x] Demo：工具栏和属性面板按钮，多选时才可点。不改拖拽吸附
+
+```text
+多选 ──► nudge_targets（可见、未锁定、选中子树的根）
+              │
+              ├─ AlignElementsCommand ── 贴齐并集边或中心
+              └─ DistributeElementsCommand ── 中间元素拉开相等间隙
+                        │
+                        └─ translate_element ── mark_dirty，一条历史
+```
+
 ## Issue #43: 方向键微调
 
 - [x] `NudgeElementsCommand`：顶层可见、未锁定；选中组则平移组根。只改平移，标脏并入撤销栈

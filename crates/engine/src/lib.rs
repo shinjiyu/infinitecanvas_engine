@@ -17,6 +17,7 @@
 //! infinitecanvas-math (数学库)
 //! ```
 
+pub mod align;
 pub mod command;
 pub mod element;
 pub mod event;
@@ -37,6 +38,10 @@ pub mod vertex_cache;
 pub mod viewport;
 
 // 重导出核心类型
+pub use align::{
+    apply_align, apply_distribute, AlignElementsCommand, AlignMode, DistributeAxis,
+    DistributeElementsCommand,
+};
 pub use command::{
     apply_nudge, AddElementCommand, Command, CommandHistory, DuplicateElementsCommand, MoveCommand,
     NudgeDirection, NudgeElementsCommand, PasteElementsCommand, RemoveElementCommand,
