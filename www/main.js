@@ -8,6 +8,7 @@
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
  * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，和工具栏、属性面板的按钮一样，进撤销栈。
  * 顶边和左边标尺可拖出参考线。G 显示或隐藏标尺和参考线。参考线进场景 JSON，导出默认不画。
+ * I 切换吸管（不带 Shift、Ctrl、Alt）。单击采样最上层可见元素的填充和描边，经 SetStyle 写到当前选区。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
@@ -935,15 +936,24 @@ function rotateSelectionQuarter(engine, dir) {
 }
 
 /**
+ * 工具栏高亮跟引擎里的当前工具对齐。吸管松手后引擎会自己切回去。
+ *
+ * @param {string} toolName
+ */
+function syncActiveTool(toolName) {
+  document.querySelectorAll('.tool').forEach((button) => {
+    button.classList.toggle('active', button.dataset.tool === toolName);
+  });
+  setText('current-tool', toolName);
+}
+
+/**
  * @param {string} toolName
  */
 function setTool(toolName) {
   if (!wasm) return;
   wasm.set_tool(toolName);
-  document.querySelectorAll('.tool').forEach((button) => {
-    button.classList.toggle('active', button.dataset.tool === toolName);
-  });
-  setText('current-tool', wasm.get_current_tool());
+  syncActiveTool(wasm.get_current_tool());
 }
 
 /**
@@ -2096,6 +2106,20 @@ function updateHud(engine) {
   setText('draw-calls', stats.drawCalls ?? engine.get_last_draw_calls());
   setText('zoom', formatZoomPercent(engine.get_zoom()));
   setText('current-tool', engine.get_current_tool());
+  if (typeof engine.take_eyedropper_notice === 'function') {
+    const notice = engine.take_eyedropper_notice();
+    if (notice) {
+      syncActiveTool(engine.get_current_tool());
+      if (notice.applied) {
+        setStatus('已吸取颜色并应用到选区');
+        scheduleAutosave(engine);
+      } else if (notice.hit) {
+        setStatus('没有可应用到选区的颜色');
+      } else {
+        setStatus('这里没有可吸取的元素');
+      }
+    }
+  }
   canvasEl.style.cursor = lastPointer
     ? engine.cursor_at(lastPointer.x, lastPointer.y)
     : engine.get_tool_cursor();

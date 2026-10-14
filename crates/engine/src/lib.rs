@@ -23,6 +23,7 @@ pub mod camera_fit;
 pub mod command;
 pub mod element;
 pub mod event;
+pub mod eyedropper;
 pub mod guides;
 pub mod hit_test;
 pub mod minimap;
@@ -67,6 +68,7 @@ pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,
     WheelEvent,
 };
+pub use eyedropper::{apply_sampled_paint, sample_paint_at, SampledPaint};
 pub use guides::{
     edge_is_axis_aligned, handle_outward, resize_edge_correction, ruler_band, ruler_major_step,
     ruler_ticks, GuideSnapshot, GuideStore, ManualGuide, RulerBand, RulerOrientation, RulerTick,

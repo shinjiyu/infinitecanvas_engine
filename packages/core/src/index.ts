@@ -154,6 +154,43 @@ export class InfiniteCanvas {
   }
 
   /**
+   * 采样世界坐标上最上层可见叶子的填充和描边。
+   *
+   * 没有命中时 `id`、`fill`、`stroke` 都是 null。图片命中时 `id` 有值，两个颜色为 null。
+   * 文本的填充是文字颜色。锁定元素仍可采样；隐藏元素会跳过。
+   *
+   * @param x - 世界坐标 X
+   * @param y - 世界坐标 Y
+   * @returns `id` 与 `#rrggbbaa` 颜色。没有该通道时颜色为 null
+   *
+   * @example
+   * ```ts
+   * const sample = canvas.sampleStyleAt(12, 8);
+   * if (sample.fill) canvas.applySampledStyleAt(12, 8);
+   * ```
+   */
+  sampleStyleAt(x: number, y: number): { id: number | null; fill: string | null; stroke: string | null } {
+    return this.requireWasm().sample_style_at(x, y) as {
+      id: number | null;
+      fill: string | null;
+      stroke: string | null;
+    };
+  }
+
+  /**
+   * 把该点采样到的填充和描边写到当前选择，一条撤销记录。
+   *
+   * 空选、全部锁定、全部隐藏、点在空白，或采样没有颜色时返回 false，不入栈。
+   *
+   * @param x - 世界坐标 X
+   * @param y - 世界坐标 Y
+   * @returns 是否写入了撤销栈
+   */
+  applySampledStyleAt(x: number, y: number): boolean {
+    return this.requireWasm().apply_sampled_style_at(x, y);
+  }
+
+  /**
    * 预览样式。连续拖动滑块时反复调用，松手后再 {@link commitStylePreview}。
    *
    * @param patch - 同 {@link setSelectionStyle}

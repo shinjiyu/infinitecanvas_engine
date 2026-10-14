@@ -283,6 +283,27 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 采样该世界点，并把颜色写到当前选择。
+     *
+     * 填充写到形状 `fill` 和文本颜色，描边写到 `stroke`。缺的通道不改，也不清掉。
+     * 多选合成一条撤销记录。空选、全部锁定、全部隐藏、点在空白、采样没有颜色，
+     * 或颜色与目标相同，都返回 false，不入栈。
+     *
+     * 不切换工具。页面上的吸管工具在松开指针后再回到之前的工具。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const applied = canvas.apply_sampled_style_at(worldX, worldY);
+     * ```
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    apply_sampled_style_at(x, y) {
+        const ret = wasm.infinitecanvas_apply_sampled_style_at(this.__wbg_ptr, x, y);
+        return ret !== 0;
+    }
+    /**
      * 标尺和手动参考线是否显示。
      * @returns {boolean}
      */
@@ -1485,6 +1506,30 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 采样世界坐标上最上层可见叶子的填充和描边。
+     *
+     * 返回对象：
+     * - `id`：命中的元素。空白处为 null
+     * - `fill` / `stroke`：`#rrggbbaa`。元素没有该通道，或没有命中时为 null
+     *
+     * 文本的 `fill` 是文字颜色。图片命中时 `id` 有值，两个颜色都是 null。
+     * 锁定元素仍可采样。隐藏元素（含被隐藏的祖先）会跳过，露出下面的叶子。
+     * 不读像素。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const sample = canvas.sample_style_at(worldX, worldY);
+     * if (sample.fill) colorInput.value = sample.fill.slice(0, 7);
+     * ```
+     * @param {number} x
+     * @param {number} y
+     * @returns {any}
+     */
+    sample_style_at(x, y) {
+        const ret = wasm.infinitecanvas_sample_style_at(this.__wbg_ptr, x, y);
+        return ret;
+    }
+    /**
      * 可见叶子的世界包围盒。
      *
      * 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
@@ -1683,9 +1728,11 @@ export class InfiniteCanvas {
      * 设置当前工具
      *
      * # 参数
-     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen")
+     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen", "eyedropper")
      *
-     * 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`。切换工具会丢掉尚未抬笔的预览。
+     * 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`，吸管快捷键 `i`。
+     * 吸管不带 Shift、Ctrl 或 Alt，避免和 V / L / P / R / O / T / H 以及翻转键抢键。
+     * 切换工具会丢掉尚未抬笔的预览。
      *
      * # 返回
      * 是否成功设置
@@ -1714,6 +1761,19 @@ export class InfiniteCanvas {
      */
     set_zoom(zoom) {
         wasm.infinitecanvas_set_zoom(this.__wbg_ptr, zoom);
+    }
+    /**
+     * 取走最近一次吸管点击的结果。没有新点击时返回 null。
+     *
+     * - `hit`：点到了可见叶子
+     * - `applied`：颜色已经写进当前选择，并占一条撤销记录
+     *
+     * 点在空白处时工具保持吸管。点到元素后，工具回到进入吸管之前的那个。
+     * @returns {any}
+     */
+    take_eyedropper_notice() {
+        const ret = wasm.infinitecanvas_take_eyedropper_notice(this.__wbg_ptr);
+        return ret;
     }
     /**
      * 取走 T 工具留下的编辑请求。没有请求时返回 `null`。
@@ -3697,7 +3757,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2733, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2753, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
