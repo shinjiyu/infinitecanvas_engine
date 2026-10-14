@@ -218,6 +218,31 @@ export class InfiniteCanvas {
         return BigInt.asUintN(64, ret);
     }
     /**
+     * 按包围盒对齐当前选择，并记入一条撤销记录。
+     *
+     * 至少两个顶层可见、未锁定的选中元素才生效。选中组时用组的世界包围盒，只平移组根。
+     * 单选、空选或已经贴齐时不入栈。不经过拖拽吸附。
+     *
+     * # 参数
+     * - `mode`: `left` / `center` / `right` / `top` / `middle` / `bottom`
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.align_selection("left");
+     * ```
+     * @param {string} mode
+     * @returns {boolean}
+     */
+    align_selection(mode) {
+        const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_align_selection(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
      * 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
      *
      * # 参数
@@ -383,6 +408,32 @@ export class InfiniteCanvas {
      */
     deselect_element(element_id) {
         const ret = wasm.infinitecanvas_deselect_element(this.__wbg_ptr, element_id);
+        return ret !== 0;
+    }
+    /**
+     * 按包围盒间隙均匀分布当前选择，并记入一条撤销记录。
+     *
+     * 至少三个顶层可见、未锁定的选中元素才生效。两端元素不动。
+     * 选中组时移动组根，不拆开子树。单选、空选或只有两个目标时不入栈。
+     * 不经过拖拽吸附。
+     *
+     * # 参数
+     * - `axis`: `horizontal` / `vertical`（也接受 `x` / `y`）
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.distribute_selection("horizontal");
+     * ```
+     * @param {string} axis
+     * @returns {boolean}
+     */
+    distribute_selection(axis) {
+        const ptr0 = passStringToWasm0(axis, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_distribute_selection(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
     }
     /**
@@ -3205,7 +3256,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2559, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2568, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },

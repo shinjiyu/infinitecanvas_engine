@@ -4,6 +4,7 @@
  * 把选择、直线、画笔、压力测试、纹理和小地图放在同一张画布上。
  * 选中元素后右侧属性面板可改填充、描边、线宽和不透明度，文本还可改字号和颜色。
  * 方向键按世界单位微调选中元素（Shift 为 10 倍）；输入框内不触发。
+ * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。
@@ -818,6 +819,46 @@ function syncPropertyPanel(engine) {
  *
  * @param {WasmCanvas} engine
  */
+/**
+ * 多选时才允许对齐和分布。单选或空选保持禁用。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncAlignControls(engine) {
+  const enabled = engine.get_selection_count() >= 2;
+  document.querySelectorAll('[data-align], [data-distribute]').forEach((button) => {
+    if (button instanceof HTMLButtonElement) button.disabled = !enabled;
+  });
+}
+
+/**
+ * 对齐和分布各记一条撤销记录。拖拽吸附不受这些按钮影响。
+ *
+ * @param {WasmCanvas} engine
+ */
+function bindAlignControls(engine) {
+  document.querySelectorAll('[data-align]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const mode = button.getAttribute('data-align');
+      if (!mode || typeof engine.align_selection !== 'function') return;
+      if (engine.align_selection(mode)) {
+        scheduleAutosave(engine);
+        setStatus('已对齐');
+      }
+    });
+  });
+  document.querySelectorAll('[data-distribute]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const axis = button.getAttribute('data-distribute');
+      if (!axis || typeof engine.distribute_selection !== 'function') return;
+      if (engine.distribute_selection(axis)) {
+        scheduleAutosave(engine);
+        setStatus('已分布');
+      }
+    });
+  });
+}
+
 function bindPropertyPanel(engine) {
   const bindRange = (id, key, labelId, format) => {
     const input = document.getElementById(id);
@@ -879,6 +920,7 @@ function bindPropertyPanel(engine) {
 
 function bindInput(canvas, engine) {
   bindPropertyPanel(engine);
+  bindAlignControls(engine);
   canvas.addEventListener('pointerdown', (event) => {
     const point = canvasPoint(event, canvas);
     engine.handle_pointer_event(
@@ -1196,6 +1238,7 @@ function updateHud(engine) {
   if (undoBtn) undoBtn.disabled = !engine.can_undo();
   if (redoBtn) redoBtn.disabled = !engine.can_redo();
   syncPropertyPanel(engine);
+  syncAlignControls(engine);
   syncSnapControls(engine);
   drawAlignmentGuides(engine);
   layerPanel?.sync();
