@@ -26,6 +26,7 @@ mod renderer;
 mod style_api;
 mod texture_manager;
 
+use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
@@ -158,6 +159,19 @@ pub struct InfiniteCanvas {
     snap: SnapSettings,
     /// 属性面板拖动中的样式基线。松手后收成一条撤销记录。
     style_preview: Option<style_api::StylePreview>,
+    /// 小地图缩略图。几何版本或尺寸变了才重算，平移缩放不扫描元素。
+    minimap_cache: Option<MinimapCache>,
+}
+
+/// 已映射到像素的小地图外框。`epoch` 来自 [`infinitecanvas_engine::Scene::geometry_epoch`]。
+struct MinimapCache {
+    epoch: u64,
+    width: f32,
+    height: f32,
+    padding: f32,
+    frame: MinimapFrame,
+    /// `x, y, width, height` 交错的像素外框。
+    rects: Vec<f32>,
 }
 
 #[wasm_bindgen]
@@ -201,6 +215,7 @@ impl InfiniteCanvas {
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
             style_preview: None,
+            minimap_cache: None,
         })
     }
 
@@ -1893,6 +1908,111 @@ impl InfiniteCanvas {
         self.viewport.center().y
     }
 
+    /// 把相机中心移到世界坐标。
+    ///
+    /// 点击小地图时，把这里传入 [`Self::minimap_to_world`] 的结果。
+    /// 非有限值会被忽略。
+    ///
+    /// # 参数
+    /// - `x`, `y`: 世界坐标
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const world = canvas.minimap_to_world(px, py, 200, 150, 8);
+    /// canvas.set_camera_center(world[0], world[1]);
+    /// ```
+    #[wasm_bindgen]
+    pub fn set_camera_center(&mut self, x: f32, y: f32) {
+        if x.is_finite() && y.is_finite() {
+            self.viewport.move_to(Vec2::new(x, y));
+        }
+    }
+
+    /// 可见叶子的世界包围盒。
+    ///
+    /// 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
+    ///
+    /// # 返回
+    /// `{ x, y, width, height }`，或 `null`。
+    #[wasm_bindgen]
+    pub fn scene_bounds(&self) -> JsValue {
+        match minimap::scene_bounds(&self.scene) {
+            Some(rect) => rect_to_js(rect),
+            None => JsValue::NULL,
+        }
+    }
+
+    /// 小地图几何版本。
+    ///
+    /// 与 [`infinitecanvas_engine::Scene::geometry_epoch`] 相同。
+    /// 元素增删或几何变化时递增，平移/缩放相机不变。
+    /// 页面应在版本变化时才调用 [`Self::minimap_element_rects`]，
+    /// 相机变化只调用 [`Self::minimap_viewport_rect`]。
+    #[wasm_bindgen]
+    pub fn minimap_epoch(&self) -> u64 {
+        self.scene.geometry_epoch()
+    }
+
+    /// 元素在小地图上的简化外框。
+    ///
+    /// 同一几何版本和尺寸会复用缓存，避免 10 万元素时每帧重扫。
+    /// 返回 `Float32Array`，每 4 个数是一个像素矩形 `x, y, width, height`。
+    ///
+    /// # 参数
+    /// - `width`, `height`: 小地图像素尺寸，例如 200×150
+    /// - `padding`: 四周留白（像素）
+    #[wasm_bindgen]
+    pub fn minimap_element_rects(
+        &mut self,
+        width: f32,
+        height: f32,
+        padding: f32,
+    ) -> js_sys::Float32Array {
+        self.ensure_minimap_cache(width, height, padding);
+        float32_array(&self.minimap_cache.as_ref().unwrap().rects)
+    }
+
+    /// 当前视口在小地图上的像素矩形。
+    ///
+    /// 映射跟元素外框共用缓存，本身不扫描场景。
+    ///
+    /// # 返回
+    /// `Float32Array` `[x, y, width, height]`。
+    #[wasm_bindgen]
+    pub fn minimap_viewport_rect(
+        &mut self,
+        width: f32,
+        height: f32,
+        padding: f32,
+    ) -> js_sys::Float32Array {
+        self.ensure_minimap_cache(width, height, padding);
+        let frame = self.minimap_cache.as_ref().unwrap().frame;
+        let rect = minimap::viewport_minimap_rect(&frame, &self.viewport);
+        float32_array(&[rect.x, rect.y, rect.width, rect.height])
+    }
+
+    /// 小地图像素坐标反算世界坐标。
+    ///
+    /// 点击处要成为相机中心时，把返回值交给 [`Self::set_camera_center`]。
+    /// 留白和内容区用的是同一个线性映射。
+    ///
+    /// # 返回
+    /// `Float32Array` `[x, y]`。
+    #[wasm_bindgen]
+    pub fn minimap_to_world(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        padding: f32,
+    ) -> js_sys::Float32Array {
+        self.ensure_minimap_cache(width, height, padding);
+        let frame = self.minimap_cache.as_ref().unwrap().frame;
+        let world = minimap::minimap_to_world(&frame, Vec2::new(x, y));
+        float32_array(&[world.x, world.y])
+    }
+
     // ========== 性能监控 API ==========
 
     /// 获取性能统计信息
@@ -1994,7 +2114,54 @@ impl InfiniteCanvas {
     }
 }
 
+fn rect_to_js(rect: Rect) -> JsValue {
+    let obj = Object::new();
+    let _ = Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from(rect.x));
+    let _ = Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from(rect.y));
+    let _ = Reflect::set(
+        &obj,
+        &JsValue::from_str("width"),
+        &JsValue::from(rect.width),
+    );
+    let _ = Reflect::set(
+        &obj,
+        &JsValue::from_str("height"),
+        &JsValue::from(rect.height),
+    );
+    obj.into()
+}
+
+fn float32_array(values: &[f32]) -> js_sys::Float32Array {
+    let array = js_sys::Float32Array::new_with_length(values.len() as u32);
+    array.copy_from(values);
+    array
+}
+
 impl InfiniteCanvas {
+    /// 几何版本或小地图尺寸变化时重算外框缓存。相机变化不进入这里的扫描。
+    fn ensure_minimap_cache(&mut self, width: f32, height: f32, padding: f32) {
+        let (size, padding) = minimap::normalize_minimap_view(Vec2::new(width, height), padding);
+        let epoch = self.scene.geometry_epoch();
+        let fresh = self.minimap_cache.as_ref().is_some_and(|cache| {
+            cache.epoch == epoch
+                && cache.width == size.x
+                && cache.height == size.y
+                && cache.padding == padding
+        });
+        if fresh {
+            return;
+        }
+        let overview = minimap::build_overview(&self.scene, size, padding);
+        self.minimap_cache = Some(MinimapCache {
+            epoch,
+            width: size.x,
+            height: size.y,
+            padding,
+            frame: overview.frame,
+            rects: overview.rects,
+        });
+    }
+
     fn dispatch_pending_events(&mut self) {
         while let Some(event) = self.event_queue.pop() {
             self.handle_event(event);
@@ -2949,6 +3116,7 @@ mod tests {
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
             style_preview: None,
+            minimap_cache: None,
         }
     }
 

@@ -165,6 +165,10 @@ pub struct Scene {
     ///
     /// 不参与 [`PartialEq`]，也不写入 JSON。
     selection_epoch: u64,
+    /// 增删元素或几何变化时递增。视口平移/缩放不改变它。
+    ///
+    /// 小地图用它判断缩略图要不要重画。不参与 [`PartialEq`]，也不写入 JSON。
+    geometry_epoch: u64,
 }
 
 /// 重排前的父子关系、组内顺序和 `z_index`。
@@ -207,7 +211,13 @@ impl Scene {
             structure_epoch: 0,
             dirty_ids: HashSet::new(),
             selection_epoch: 0,
+            geometry_epoch: 0,
         }
+    }
+
+    /// 几何版本前进一格。视口变化不要调用。
+    fn bump_geometry_epoch(&mut self) {
+        self.geometry_epoch = self.geometry_epoch.wrapping_add(1);
     }
 
     /// 插入元素并标记结构变化。
@@ -221,12 +231,21 @@ impl Scene {
             stored.as_element_mut().mark_dirty();
         }
         self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        self.bump_geometry_epoch();
         id
     }
 
     /// 场景结构版本。增删元素后变化。
     pub fn structure_epoch(&self) -> u64 {
         self.structure_epoch
+    }
+
+    /// 几何版本。增删元素，或 [`Self::mark_dirty`] 时递增。
+    ///
+    /// 平移/缩放视口不要调用 [`Self::mark_dirty`]，这个版本也不会变。
+    /// 小地图据此跳过缩略图重算，只在相机变化时重画视口框。
+    pub fn geometry_epoch(&self) -> u64 {
+        self.geometry_epoch
     }
 
     /// 选择高亮版本。选择集变化，或被选中元素的几何变化时递增。
@@ -264,6 +283,7 @@ impl Scene {
     /// 记录一个元素的几何、样式或变换已经变化。
     ///
     /// 平移/缩放视口不要调用。同一元素在被缓存消化前重复调用只会入队一次。
+    /// 每次成功调用仍推进 [`Self::geometry_epoch`]，小地图才知道外框变了。
     /// 被选中的元素同时推进 [`Self::selection_epoch`]，让高亮框跟着动。
     ///
     /// # 示例
@@ -286,7 +306,9 @@ impl Scene {
     pub fn mark_dirty(&mut self, id: ElementId) {
         // 已经入队的元素不用重复记。新建元素的 dirty 为 true，但还没入队，
         // 这种情况下仍然要推进去，否则第一次同步前的修改会漏掉选择框刷新。
+        // 几何版本照样前进：同一帧里的第二次修改也要让小地图缓存失效。
         if self.dirty_ids.contains(&id) {
+            self.bump_geometry_epoch();
             return;
         }
         let selected = {
@@ -298,6 +320,7 @@ impl Scene {
             props.selected
         };
         self.dirty_ids.insert(id);
+        self.bump_geometry_epoch();
         if selected {
             self.selection_epoch = self.selection_epoch.wrapping_add(1);
         }
@@ -313,6 +336,7 @@ impl Scene {
             structure_epoch: 0,
             dirty_ids: HashSet::new(),
             selection_epoch: 0,
+            geometry_epoch: 0,
         };
         scene.invalidate_geometry();
         scene
@@ -395,6 +419,7 @@ impl Scene {
         }
         if root.is_some() {
             self.structure_epoch = self.structure_epoch.wrapping_add(1);
+            self.bump_geometry_epoch();
         }
         if let Some(parent_id) = parent {
             self.recompute_group_bounds(parent_id);
@@ -421,6 +446,7 @@ impl Scene {
     pub fn clear(&mut self) {
         if !self.elements.is_empty() {
             self.structure_epoch = self.structure_epoch.wrapping_add(1);
+            self.bump_geometry_epoch();
         }
         self.elements.clear();
         self.dirty_ids.clear();

@@ -22,6 +22,8 @@ Scene.mark_dirty(id) ──► VertexCache.sync
 
 几何修改（平移、旋转、缩放、端点、箭头、采样点、透明度、填充/描边/线宽、文本内容或光栅结果，以及组变换）必须调用 `Scene::mark_dirty`。只改视口不要调用。`SetStyle` 的执行和撤销会标记受影响的元素。文本改字号、颜色或描边时丢掉光栅，下一帧重画；只改不透明度时保留纹理，用 tint。文本的创建、改内容、撤销/重做和 `commit_text_raster` 都会标记。组的 `translate_element` / `set_world_transform` / `set_visible` 会把整棵子树入队，文本纹理四边形跟着重写。隐藏的组在重写时不再输出子孙三角形。
 
+`Scene::geometry_epoch` 在增删元素和每次 `mark_dirty` 时递增，小地图用它决定要不要重画缩略图。视口平移/缩放不递增。
+
 变换手柄写完整 `Transform`。实时拖动（含多选和取消）在应用变换列表时标记脏；`TransformElementsCommand` 的执行与撤销同样标记，顶点才会重生成。
 
 `dirty`、结构版本和脏队列不写入场景 JSON。`import_json` 让缓存失效，下一帧整表重建并全量上传。
