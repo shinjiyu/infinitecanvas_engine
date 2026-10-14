@@ -593,6 +593,13 @@ export class InfiniteCanvas {
      */
     get_zoom(): number;
     /**
+     * 背景网格是否可见。
+     *
+     * # 返回
+     * 可见时为 `true`
+     */
+    grid_visible(): boolean;
+    /**
      * 把至少两个元素组成一个 Group。
      *
      * # 参数
@@ -947,6 +954,21 @@ export class InfiniteCanvas {
      */
     set_element_visible(id: bigint, visible: boolean): boolean;
     /**
+     * 显示或隐藏背景网格。
+     *
+     * 默认可见，和第一次打开时的表现一致。下一帧 `render` 生效，不进撤销栈。
+     *
+     * # 参数
+     * - `visible`: `true` 显示网格
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_grid_visible(false);
+     * canvas.grid_visible();
+     * ```
+     */
+    set_grid_visible(visible: boolean): void;
+    /**
      * 设置图片透明度
      *
      * # 参数
@@ -1258,6 +1280,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_viewport_center_x: (a: number) => number;
     readonly infinitecanvas_get_viewport_center_y: (a: number) => number;
     readonly infinitecanvas_get_zoom: (a: number) => number;
+    readonly infinitecanvas_grid_visible: (a: number) => number;
     readonly infinitecanvas_group_elements: (a: number, b: any) => bigint;
     readonly infinitecanvas_handle_keyboard_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly infinitecanvas_handle_pointer_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
@@ -1297,6 +1320,7 @@ export interface InitOutput {
     readonly infinitecanvas_set_camera_center: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_element_visible: (a: number, b: bigint, c: number) => number;
+    readonly infinitecanvas_set_grid_visible: (a: number, b: number) => void;
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_rulers_visible: (a: number, b: number) => void;
     readonly infinitecanvas_set_selection_style: (a: number, b: any) => number;

@@ -24,6 +24,7 @@ pub mod command;
 pub mod element;
 pub mod event;
 pub mod eyedropper;
+pub mod grid;
 pub mod guides;
 pub mod hit_test;
 pub mod minimap;
@@ -69,6 +70,10 @@ pub use event::{
     WheelEvent,
 };
 pub use eyedropper::{apply_sampled_paint, sample_paint_at, SampledPaint};
+pub use grid::{
+    grid_lines, grid_vertices, on_grid_line, visible_grid_spacing, GridLine, GRID_AXIS_COLOR,
+    GRID_COLOR, GRID_SPACING,
+};
 pub use guides::{
     edge_is_axis_aligned, handle_outward, resize_edge_correction, ruler_band, ruler_major_step,
     ruler_ticks, GuideSnapshot, GuideStore, ManualGuide, RulerBand, RulerOrientation, RulerTick,

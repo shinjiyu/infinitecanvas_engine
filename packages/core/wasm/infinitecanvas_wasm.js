@@ -1032,6 +1032,17 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 背景网格是否可见。
+     *
+     * # 返回
+     * 可见时为 `true`
+     * @returns {boolean}
+     */
+    grid_visible() {
+        const ret = wasm.infinitecanvas_grid_visible(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 把至少两个元素组成一个 Group。
      *
      * # 参数
@@ -1642,6 +1653,24 @@ export class InfiniteCanvas {
     set_element_visible(id, visible) {
         const ret = wasm.infinitecanvas_set_element_visible(this.__wbg_ptr, id, visible);
         return ret !== 0;
+    }
+    /**
+     * 显示或隐藏背景网格。
+     *
+     * 默认可见，和第一次打开时的表现一致。下一帧 `render` 生效，不进撤销栈。
+     *
+     * # 参数
+     * - `visible`: `true` 显示网格
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_grid_visible(false);
+     * canvas.grid_visible();
+     * ```
+     * @param {boolean} visible
+     */
+    set_grid_visible(visible) {
+        wasm.infinitecanvas_set_grid_visible(this.__wbg_ptr, visible);
     }
     /**
      * 设置图片透明度

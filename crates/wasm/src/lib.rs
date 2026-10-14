@@ -194,6 +194,8 @@ pub struct InfiniteCanvas {
     snap: SnapSettings,
     /// 标尺和手动参考线是否显示。隐藏后不命中、不吸附。
     rulers_visible: bool,
+    /// 背景网格是否显示。默认可见，隐藏不进撤销栈。
+    grid_visible: bool,
     /// 正在拖的参考线。
     guide_gesture: Option<GuideGesture>,
     /// 当前选中的参考线。和元素选择互斥。
@@ -262,6 +264,7 @@ impl InfiniteCanvas {
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
             rulers_visible: true,
+            grid_visible: true,
             guide_gesture: None,
             selected_guide: None,
             style_preview: None,
@@ -360,6 +363,7 @@ impl InfiniteCanvas {
                 &self.viewport,
                 selection_box,
                 transform_frame,
+                self.grid_visible,
             )?;
             let stats = renderer.last_stats();
 
@@ -1090,6 +1094,32 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn are_rulers_visible(&self) -> bool {
         self.rulers_visible
+    }
+
+    /// 显示或隐藏背景网格。
+    ///
+    /// 默认可见，和第一次打开时的表现一致。下一帧 `render` 生效，不进撤销栈。
+    ///
+    /// # 参数
+    /// - `visible`: `true` 显示网格
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.set_grid_visible(false);
+    /// canvas.grid_visible();
+    /// ```
+    #[wasm_bindgen]
+    pub fn set_grid_visible(&mut self, visible: bool) {
+        self.grid_visible = visible;
+    }
+
+    /// 背景网格是否可见。
+    ///
+    /// # 返回
+    /// 可见时为 `true`
+    #[wasm_bindgen]
+    pub fn grid_visible(&self) -> bool {
+        self.grid_visible
     }
 
     /// 标尺厚度（屏幕像素）。
@@ -4390,6 +4420,7 @@ mod tests {
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
             rulers_visible: true,
+            grid_visible: true,
             guide_gesture: None,
             selected_guide: None,
             style_preview: None,
@@ -4398,6 +4429,19 @@ mod tests {
             eyedropper_gesture: None,
             eyedropper_notice: None,
         }
+    }
+
+    /// 背景网格默认可见，切换不进撤销栈。
+    #[test]
+    fn grid_is_visible_by_default_and_the_toggle_is_not_undoable() {
+        let mut canvas = blank_canvas();
+        assert!(canvas.grid_visible());
+        canvas.set_grid_visible(false);
+        assert!(!canvas.grid_visible());
+        assert_eq!(canvas.get_undo_count(), 0);
+        canvas.set_grid_visible(true);
+        assert!(canvas.grid_visible());
+        assert_eq!(canvas.get_undo_count(), 0);
     }
 
     fn translation(scene: &Scene, id: ElementId) -> Vec2 {

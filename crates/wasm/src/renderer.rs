@@ -5,9 +5,10 @@
 use crate::texture_manager::TextureManager;
 use infinitecanvas_engine::{
     element::Element,
+    grid_vertices,
     math::{Rect, Vec2, Vertex},
     transform_handles::{HandleKind, HandleMetrics, SelectionFrame},
-    GpuVertexWrite, Scene, VertexBufferKind, VertexCache, Viewport,
+    visible_grid_spacing, GpuVertexWrite, Scene, VertexBufferKind, VertexCache, Viewport,
 };
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
@@ -25,6 +26,28 @@ pub struct FrameRenderStats {
     pub gpu_bytes_written: u64,
     /// 几何和高亮都没变，只更新了 uniform。
     pub geometry_unchanged: bool,
+}
+
+/// 视口和间距没变时，网格顶点不用重传。
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct GridCacheKey {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    spacing: u32,
+}
+
+impl GridCacheKey {
+    fn new(bounds: Rect, spacing: f32) -> Self {
+        Self {
+            x: bounds.x.to_bits(),
+            y: bounds.y.to_bits(),
+            width: bounds.width.to_bits(),
+            height: bounds.height.to_bits(),
+            spacing: spacing.to_bits(),
+        }
+    }
 }
 
 /// WebGPU 渲染器
@@ -49,6 +72,11 @@ pub struct WebGPURenderer {
     /// 选中高亮。几何不变时不重传。
     selection_buffer: wgpu::Buffer,
     selection_capacity: usize,
+    /// 背景网格。视口没变时不重传。
+    grid_buffer: wgpu::Buffer,
+    grid_capacity: usize,
+    grid_vertex_count: u32,
+    grid_key: Option<GridCacheKey>,
     /// CPU 侧世界空间顶点缓存。平移/缩放不重生成顶点。
     vertex_cache: VertexCache,
     selection_fill: Vec<Vertex>,
@@ -347,6 +375,8 @@ impl WebGPURenderer {
             create_vertex_buffer(&device, "Textured Vertex Buffer", textured_capacity);
         let selection_buffer =
             create_vertex_buffer(&device, "Selection Vertex Buffer", selection_capacity);
+        let grid_capacity = 1024;
+        let grid_buffer = create_vertex_buffer(&device, "Grid Vertex Buffer", grid_capacity);
 
         // 13. 创建纹理采样器
         let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -529,6 +559,10 @@ impl WebGPURenderer {
             textured_capacity,
             selection_buffer,
             selection_capacity,
+            grid_buffer,
+            grid_capacity,
+            grid_vertex_count: 0,
+            grid_key: None,
             vertex_cache: VertexCache::new(),
             selection_fill: Vec::new(),
             selection_stroke: Vec::new(),
@@ -558,12 +592,14 @@ impl WebGPURenderer {
     /// - `viewport`: 视口。投影矩阵每帧更新；手柄尺寸按缩放换算
     /// - `selection_box`: 框选矩形（如果正在框选）
     /// - `transform_frame`: 选中框。有选中元素时带 8 个缩放手柄和 1 个旋转手柄
+    /// - `grid_visible`: 为 false 时不画背景网格。网格顶点不计入场景几何是否变化
     pub fn render(
         &mut self,
         scene: &mut Scene,
         viewport: &Viewport,
         selection_box: Option<Rect>,
         transform_frame: Option<SelectionFrame>,
+        grid_visible: bool,
     ) -> Result<(), JsValue> {
         let sync = self.vertex_cache.sync(scene);
         let selection_changed =
@@ -580,6 +616,12 @@ impl WebGPURenderer {
         if selection_changed || selection_grew {
             gpu_bytes += self.upload_selection();
         }
+        let (grid_count, grid_bytes) = if grid_visible {
+            self.sync_grid(viewport)
+        } else {
+            (0, 0)
+        };
+        gpu_bytes += grid_bytes;
 
         self.write_uniform(viewport);
 
@@ -625,6 +667,14 @@ impl WebGPURenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+
+            if grid_count > 0 {
+                render_pass.set_pipeline(&self.stroke_pipeline);
+                render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.grid_buffer.slice(..));
+                render_pass.draw(0..grid_count, 0..1);
+                draw_calls += 1;
+            }
 
             if fill_count > 0 {
                 render_pass.set_pipeline(&self.fill_pipeline);
@@ -724,7 +774,8 @@ impl WebGPURenderer {
                 + self.vertex_cache.stroke().len()
                 + self.vertex_cache.textured().len()
                 + self.selection_fill.len()
-                + self.selection_stroke.len(),
+                + self.selection_stroke.len()
+                + grid_count as usize,
             draw_calls,
             regenerated_elements: sync.regenerated,
             gpu_bytes_written: gpu_bytes,
@@ -854,6 +905,34 @@ impl WebGPURenderer {
             &self.selection_stroke,
         );
         bytes
+    }
+
+    /// 按当前视口生成背景网格。范围和间距都没变时不写缓冲。
+    ///
+    /// # 返回
+    /// 顶点数量，以及这次写入的字节数。
+    fn sync_grid(&mut self, viewport: &Viewport) -> (u32, u64) {
+        let spacing = visible_grid_spacing(viewport.zoom());
+        let bounds = viewport.bounds();
+        let key = GridCacheKey::new(bounds, spacing);
+        if self.grid_key == Some(key) {
+            return (self.grid_vertex_count, 0);
+        }
+        let vertices = grid_vertices(bounds, spacing);
+        let mut bytes = 0;
+        if !vertices.is_empty() {
+            let _grew = grow_buffer(
+                &self.device,
+                &mut self.grid_buffer,
+                &mut self.grid_capacity,
+                vertices.len(),
+                "Grid Vertex Buffer",
+            );
+            bytes = write_vertices(&self.queue, &self.grid_buffer, 0, &vertices);
+        }
+        self.grid_vertex_count = vertices.len() as u32;
+        self.grid_key = Some(key);
+        (self.grid_vertex_count, bytes)
     }
 
     /// 把视口写成列主序投影矩阵。不触碰顶点缓冲。

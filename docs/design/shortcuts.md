@@ -32,6 +32,8 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 吸管（#60）是不带修饰键的 `I`。`Shift+I`、`Ctrl/Cmd+I`、`Alt+I` 都不触发，因此不会占用 V / L / P / R / O / T / H / G，也不会和 Shift+H / Shift+V / Shift+R 撞车。工具栏有同样的按钮。按住不重复。
 
+背景网格（#64）也在这张表里：`Ctrl/Cmd+'`（`toggleGrid`）显示或隐藏网格，按住不重复。不占用 `G`，也不占用 `I` 或 `Ctrl/Cmd+=` / `-` / `0`。工具栏「网格」按钮调用同一个 `set_grid_visible`。Mac 上显示为 ⌘'。详见 [grid.md](./grid.md)。
+
 ## 引擎补充
 
 删除、全选和缩放在页面里没有现成的一次调用，所以 WASM 增加了这些入口，场景逻辑仍在 engine 里：
