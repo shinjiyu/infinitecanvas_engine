@@ -139,6 +139,28 @@ impl AnyElement {
     }
 }
 
+/// 从场景里摘下的一棵子树。
+///
+/// [`Scene::take_subtree`] 和 [`Scene::snapshot_subtree`] 生成它，
+/// [`Scene::restore_subtree`] 按原来的父节点和兄弟下标放回。
+/// 节点按前序排列，第一个是根；`parent` 和组的 `children` 保持摘除前的值。
+#[derive(Debug, Clone)]
+pub struct RemovedSubtree {
+    /// 根在父组 `children` 中的下标。根在顶层时为 `None`。
+    index_in_parent: Option<usize>,
+    /// 前序节点。第一个是根。
+    nodes: Vec<AnyElement>,
+}
+
+impl RemovedSubtree {
+    /// 前序节点。第一个是根。
+    ///
+    /// 删除命令用它找出需要暂存到撤销栈的图片。
+    pub(crate) fn nodes(&self) -> &[AnyElement] {
+        &self.nodes
+    }
+}
+
 /// 场景容器
 ///
 /// # 职责
@@ -437,6 +459,7 @@ impl Scene {
     /// 返回被删除的根元素；子孙从场景中丢弃。
     /// 每个被删掉的图片都会减少资源引用。降到 0 时资源离开表，
     /// 暂存在 [`Self::take_detached_assets`]。
+    /// 要撤销这次删除，用 [`Scene::take_subtree`]，它会把子孙一并留下。
     pub fn remove(&mut self, id: ElementId) -> Option<AnyElement> {
         if !self.elements.contains_key(&id) {
             return None;
@@ -539,6 +562,135 @@ impl Scene {
         self.assets.to_records()
     }
 
+    /// 克隆元素及其全部后代，不从场景中删除。
+    ///
+    /// 根不在场景中时返回 `None`。多个根要一起删除时，先对每个根调用本方法，
+    /// 再 [`Scene::remove`]，这样兄弟下标还是删除前的值。
+    ///
+    /// # 参数
+    /// - `id`: 子树根
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene};
+    /// use infinitecanvas_math::Vec2;
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+    /// scene.add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::new(10.0, 10.0)));
+    /// let group_id = scene.group(&[1, 2]).unwrap();
+    /// assert!(scene.snapshot_subtree(group_id).is_some());
+    /// assert!(scene.contains(1));
+    /// ```
+    pub fn snapshot_subtree(&self, id: ElementId) -> Option<RemovedSubtree> {
+        if !self.elements.contains_key(&id) {
+            return None;
+        }
+        let parent = self.parent_id(id);
+        let index_in_parent = parent.and_then(|parent_id| {
+            self.group_child_ids(parent_id)
+                .iter()
+                .position(|child| *child == id)
+        });
+        let nodes = self
+            .subtree_ids(id)
+            .into_iter()
+            .filter_map(|element_id| self.elements.get(&element_id).cloned())
+            .collect::<Vec<_>>();
+        if nodes.is_empty() {
+            return None;
+        }
+        Some(RemovedSubtree {
+            index_in_parent,
+            nodes,
+        })
+    }
+
+    /// 删除根及其全部后代，并留下可放回的快照。
+    ///
+    /// [`Scene::remove`] 只返回根。撤销删除要用这个方法，再 [`Scene::restore_subtree`]。
+    ///
+    /// # 参数
+    /// - `id`: 子树根
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene};
+    /// use infinitecanvas_math::Vec2;
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+    /// scene.add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::new(10.0, 10.0)));
+    /// let group_id = scene.group(&[1, 2]).unwrap();
+    /// let snapshot = scene.take_subtree(group_id).unwrap();
+    /// assert!(!scene.contains(1) && !scene.contains(group_id));
+    /// scene.restore_subtree(snapshot);
+    /// assert_eq!(scene.children_of(group_id), vec![1, 2]);
+    /// ```
+    pub fn take_subtree(&mut self, id: ElementId) -> Option<RemovedSubtree> {
+        let snapshot = self.snapshot_subtree(id)?;
+        self.remove(id)?;
+        Some(snapshot)
+    }
+
+    /// 把 [`Scene::snapshot_subtree`] 或 [`Scene::take_subtree`] 的结果放回场景。
+    ///
+    /// 父组还在时，根按原来的下标插回子列表。父组已经不在时，根回到顶层。
+    /// 组自己的变换用快照里的值，不在这里重算；父组的包围盒会按放回后的子元素刷新。
+    /// 图片会重新增加资源引用。像素若还在 [`Self::take_detached_assets`] 的缓冲区里，
+    /// 会先放回资源表；命令把像素暂存到撤销栈时，要先 [`Self::restore_assets`]。
+    ///
+    /// # 参数
+    /// - `snapshot`: 删除前克隆的子树
+    pub fn restore_subtree(&mut self, mut snapshot: RemovedSubtree) {
+        let Some(root) = snapshot.nodes.first() else {
+            return;
+        };
+        let root_id = root.id();
+        let declared_parent = root.as_element().props().parent;
+        let parent = declared_parent
+            .filter(|parent_id| matches!(self.elements.get(parent_id), Some(AnyElement::Group(_))));
+        if parent.is_none() {
+            if let Some(root) = snapshot.nodes.first_mut() {
+                root.as_element_mut().props_mut().parent = None;
+            }
+        }
+        self.reclaim_detached_assets(&snapshot.nodes);
+        let index = snapshot.index_in_parent.unwrap_or(usize::MAX);
+        for node in snapshot.nodes {
+            self.retain_image_element(&node);
+            self.insert_element(node);
+        }
+        self.mark_subtree_dirty(root_id);
+        if let Some(parent_id) = parent {
+            self.insert_child(parent_id, root_id, index);
+            self.refresh_bounds_upwards(parent_id);
+            self.mark_dirty(parent_id);
+        }
+    }
+
+    /// 把仍留在脱离缓冲区、且被这些节点引用的图片放回资源表。
+    ///
+    /// 引用计数保持 0，随后的 [`Self::retain_image_element`] 再加一。
+    /// 缓冲区里其他资源不动。命令已经把像素取走时，这里什么都找不到。
+    fn reclaim_detached_assets(&mut self, nodes: &[AnyElement]) {
+        let keep: HashSet<String> = nodes
+            .iter()
+            .filter_map(|element| match element {
+                AnyElement::Image(image) if !image.asset_id.is_empty() => {
+                    Some(image.asset_id.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        if keep.is_empty() {
+            return;
+        }
+        let (mine, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut self.detached_assets)
+            .into_iter()
+            .partition(|asset| keep.contains(&asset.id));
+        self.detached_assets = rest;
+        self.restore_assets(mine);
+    }
+
     /// 获取元素
     pub fn get(&self, id: ElementId) -> Option<&AnyElement> {
         self.elements.get(&id)
@@ -588,9 +740,10 @@ impl Scene {
         self.elements.values()
     }
 
-    /// 全部元素世界包围盒的并集。
+    /// 可见叶子的世界包围盒并集。
     ///
-    /// 空场景，或包围盒含非有限值时，返回 `None`。
+    /// 组节点不计入，范围由它的子元素表达。元素自己不可见，或祖先被隐藏时，
+    /// 也不计入。空场景、没有可见叶子，或包围盒含非有限值时，返回 `None`。
     /// 缩放到适合用它作为目标矩形。
     ///
     /// # 示例
@@ -604,8 +757,19 @@ impl Scene {
     /// assert!((bounds.width - 50.0).abs() < 1e-3);
     /// ```
     pub fn content_bounds(&self) -> Option<Rect> {
+        let ids: Vec<ElementId> = self
+            .iter()
+            .filter(|element| element.as_group().is_none())
+            .map(|element| element.id())
+            .collect();
         let mut acc: Option<Rect> = None;
-        for element in self.iter() {
+        for id in ids {
+            if !self.is_effectively_visible(id) {
+                continue;
+            }
+            let Some(element) = self.get(id) else {
+                continue;
+            };
             let bounds = element.as_element().world_bounds();
             if !bounds.x.is_finite()
                 || !bounds.y.is_finite()
@@ -1689,7 +1853,8 @@ impl Default for Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use infinitecanvas_math::Vec2;
+    use crate::element::Group;
+    use infinitecanvas_math::{Rect, Transform, Vec2};
 
     #[test]
     fn test_add_remove() {
@@ -1767,6 +1932,41 @@ mod tests {
             Vec2::new(100.0, 0.0),
             Vec2::new(10.0, 10.0),
         ));
+
+        let bounds = scene.content_bounds().unwrap();
+        assert!((bounds.x - -5.0).abs() < 1e-3);
+        assert!((bounds.y - -5.0).abs() < 1e-3);
+        assert!((bounds.width - 110.0).abs() < 1e-3);
+        assert!((bounds.height - 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn content_bounds_skips_groups_and_hidden() {
+        let mut scene = Scene::new();
+        let left = scene.next_id();
+        scene.add_rect(rect(left, Vec2::new(0.0, 0.0)));
+        let right = scene.next_id();
+        scene.add_rect(rect(right, Vec2::new(100.0, 0.0)));
+        let group_id = scene.group(&[left, right]).unwrap();
+        assert!(scene.contains(group_id));
+
+        let hidden_id = scene.next_id();
+        let mut hidden = rect(hidden_id, Vec2::new(500.0, 0.0));
+        hidden.props.visible = false;
+        scene.add_rect(hidden);
+
+        let buried_a = scene.next_id();
+        scene.add_rect(rect(buried_a, Vec2::new(-400.0, 0.0)));
+        let buried_b = scene.next_id();
+        scene.add_rect(rect(buried_b, Vec2::new(-380.0, 0.0)));
+        let hidden_group = scene.group(&[buried_a, buried_b]).unwrap();
+        assert!(scene.set_visible(hidden_group, false));
+
+        let decoy_id = scene.next_id();
+        let mut decoy = Group::new(decoy_id);
+        decoy.props.transform = Transform::from_translation(Vec2::new(1000.0, 1000.0));
+        decoy.local_bounds = Rect::new(-80.0, -80.0, 160.0, 160.0);
+        scene.add(AnyElement::Group(decoy));
 
         let bounds = scene.content_bounds().unwrap();
         assert!((bounds.x - -5.0).abs() < 1e-3);

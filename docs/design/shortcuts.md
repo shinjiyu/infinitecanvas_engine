@@ -22,9 +22,9 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 | 方法 | 作用 |
 | --- | --- |
-| `delete_selection` | 选中元素合成一条 `RemoveElementsCommand` |
-| `select_all` | 选中全部元素 |
-| `zoom_to_fit` | 用 `Scene::content_bounds` 和 `Viewport::fit_rect`，四周留 48px |
+| `delete_selection` | 选中元素合成一条 `RemoveElementsCommand`。组会连同子孙删除，撤销时放回整棵子树 |
+| `select_all` | 选中顶层可见元素。组只选中组本身。锁定元素（含被锁定的组）不选 |
+| `zoom_to_fit` | 用 `Scene::content_bounds`（跳过组节点和隐藏元素）和 `Viewport::fit_rect`，四周留 48px |
 | `set_zoom` | 设置缩放倍数，视口中心不变。`1` 即 100% |
 
-文本（#4）已经进 master：`T` 切换文本工具；编辑框聚焦时 `Enter` 确认、`Esc` 取消，这两条的 `scope` 是 `text-editor`，不会在画布上触发。分组（#13）还没进 master，表里没有 Ctrl+G。
+文本（#4）已经进 master：`T` 切换文本工具；编辑框聚焦时 `Enter` 确认、`Esc` 取消，这两条的 `scope` 是 `text-editor`，不会在画布上触发。分组（#13）已进 master：`Ctrl+G` 调用 `group_elements`，`Ctrl+Shift+G` 调用 `ungroup`。成组后改选新组；取消分组后改选原来的直接子元素。

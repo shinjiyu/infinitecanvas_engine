@@ -453,7 +453,9 @@ impl InfiniteCanvas {
         self.selection.clear(&mut self.scene);
     }
 
-    /// 选中场景中的全部元素。
+    /// 选中顶层的可见元素。
+    ///
+    /// 组只选中组本身，不选中组内元素。隐藏元素不选。锁定的元素，以及被锁定祖先挡住的组，也不选。
     ///
     /// # 返回
     /// 选中数量。空场景返回 0。
@@ -471,11 +473,13 @@ impl InfiniteCanvas {
 
     /// 删除当前选中的元素。
     ///
-    /// 多个元素合成一条撤销记录。没有选中时什么也不做。
-    /// 元素上的选中标记会随撤销恢复。
+    /// 多个元素合成一条撤销记录。选中的是组时，整棵子树一起删除。
+    /// 没有选中时什么也不做。快照里的选中标记会随撤销恢复。
+    /// 删除后会像 [`Self::remove_element`] 一样，把这些 id（含子孙）从选择集里去掉，
+    /// 并释放不再被场景使用的文本纹理。
     ///
     /// # 返回
-    /// 删除的元素数量
+    /// 从场景中删除的元素数量，含组的子孙
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -491,15 +495,24 @@ impl InfiniteCanvas {
         if ids.is_empty() {
             return 0;
         }
-        let count = ids.len() as u32;
-        self.command_history.execute(
-            Box::new(RemoveElementsCommand::new(ids.clone())),
-            &mut self.scene,
-        );
-        for id in ids {
+        let mut affected = Vec::new();
+        for id in &ids {
+            for element_id in self.scene.subtree_ids(*id) {
+                if !affected.contains(&element_id) {
+                    affected.push(element_id);
+                }
+            }
+        }
+        let textures = self.snapshot_text_textures();
+        let before = self.scene.count();
+        self.command_history
+            .execute(Box::new(RemoveElementsCommand::new(ids)), &mut self.scene);
+        for id in affected {
+            let _ = self.selection.deselect(&mut self.scene, id);
             self.selection.remove_id(id);
         }
-        count
+        self.release_text_textures_except(textures);
+        before.saturating_sub(self.scene.count()) as u32
     }
 
     #[wasm_bindgen]
@@ -4021,5 +4034,89 @@ mod tests {
         canvas.clear_selection();
         assert!(!canvas.reorder_selection("back"));
         assert_eq!(canvas.get_undo_count(), 1);
+    }
+
+    #[test]
+    fn select_all_selects_the_group_and_not_its_children() {
+        let mut canvas = blank_canvas();
+        let left = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            left,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let right = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = canvas.scene.group(&[left, right]).unwrap();
+        let hidden = canvas.scene.next_id();
+        let mut hidden_rect = Rectangle::new(hidden, Vec2::new(80.0, 0.0), Vec2::new(10.0, 10.0));
+        hidden_rect.props.visible = false;
+        canvas.scene.add_rect(hidden_rect);
+        let locked = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            locked,
+            Vec2::new(120.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        canvas.scene.set_locked(locked, true);
+
+        assert_eq!(canvas.select_all(), 1);
+        assert!(canvas.selection.is_selected(group_id));
+        assert!(!canvas.selection.is_selected(left));
+        assert!(!canvas.selection.is_selected(right));
+        assert!(!canvas.selection.is_selected(hidden));
+        assert!(!canvas.selection.is_selected(locked));
+    }
+
+    #[test]
+    fn delete_selection_removes_group_subtree_and_clears_selection() {
+        let mut canvas = blank_canvas();
+        let left = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            left,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let right = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let text_id = canvas.scene.next_id();
+        let mut text = Text::new(text_id, Vec2::new(70.0, 0.0), "Hi");
+        text.commit_raster(text.revision, 0, "glyph".into(), Vec2::new(16.0, 8.0))
+            .unwrap();
+        canvas.scene.add_text(text);
+        let group_id = canvas.scene.group(&[left, right]).unwrap();
+        canvas
+            .selection
+            .select_element(&mut canvas.scene, group_id, false);
+        canvas
+            .selection
+            .select_element(&mut canvas.scene, text_id, true);
+        canvas
+            .selection
+            .select_element(&mut canvas.scene, left, true);
+
+        // 没有 WebGPU 渲染器时，文本纹理释放是空操作；选择集仍必须清掉。
+        assert_eq!(canvas.delete_selection(), 4);
+        assert!(!canvas.scene.contains(group_id));
+        assert!(!canvas.scene.contains(left));
+        assert!(!canvas.scene.contains(right));
+        assert!(!canvas.scene.contains(text_id));
+        assert!(canvas.selection.is_empty());
+
+        assert!(canvas.undo());
+        assert_eq!(canvas.scene.children_of(group_id), vec![left, right]);
+        assert!(canvas.scene.contains(text_id));
+        assert!(canvas.selection.is_selected(group_id));
+        assert!(canvas.selection.is_selected(text_id));
+        assert!(canvas.selection.is_selected(left));
+        assert!(!canvas.selection.is_selected(right));
     }
 }

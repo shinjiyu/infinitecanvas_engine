@@ -96,6 +96,15 @@ test('delete, select all, escape, zoom, and help', () => {
   assert.equal(assertHandler('delete', { key: 'Backspace' }).id, 'backspace');
   assert.equal(assertHandler('selectAll', { key: 'a', ctrlKey: true }).id, 'select-all');
   assert.equal(assertHandler('selectAll', { key: 'a', metaKey: true }).id, 'select-all');
+  assert.equal(assertHandler('group', { key: 'g', ctrlKey: true }).id, 'group');
+  assert.equal(assertHandler('group', { key: 'G', metaKey: true }).id, 'group');
+  assert.equal(assertHandler('ungroup', { key: 'g', ctrlKey: true, shiftKey: true }).id, 'ungroup');
+  assert.equal(assertHandler('ungroup', { key: 'G', metaKey: true, shiftKey: true }).id, 'ungroup');
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: 'g', ctrlKey: true, shiftKey: true }), 'down')?.handler,
+    'ungroup',
+  );
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'g' }), 'down'), null);
   assert.equal(assertHandler('escape', { key: 'Escape' }).id, 'escape');
   assert.equal(assertHandler('zoomFit', { key: '!', code: 'Digit1', shiftKey: true }).id, 'zoom-fit');
   assert.equal(assertHandler('zoomFit', { key: '1', code: 'Digit1', shiftKey: true }).id, 'zoom-fit');
@@ -135,6 +144,10 @@ test('help rows are generated from the table and show both chords', () => {
   assert.equal(mac.find((row) => row.id === 'zoom-100')?.chords[0], '⇧0');
   assert.equal(other.find((row) => row.id === 'undo')?.chords[0], 'Ctrl+Z');
   assert.equal(mac.find((row) => row.id === 'select-all')?.chords[0], '⌘A');
+  assert.equal(other.find((row) => row.id === 'group')?.chords[0], 'Ctrl+G');
+  assert.equal(mac.find((row) => row.id === 'group')?.chords[0], '⌘G');
+  assert.equal(other.find((row) => row.id === 'ungroup')?.chords[0], 'Ctrl+Shift+G');
+  assert.equal(mac.find((row) => row.id === 'ungroup')?.chords[0], '⌘⇧G');
   assert.equal(other.find((row) => row.id === 'help')?.chords[0], 'Shift+/');
   assert.equal(mac.find((row) => row.id === 'help')?.chords[0], '⇧/');
 

@@ -217,7 +217,8 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] 输入框、textarea、contenteditable 聚焦时不触发；Mac 显示 ⌘，其他平台显示 Ctrl
 - [x] WASM 只新增 `delete_selection`、`select_all`、`zoom_to_fit`、`set_zoom`
 - [x] #4 文本已合并：`T` 切换文本工具，编辑框里 Enter 确认、Esc 取消
-- [x] #13 分组尚未合并，未登记 Ctrl+G
+- [x] #13 已合并：`Ctrl+G` 成组（`group_elements`），`Ctrl+Shift+G` 取消分组（`ungroup`）
+- [x] 删除组会快照整棵子树，撤销后子孙还在；全选只选顶层可见元素，并跳过锁定元素；`content_bounds` 跳过组节点和隐藏元素
 
 ```text
 SHORTCUTS ──► matchShortcut ──► 画布动作
@@ -302,7 +303,7 @@ Scene ── 事务 ──▶ Y.Doc elements ── SyncStep1/2 ──▶ 另一
 
 - [x] `Scene::move_in_outline`：兄弟换序或移入/移出组，重写 `z_index` 并推进 `structure_epoch`
 - [x] `ReorderOutlineCommand` 撤销/重做父指针、子列表和绘制顺序
-- [x] 锁定沿祖先生效：命中、点选、框选和拖动都会跳过
+- [x] 锁定沿祖先生效：命中、点选、框选、全选和拖动都会跳过
 - [x] WASM：`reorder_element`、`get_structure_epoch`；`set_element_locked` 取消选中子树
 - [x] Demo 图层面板：树列表、选中双向同步、拖拽、显隐/锁定、虚拟滚动
 - [x] Rust 单测覆盖显隐、锁定、重排和重入组

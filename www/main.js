@@ -586,6 +586,97 @@ function syncShortcutLabels() {
 }
 
 /**
+ * 把当前选择收成一个组，并改选新组。
+ *
+ * 选择里如果同时有组和它的子孙，只把组交出去。少于两个，或引擎拒绝时，选择保持不变。
+ *
+ * @param {WasmCanvas} engine
+ */
+function groupSelection(engine) {
+  const tree = engine.get_scene_tree();
+  const ids = selectionRoots([...engine.get_selected_ids()], tree?.roots);
+  if (ids.length < 2) {
+    setStatus('成组至少需要两个元素');
+    return;
+  }
+  const groupId = engine.group_elements(ids);
+  if (groupId === 0n || groupId === 0) {
+    setStatus('无法成组');
+    return;
+  }
+  engine.clear_selection();
+  engine.select_element(groupId, false);
+  scheduleAutosave(engine);
+  setStatus('已成组');
+}
+
+/**
+ * 解散当前选中的组，并改选原来的直接子元素。
+ *
+ * 不是组的选中项会被 `ungroup` 拒绝。子元素列表在解散前从场景树读出。
+ *
+ * @param {WasmCanvas} engine
+ */
+function ungroupSelection(engine) {
+  const ids = [...engine.get_selected_ids()];
+  const tree = engine.get_scene_tree();
+  /** @type {Array<bigint | number>} */
+  const children = [];
+  let changed = false;
+  for (const id of ids) {
+    const node = findTreeNode(tree?.roots, id);
+    if (!engine.ungroup(id)) continue;
+    changed = true;
+    for (const child of node?.children ?? []) {
+      children.push(child.id);
+    }
+  }
+  if (!changed) return;
+  engine.clear_selection();
+  for (const childId of children) {
+    engine.select_element(childId, true);
+  }
+  scheduleAutosave(engine);
+  setStatus('已取消分组');
+}
+
+/**
+ * 去掉那些祖先也在选择里的 id。成组时只提交这批根。
+ *
+ * @param {Array<bigint | number>} ids
+ * @param {Array<{ id: bigint | number, parentId: bigint | number | null, children?: unknown[] }> | undefined} roots
+ * @returns {Array<bigint | number>}
+ */
+function selectionRoots(ids, roots) {
+  const selected = new Set(ids.map((id) => String(id)));
+  return ids.filter((id) => {
+    let parentId = findTreeNode(roots, id)?.parentId;
+    while (parentId != null) {
+      if (selected.has(String(parentId))) return false;
+      parentId = findTreeNode(roots, parentId)?.parentId;
+    }
+    return true;
+  });
+}
+
+/**
+ * 在场景树里按 id 查找节点。数字和 bigint 都按十进制文本比较。
+ *
+ * @param {Array<{ id: bigint | number, parentId?: bigint | number | null, children?: unknown[] }> | undefined} nodes
+ * @param {bigint | number} id
+ * @returns {any}
+ */
+function findTreeNode(nodes, id) {
+  if (!nodes) return null;
+  for (const node of nodes) {
+    if (String(node.id) === String(id)) return node;
+    const found = findTreeNode(node.children, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
  * 执行快捷键表命中的动作。
  *
  * @param {import('./shortcuts.js').Shortcut} shortcut
@@ -639,6 +730,12 @@ function dispatchShortcut(shortcut, engine) {
     case 'selectAll':
       engine.select_all();
       scheduleAutosave(engine);
+      break;
+    case 'group':
+      groupSelection(engine);
+      break;
+    case 'ungroup':
+      ungroupSelection(engine);
       break;
     case 'escape':
       if (escapeAction(isHelpOpen()) === 'closeHelp') {
