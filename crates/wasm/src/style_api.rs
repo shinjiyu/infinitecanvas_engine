@@ -35,6 +35,7 @@ impl InfiniteCanvas {
     ///   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
     /// - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
     /// - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
+    /// - `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字。`shadowColor` 是 `#rrggbbaa`（面板只用 RGB，浓度在 `shadowOpacity`）。没有形状、文本或图片时 `shadowSupported` 为 false
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -61,6 +62,16 @@ impl InfiniteCanvas {
         write_number(&obj, "innerRadius", &style.inner_radius);
         js_set(&obj, "hasPolygon", JsValue::from(style.has_polygon));
         js_set(&obj, "hasStar", JsValue::from(style.has_star));
+        write_number(&obj, "shadowOffsetX", &style.shadow_offset_x);
+        write_number(&obj, "shadowOffsetY", &style.shadow_offset_y);
+        write_number(&obj, "shadowBlur", &style.shadow_blur);
+        write_number(&obj, "shadowOpacity", &style.shadow_opacity);
+        write_color(&obj, "shadowColor", &style.shadow_color);
+        js_set(
+            &obj,
+            "shadowSupported",
+            JsValue::from(style.shadow_supported),
+        );
         write_color(&obj, "textColor", &style.text_color);
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
@@ -75,6 +86,8 @@ impl InfiniteCanvas {
     /// `cornerRadius` 也可以写成 `corner_radius`。`sides` 也可以写成 `points`，并钳到 3–64。
     /// `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
     /// `textColor` 是十六进制颜色。圆角只写到矩形上。
+    /// `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
+    /// `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。空选择或没有变化时返回 false。
     /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
     /// 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
     /// 没有任何变化时返回 false，也不入栈。
@@ -396,6 +409,15 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         corner_radius: read_f32(value, "cornerRadius").or_else(|| read_f32(value, "corner_radius")),
         sides: read_sides(value),
         inner_radius: read_f32(value, "innerRadius").or_else(|| read_f32(value, "inner_radius")),
+        shadow_offset_x: read_f32(value, "shadowOffsetX")
+            .or_else(|| read_f32(value, "shadow_offset_x")),
+        shadow_offset_y: read_f32(value, "shadowOffsetY")
+            .or_else(|| read_f32(value, "shadow_offset_y")),
+        shadow_blur: read_f32(value, "shadowBlur").or_else(|| read_f32(value, "shadow_blur")),
+        shadow_color: read_color(value, "shadowColor")
+            .or_else(|| read_color(value, "shadow_color")),
+        shadow_opacity: read_f32(value, "shadowOpacity")
+            .or_else(|| read_f32(value, "shadow_opacity")),
     })
 }
 

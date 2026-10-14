@@ -8,7 +8,8 @@
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 
-use crate::element::{Element, ElementId, ElementProps};
+use crate::element::shadow::quad_shadow;
+use crate::element::{DropShadow, Element, ElementId, ElementProps};
 
 fn default_image_alpha() -> f32 {
     1.0
@@ -80,6 +81,11 @@ pub struct Image {
     /// JSON 中缺省为 1。
     #[serde(default = "default_image_alpha")]
     pub alpha: f32,
+    /// 投影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
+    ///
+    /// 按显示矩形画偏移羽化，不模糊纹理像素。
+    #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
+    pub shadow: DropShadow,
 }
 
 impl Image {
@@ -103,6 +109,7 @@ impl Image {
             intrinsic_height: 0,
             uv_rect: None,
             alpha: 1.0,
+            shadow: DropShadow::default(),
         }
     }
 
@@ -188,6 +195,7 @@ impl Image {
             intrinsic_height: 0,
             uv_rect: Some(uv_rect),
             alpha: 1.0,
+            shadow: DropShadow::default(),
         }
     }
 
@@ -198,6 +206,7 @@ impl Image {
         if !self.asset_id.is_empty() {
             self.texture_id = self.asset_id.clone();
         }
+        self.shadow = self.shadow.sanitized();
     }
 
     /// 在世界坐标采样资源像素。
@@ -315,6 +324,20 @@ impl Image {
     /// 包含此图片的最小轴对齐矩形，已计入平移、旋转和缩放。
     pub fn bounding_box(&self) -> Rect {
         self.world_bounds()
+    }
+
+    /// 显示矩形的投影。关闭或不可见时为空。命中仍是显示矩形。
+    pub(crate) fn shadow_vertices(&self) -> Vec<Vertex> {
+        if !self.props.visible {
+            return Vec::new();
+        }
+        quad_shadow(
+            Vec2::ZERO,
+            self.size,
+            self.shadow,
+            self.alpha,
+            &self.props.transform,
+        )
     }
 
     /// 生成纹理顶点（6个顶点 = 2个三角形）

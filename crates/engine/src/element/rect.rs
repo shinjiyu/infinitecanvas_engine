@@ -1,4 +1,5 @@
 //! 矩形元素
+use super::shadow::soft_shadow_vertices;
 use super::stroke::{
     color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled, transform_vertices,
     StrokePaint,
@@ -124,6 +125,35 @@ impl Rectangle {
     /// 获取尺寸
     pub fn size(&self) -> Vec2 {
         self.size
+    }
+
+    /// 投影顶点。关闭时为空。轮廓跟圆角，放在填充之前。
+    ///
+    /// 不改变 [`Element::local_bounds`] 或命中测试。
+    pub(crate) fn shadow_vertices(&self) -> Vec<Vertex> {
+        soft_shadow_vertices(
+            &self.local_silhouette(),
+            self.style.shadow,
+            self.style.opacity,
+            &self.props.transform,
+        )
+    }
+
+    /// 局部空间的形状外轮廓。半径为 0 时是四个角，首尾闭合。
+    fn local_silhouette(&self) -> Vec<Vec2> {
+        let radius = self.effective_corner_radius();
+        if radius > 0.0 {
+            return self.rounded_outline(radius);
+        }
+        let half_w = self.size.x / 2.0;
+        let half_h = self.size.y / 2.0;
+        vec![
+            Vec2::new(-half_w, -half_h),
+            Vec2::new(half_w, -half_h),
+            Vec2::new(half_w, half_h),
+            Vec2::new(-half_w, half_h),
+            Vec2::new(-half_w, -half_h),
+        ]
     }
 
     /// 生成填充顶点（2个三角形 = 6个顶点）

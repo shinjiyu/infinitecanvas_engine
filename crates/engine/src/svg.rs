@@ -19,8 +19,8 @@
 //! 文本写成 `<text>` / `<tspan>`。锚点与 [`TextAlign`] 相同：左上、上边中点或右上角。
 
 use crate::element::{
-    Circle, ElementId, ElementStyle, Image, Line, Path, Polygon, Rectangle, StrokeCap, StrokeJoin,
-    Text, TextAlign,
+    Circle, DropShadow, ElementId, ElementStyle, Image, Line, Path, Polygon, Rectangle, StrokeCap,
+    StrokeJoin, Text, TextAlign,
 };
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
@@ -271,6 +271,7 @@ fn embedded_image(scene: &Scene, image: &Image) -> Option<String> {
         image.props.id,
         &image.props.transform,
         image.alpha,
+        &image.shadow,
         &body,
     ))
 }
@@ -413,6 +414,7 @@ fn write_rectangle(rect: &Rectangle) -> String {
         rect.props.id,
         &rect.props.transform,
         rect.style.opacity,
+        &rect.style.shadow,
         &shape,
     )
 }
@@ -434,6 +436,7 @@ fn write_circle(circle: &Circle) -> String {
         circle.props.id,
         &circle.props.transform,
         circle.style.opacity,
+        &circle.style.shadow,
         &shape,
     )
 }
@@ -459,6 +462,7 @@ fn write_polygon(polygon: &Polygon) -> String {
         polygon.props.id,
         &polygon.props.transform,
         polygon.style.opacity,
+        &polygon.style.shadow,
         &shape,
     )
 }
@@ -489,6 +493,7 @@ fn write_line(line: &Line) -> String {
         line.props.id,
         &line.props.transform,
         line.style.opacity,
+        &line.style.shadow,
         &body,
     )
 }
@@ -539,6 +544,7 @@ fn write_text(text: &Text) -> Option<String> {
         text.props.id,
         &text.props.transform,
         text.opacity,
+        &text.shadow,
         &body,
     ))
 }
@@ -554,11 +560,18 @@ fn write_path(path: &Path) -> Option<String> {
         path.props.id,
         &path.props.transform,
         path.style.opacity,
+        &path.style.shadow,
         &body,
     ))
 }
 
-fn wrap_group(id: u64, transform: &Transform, opacity: f32, body: &str) -> String {
+fn wrap_group(
+    id: u64,
+    transform: &Transform,
+    opacity: f32,
+    shadow: &DropShadow,
+    body: &str,
+) -> String {
     let mut group = format!("  <g id=\"e{id}\"");
     if let Some(matrix) = matrix_value(transform) {
         group.push_str(" transform=\"matrix(");
@@ -570,10 +583,38 @@ fn wrap_group(id: u64, transform: &Transform, opacity: f32, body: &str) -> Strin
         group.push_str(&value);
         group.push('"');
     }
+    if !shadow.is_off() {
+        group.push_str(&format!(" filter=\"url(#e{id}-shadow)\""));
+    }
     group.push_str(">\n");
+    if let Some(filter) = shadow_filter(id, transform, shadow) {
+        group.push_str(&filter);
+    }
     group.push_str(body);
     group.push_str("  </g>\n");
     group
+}
+
+/// SVG 的 `feDropShadow` 近似画布上的偏移羽化。`stdDeviation` 取模糊的一半。
+///
+/// 偏移先乘旋转和缩放，和顶点里的局部偏移一致。滤镜区域按对象包围盒放宽，
+/// 很大的偏移仍可能被 SVG 裁切；画布顶点不受这个范围限制。
+fn shadow_filter(id: u64, transform: &Transform, shadow: &DropShadow) -> Option<String> {
+    if shadow.is_off() {
+        return None;
+    }
+    let shadow = shadow.sanitized();
+    let offset = transform.transform_vector(shadow.offset);
+    let scale = transform.scale.x.abs().max(transform.scale.y.abs());
+    let deviation = shadow.blur * scale * 0.5;
+    Some(format!(
+        "    <filter id=\"e{id}-shadow\" filterUnits=\"objectBoundingBox\" x=\"-4\" y=\"-4\" width=\"9\" height=\"9\">\n      <feDropShadow dx=\"{}\" dy=\"{}\" stdDeviation=\"{}\" flood-color=\"{}\" flood-opacity=\"{}\"/>\n    </filter>\n",
+        fmt_num(offset.x),
+        fmt_num(offset.y),
+        fmt_num(deviation),
+        rgb_hex(shadow.color),
+        fmt_num(shadow.color.a),
+    ))
 }
 
 fn push_fill_stroke(

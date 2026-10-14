@@ -1,8 +1,12 @@
 //! 选中元素的样式读取和修改。
 //!
-//! 矩形、圆、直线、路径共用 [`ElementStyle`]。文本另外记录字号、文字颜色、
-//! 不透明度和可选描边。图片只参与不透明度（[`crate::element::Image::alpha`]），
+//! 矩形、圆、多边形、星形、直线、路径共用 [`ElementStyle`]。文本另外记录字号、文字颜色、
+//! 不透明度和可选描边。图片参与不透明度（[`crate::element::Image::alpha`]）和投影，
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
+//!
+//! 投影是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
+//! 吸管只写填充和描边。渐变、混合模式以后也可以加同样的可选字段；后合并的改动负责
+//! 同一符号上的冲突。
 //!
 //! ```text
 //! 选中 id ──► style_target_ids（组展开为子孙）
@@ -13,11 +17,12 @@
 //!                                      ├─ 文本字号 / 颜色 / 描边变化时丢掉光栅
 //!                                      ├─ 矩形圆角（其它元素忽略该字段）
 //!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
-//!                                      └─ 图片只改 alpha
+//!                                      ├─ 投影（形状、文本、图片；不丢文本光栅）
+//!                                      └─ 图片只改 alpha 和投影
 //! ```
 
 use crate::element::{
-    ElementId, ElementStyle, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin,
+    DropShadow, ElementId, ElementStyle, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin,
 };
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::Color;
@@ -46,6 +51,8 @@ pub struct TextPaint {
     pub stroke: Option<Color>,
     /// 世界单位描边宽度。0 表示不描边。
     pub stroke_width: f32,
+    /// 投影。文本不把它画进字形纹理。
+    pub shadow: DropShadow,
 }
 
 /// 一个元素上可撤销的样式快照。
@@ -74,8 +81,13 @@ pub enum StyleSnapshot {
     },
     /// 文本。
     Text(TextPaint),
-    /// 图片。只有不透明度，对应 [`crate::element::Image::alpha`]。
-    Image { alpha: f32 },
+    /// 图片。不透明度和投影。不改资源表。
+    Image {
+        /// [`crate::element::Image::alpha`]。
+        alpha: f32,
+        /// 显示矩形的投影。
+        shadow: DropShadow,
+    },
 }
 
 /// 一次样式修改。`None` 表示这个字段不动。
@@ -109,6 +121,16 @@ pub struct StylePatch {
     pub sides: Option<u32>,
     /// 星形内径比（相对外接圆）。只写到星形上，并钳到 0.05–0.95。正多边形忽略。
     pub inner_radius: Option<f32>,
+    /// 投影局部偏移 X。形状、文本和图片都写。
+    pub shadow_offset_x: Option<f32>,
+    /// 投影局部偏移 Y。
+    pub shadow_offset_y: Option<f32>,
+    /// 投影羽化半径。负数收成 0。
+    pub shadow_blur: Option<f32>,
+    /// 投影颜色的 RGB。不改 alpha，浓度走 [`Self::shadow_opacity`]。
+    pub shadow_color: Option<Color>,
+    /// 投影浓度，写入颜色 alpha，范围 0 到 1。0 表示不绘制。
+    pub shadow_opacity: Option<f32>,
 }
 
 /// 当前选择的公共样式。
@@ -142,6 +164,18 @@ pub struct SelectionStyle {
     pub has_polygon: bool,
     /// 选择里有星形。
     pub has_star: bool,
+    /// 投影偏移 X。没有可编辑叶子时为 [`StyleField::Absent`]。
+    pub shadow_offset_x: StyleField<f32>,
+    /// 投影偏移 Y。
+    pub shadow_offset_y: StyleField<f32>,
+    /// 投影羽化半径。
+    pub shadow_blur: StyleField<f32>,
+    /// 投影颜色的 RGB，alpha 固定为 1，浓度见 [`Self::shadow_opacity`]。
+    pub shadow_color: StyleField<Color>,
+    /// 投影浓度。
+    pub shadow_opacity: StyleField<f32>,
+    /// 选择里有形状、文本或图片，可以改投影。
+    pub shadow_supported: bool,
     /// 选择里有形状（含组内的形状）。
     pub has_shape: bool,
     /// 选择里有矩形（含组内的矩形）。圆角只对它们生效。
@@ -209,11 +243,13 @@ impl StyleSnapshot {
                 if let Some(width) = finite_width(patch.stroke_width) {
                     text.stroke_width = width;
                 }
+                apply_shadow(&mut text.shadow, patch);
             }
-            Self::Image { alpha } => {
+            Self::Image { alpha, shadow } => {
                 if let Some(opacity) = finite_opacity(patch.opacity) {
                     *alpha = opacity;
                 }
+                apply_shadow(shadow, patch);
             }
         }
         *self != original
@@ -283,8 +319,12 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             opacity: text.opacity,
             stroke: text.stroke,
             stroke_width: text.stroke_width,
+            shadow: text.shadow,
         })),
-        AnyElement::Image(image) => Some(StyleSnapshot::Image { alpha: image.alpha }),
+        AnyElement::Image(image) => Some(StyleSnapshot::Image {
+            alpha: image.alpha,
+            shadow: image.shadow,
+        }),
         AnyElement::Group(_) => None,
     }
 }
@@ -308,14 +348,17 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                     paint.stroke,
                     paint.stroke_width,
                 );
+                // 投影不进字形纹理，只标脏让填充通道重写包围盒阴影。
+                text.shadow = paint.shadow;
                 true
             } else {
                 false
             }
         }
         Some(AnyElement::Image(image)) => {
-            if let StyleSnapshot::Image { alpha } = snapshot {
+            if let StyleSnapshot::Image { alpha, shadow } = snapshot {
                 image.set_alpha(*alpha);
+                image.shadow = *shadow;
                 true
             } else {
                 false
@@ -342,6 +385,11 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut radii = Vec::new();
     let mut side_counts = Vec::new();
     let mut inner_radii = Vec::new();
+    let mut shadow_xs = Vec::new();
+    let mut shadow_ys = Vec::new();
+    let mut shadow_blurs = Vec::new();
+    let mut shadow_colors = Vec::new();
+    let mut shadow_opacities = Vec::new();
     let mut has_shape = false;
     let mut has_polygon = false;
     let mut has_star = false;
@@ -363,6 +411,14 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
+                push_shadow(
+                    &mut shadow_xs,
+                    &mut shadow_ys,
+                    &mut shadow_blurs,
+                    &mut shadow_colors,
+                    &mut shadow_opacities,
+                    style.shadow,
+                );
             }
             Some(StyleSnapshot::Rectangle {
                 style,
@@ -381,6 +437,14 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
                 radii.push(corner_radius);
+                push_shadow(
+                    &mut shadow_xs,
+                    &mut shadow_ys,
+                    &mut shadow_blurs,
+                    &mut shadow_colors,
+                    &mut shadow_opacities,
+                    style.shadow,
+                );
             }
             Some(StyleSnapshot::Polygon {
                 style,
@@ -406,6 +470,14 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 } else {
                     has_polygon = true;
                 }
+                push_shadow(
+                    &mut shadow_xs,
+                    &mut shadow_ys,
+                    &mut shadow_blurs,
+                    &mut shadow_colors,
+                    &mut shadow_opacities,
+                    style.shadow,
+                );
             }
             Some(StyleSnapshot::Text(text)) => {
                 has_text = true;
@@ -414,10 +486,26 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 opacities.push(text.opacity);
                 font_sizes.push(text.font_size);
                 text_colors.push(text.color);
+                push_shadow(
+                    &mut shadow_xs,
+                    &mut shadow_ys,
+                    &mut shadow_blurs,
+                    &mut shadow_colors,
+                    &mut shadow_opacities,
+                    text.shadow,
+                );
             }
-            Some(StyleSnapshot::Image { alpha }) => {
+            Some(StyleSnapshot::Image { alpha, shadow }) => {
                 has_image = true;
                 opacities.push(alpha);
+                push_shadow(
+                    &mut shadow_xs,
+                    &mut shadow_ys,
+                    &mut shadow_blurs,
+                    &mut shadow_colors,
+                    &mut shadow_opacities,
+                    shadow,
+                );
             }
             None => {}
         }
@@ -438,6 +526,12 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         inner_radius: fold(inner_radii),
         has_polygon,
         has_star,
+        shadow_offset_x: fold(shadow_xs),
+        shadow_offset_y: fold(shadow_ys),
+        shadow_blur: fold(shadow_blurs),
+        shadow_color: fold(shadow_colors),
+        shadow_opacity: fold(shadow_opacities),
+        shadow_supported: has_shape || has_text || has_image,
         has_shape,
         has_rect,
         has_text,
@@ -495,6 +589,43 @@ fn apply_shape_paint(style: &mut ElementStyle, patch: &StylePatch) {
     if let Some(join) = patch.stroke_join {
         style.stroke_join = join;
     }
+    apply_shadow(&mut style.shadow, patch);
+}
+
+fn apply_shadow(shadow: &mut DropShadow, patch: &StylePatch) {
+    if let Some(x) = patch.shadow_offset_x.filter(|value| value.is_finite()) {
+        shadow.offset.x = x;
+    }
+    if let Some(y) = patch.shadow_offset_y.filter(|value| value.is_finite()) {
+        shadow.offset.y = y;
+    }
+    if let Some(blur) = patch.shadow_blur.filter(|value| value.is_finite()) {
+        shadow.blur = blur.max(0.0);
+    }
+    if let Some(color) = patch.shadow_color {
+        let alpha = shadow.color.a;
+        shadow.color = Color::new(color.r, color.g, color.b, alpha);
+    }
+    if let Some(opacity) = patch.shadow_opacity.filter(|value| value.is_finite()) {
+        shadow.color.a = opacity.clamp(0.0, 1.0);
+    }
+    *shadow = shadow.sanitized();
+}
+
+fn push_shadow(
+    xs: &mut Vec<f32>,
+    ys: &mut Vec<f32>,
+    blurs: &mut Vec<f32>,
+    colors: &mut Vec<Color>,
+    opacities: &mut Vec<f32>,
+    shadow: DropShadow,
+) {
+    let shadow = shadow.sanitized();
+    xs.push(shadow.offset.x);
+    ys.push(shadow.offset.y);
+    blurs.push(shadow.blur);
+    colors.push(Color::rgb(shadow.color.r, shadow.color.g, shadow.color.b));
+    opacities.push(shadow.color.a);
 }
 
 fn assign_rectangle(rect: &mut Rectangle, snapshot: &StyleSnapshot) -> bool {
@@ -578,8 +709,12 @@ fn finite_font(value: Option<f32>) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::{Line, Path, Rectangle, StrokeCap, StrokeJoin, Text};
-    use crate::{Circle, Command, CommandHistory, SetStyleCommand, VertexCache};
+    use crate::element::{DropShadow, Image, Line, Path, Rectangle, StrokeCap, StrokeJoin, Text};
+    use crate::Element;
+    use crate::{
+        hit_test_point, sample_paint_at, Circle, Command, CommandHistory, HitTestOptions,
+        SampledPaint, SetStyleCommand, VertexCache,
+    };
     use infinitecanvas_math::Vec2;
 
     fn shape_fill(scene: &Scene, id: ElementId) -> Option<Color> {
@@ -1064,5 +1199,169 @@ mod tests {
         }
         let together = selection_style(&scene, &[1, 2]);
         assert_eq!(together.corner_radius, StyleField::Mixed);
+    }
+
+    #[test]
+    fn drop_shadow_is_one_style_patch_and_stays_out_of_hit_testing() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(40.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let before = match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => rect.world_bounds(),
+            other => panic!("rect, got {other:?}"),
+        };
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[],
+            &StylePatch {
+                shadow_offset_x: Some(8.0),
+                shadow_opacity: Some(0.4),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[1],
+            &StylePatch {
+                shadow_blur: Some(0.0),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let patch = StylePatch {
+            shadow_offset_x: Some(8.0),
+            shadow_offset_y: Some(6.0),
+            shadow_blur: Some(12.0),
+            shadow_color: Some(Color::rgb(0.2, 0.0, 0.0)),
+            shadow_opacity: Some(0.4),
+            ..StylePatch::default()
+        };
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1], &patch).unwrap()),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert!(scene.has_dirty_elements());
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style.shadow.offset, Vec2::new(8.0, 6.0));
+                assert_eq!(rect.style.shadow.blur, 12.0);
+                assert!((rect.style.shadow.color.r - 0.2).abs() < 1.0e-5);
+                assert!((rect.style.shadow.color.a - 0.4).abs() < 1.0e-5);
+                assert_eq!(rect.world_bounds(), before);
+                assert!(rect.contains_point(Vec2::ZERO));
+                assert!(!rect.contains_point(Vec2::new(8.0, 6.0)));
+                let fill = rect.generate_fill_vertices();
+                let shadow = rect.shadow_vertices();
+                assert!(!shadow.is_empty());
+                assert!(shadow.len() > fill.len());
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        assert!(hit_test_point(&scene, Vec2::new(8.0, 6.0), &HitTestOptions::default()).is_empty());
+        assert!(sample_paint_at(&scene, Vec2::new(8.0, 6.0)).is_none());
+
+        let summary = selection_style(&scene, &[1, 2]);
+        assert_eq!(summary.shadow_offset_x, StyleField::Mixed);
+        assert_eq!(summary.shadow_blur, StyleField::Mixed);
+        assert!(summary.shadow_supported);
+
+        let mut cache = VertexCache::new();
+        let synced = cache.sync(&mut scene);
+        assert!(synced.regenerated >= 1);
+        let painted = cache.fill_slice(1).unwrap();
+        assert!(painted[0].color[3] < 0.5);
+        assert!(painted.iter().any(|vertex| vertex.color[3] > 0.9));
+        assert!(cache.sync(&mut scene).geometry_unchanged);
+
+        let stored = match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => serde_json::to_value(rect).unwrap(),
+            other => panic!("rect, got {other:?}"),
+        };
+        assert!(stored["style"]["shadow"].is_object());
+        let restored: Rectangle = serde_json::from_value(stored).unwrap();
+        assert_eq!(restored.style.shadow.blur, 12.0);
+        let legacy = serde_json::json!({
+            "props": { "id": 9 },
+            "size": serde_json::to_value(Vec2::new(10.0, 10.0)).unwrap(),
+        });
+        let old: Rectangle = serde_json::from_value(legacy).unwrap();
+        assert!(old.style.shadow.is_unset());
+        assert!(serde_json::to_value(&old).unwrap().get("shadow").is_none());
+
+        let sample = SampledPaint {
+            id: 2,
+            fill: Some(Color::BLUE),
+            stroke: None,
+        };
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1], &sample.to_style_patch()).unwrap()),
+            &mut scene,
+        );
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style.fill, Some(Color::BLUE));
+                assert_eq!(rect.style.shadow.offset, Vec2::new(8.0, 6.0));
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+
+        assert!(history.undo(&mut scene));
+        assert!(history.undo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => assert!(rect.style.shadow.is_off()),
+            other => panic!("rect, got {other:?}"),
+        }
+
+        let mut text = Text::new(3, Vec2::new(0.0, 30.0), "Hi");
+        text.texture_id = Some("glyph".to_string());
+        text.raster_revision = text.revision;
+        scene.add_text(text);
+        scene.add_image(Image::new(
+            4,
+            Vec2::new(80.0, 0.0),
+            Vec2::new(12.0, 12.0),
+            "photo".to_string(),
+        ));
+        let mut text_cmd = SetStyleCommand::from_patch(
+            &scene,
+            &[3, 4],
+            &StylePatch {
+                shadow_offset_x: Some(4.0),
+                shadow_opacity: Some(0.5),
+                ..StylePatch::default()
+            },
+        )
+        .unwrap();
+        text_cmd.execute(&mut scene);
+        match scene.get(3).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.texture_id.as_deref(), Some("glyph"));
+                assert!(!text.shadow.is_off());
+                assert!(!text.shadow_vertices().is_empty());
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        match scene.get(4).unwrap() {
+            AnyElement::Image(image) => assert!(!image.shadow_vertices().is_empty()),
+            other => panic!("image, got {other:?}"),
+        }
+        let mixed = selection_style(&scene, &[3, 4]);
+        assert_eq!(mixed.shadow_offset_x, StyleField::Uniform(4.0));
+        assert!(mixed.shadow_supported);
+
+        let group_id = scene.group(&[1, 2]).unwrap();
+        assert!(scene.set_visible(group_id, false));
+        let mut hidden = VertexCache::new();
+        let _ = hidden.sync(&mut scene);
+        assert!(hidden.fill_slice(1).is_none_or(|slice| slice.is_empty()));
+        let _ = DropShadow::default();
     }
 }
