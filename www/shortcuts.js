@@ -36,6 +36,7 @@
  * @property {string} [helpGroup] 合并到同一行帮助的组名。缺省用 `id`
  * @property {boolean} [help] 为 false 时不单独成行，但仍可并进 `helpGroup` 的键帽
  * @property {boolean} [allowRepeat] 按住不放时是否重复触发。默认允许
+ * @property {boolean} [stealsBrowserZoom] 为 true 时会挡住浏览器缩放。只在画布/舞台聚焦时执行，并且只在那时 preventDefault
  */
 
 /**
@@ -63,6 +64,7 @@ export const TOOL_LABELS = {
  * Shift+Alt+R 逆时针转 90°。不带 Shift 的 H / V / R 仍是平移、选择、矩形。
  * Shift+1 缩放到适合，Shift+2 缩放到选中，Shift+0 为 100%。数字键用 `code`，避开 Shift 改写 `key`。
  * Ctrl/Cmd+L 切换锁定，Ctrl/Cmd+Shift+H 切换隐藏。不带修饰键的 L / H 仍是直线和平移。
+ * Ctrl/Cmd+= 或 Ctrl/Cmd++ 放大，Ctrl/Cmd+- 缩小，Ctrl/Cmd+0 回到 100%。倍数来自引擎的 `zoom_step`。
  *
  * @type {Shortcut[]}
  */
@@ -503,6 +505,43 @@ export const SHORTCUTS = [
     keys: ['Escape', 'Esc'],
   },
   {
+    id: 'zoom-in',
+    action: '放大',
+    tool: 'canvas',
+    handler: 'zoomIn',
+    label: '+',
+    keys: ['+', '='],
+    code: 'Equal',
+    ctrl: true,
+    stealsBrowserZoom: true,
+  },
+  {
+    id: 'zoom-in-eq',
+    action: '放大',
+    tool: 'canvas',
+    handler: 'zoomIn',
+    label: '=',
+    keys: ['='],
+    code: 'Equal',
+    ctrl: true,
+    shift: false,
+    help: false,
+    helpGroup: 'zoom-in',
+    stealsBrowserZoom: true,
+  },
+  {
+    id: 'zoom-out',
+    action: '缩小',
+    tool: 'canvas',
+    handler: 'zoomOut',
+    label: '-',
+    keys: ['-'],
+    code: 'Minus',
+    ctrl: true,
+    shift: false,
+    stealsBrowserZoom: true,
+  },
+  {
     id: 'zoom-fit',
     action: '缩放到适合',
     tool: 'canvas',
@@ -531,6 +570,19 @@ export const SHORTCUTS = [
     keys: ['0', ')'],
     code: 'Digit0',
     shift: true,
+  },
+  {
+    id: 'zoom-reset',
+    action: '缩放到 100%',
+    tool: 'canvas',
+    handler: 'zoom100',
+    label: '0',
+    keys: ['0'],
+    code: 'Digit0',
+    ctrl: true,
+    shift: false,
+    helpGroup: 'zoom-100',
+    stealsBrowserZoom: true,
   },
   {
     id: 'save',
@@ -587,6 +639,68 @@ export const SHORTCUTS = [
  */
 export function prefersMacModifier(platform = defaultPlatform()) {
   return /mac|iphone|ipad|ipod/i.test(platform);
+}
+
+/**
+ * 把引擎缩放倍数格式化成页脚上的百分比。
+ *
+ * 与 `get_zoom()` 对齐，四舍五入到最接近的整数。`1` 显示为 `100%`。
+ * 滚轮和键盘改的是同一个相机，所以页脚每一帧读一次就能两边都跟上。
+ *
+ * @param {number} zoom 视口缩放倍数
+ * @returns {string} 例如 `100%`、`110%`
+ *
+ * @example
+ * ```js
+ * formatZoomPercent(1);
+ * ```
+ */
+export function formatZoomPercent(zoom) {
+  if (typeof zoom !== 'number' || !Number.isFinite(zoom)) return '100%';
+  return `${Math.round(zoom * 100)}%`;
+}
+
+/**
+ * 焦点是否在画布舞台上，或还没有落到具体控件。
+ *
+ * 画布通常不可聚焦，点在画布上时焦点落在 `body`。
+ * 按钮、输入框、下拉框和图层面板返回 false，键盘缩放不会抢走浏览器缩放。
+ *
+ * @param {EventTarget | null | undefined} target 事件目标
+ * @returns {boolean} 可以接管 Ctrl/Cmd 缩放时为 true
+ *
+ * @example
+ * ```js
+ * isCanvasStageFocus({ tagName: 'CANVAS', id: 'canvas' });
+ * ```
+ */
+export function isCanvasStageFocus(target) {
+  if (!target || typeof target !== 'object') return false;
+  const tag = typeof target.tagName === 'string' ? target.tagName.toUpperCase() : '';
+  if (tag === 'BODY' || tag === 'HTML') return true;
+  const id = typeof target.id === 'string' ? target.id : '';
+  return id === 'stage' || id === 'canvas' || id === 'guides';
+}
+
+/**
+ * 这次快捷键是否应该执行。
+ *
+ * 会挡住浏览器缩放的和弦只在 [`isCanvasStageFocus`] 为 true 时执行。
+ * 输入框里一律不执行。其他快捷键只避开可编辑控件。
+ *
+ * @param {Shortcut | null | undefined} shortcut 命中的快捷键
+ * @param {EventTarget | null | undefined} target 事件目标
+ * @returns {boolean} 应该执行并允许 preventDefault 时为 true
+ *
+ * @example
+ * ```js
+ * shouldApplyShortcut(SHORTCUTS.find((item) => item.id === 'zoom-in'), { tagName: 'BODY' });
+ * ```
+ */
+export function shouldApplyShortcut(shortcut, target) {
+  if (!shortcut || isEditableTarget(target)) return false;
+  if (shortcut.stealsBrowserZoom) return isCanvasStageFocus(target);
+  return true;
 }
 
 /**

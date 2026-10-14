@@ -4,6 +4,14 @@
 use infinitecanvas_math::{Rect, Transform, Vec2};
 use serde::{Deserialize, Serialize};
 
+/// 滚轮和键盘每一步共用的缩放倍数。
+///
+/// 大于 1 表示放大。Demo 滚轮把指针交给 [`Viewport::zoom_at`]；
+/// 键盘把这个倍数交给 [`Viewport::zoom_by`]，锚点是视口中心。
+/// 两条路径都限制在 [`Viewport::min_zoom`] 与 [`Viewport::max_zoom`] 之间，
+/// 和 [`crate::camera_fit`] 的适应结果是同一组上下限。
+pub const ZOOM_STEP: f32 = 1.1;
+
 /// 视口管理器
 ///
 /// # 职责
@@ -86,7 +94,7 @@ impl Viewport {
     ///
     /// # 参数
     /// - `anchor`: 缩放中心点（屏幕空间）
-    /// - `delta_zoom`: 缩放增量（例如 1.1 放大 10%）
+    /// - `delta_zoom`: 缩放增量。滚轮和键盘一步使用 [`ZOOM_STEP`]
     pub fn zoom_at(&mut self, anchor: Vec2, delta_zoom: f32) {
         let old_zoom = self.zoom;
         self.zoom = (self.zoom * delta_zoom).clamp(self.min_zoom, self.max_zoom);
@@ -104,6 +112,33 @@ impl Viewport {
 
         // 调整视口中心，使锚点在世界空间中的位置保持不变
         self.center += world_anchor_before - world_anchor_after;
+    }
+
+    /// 绕视口中心按倍数缩放。
+    ///
+    /// 锚点是画布中心，所以相机中心保持不变。实际相乘和钳制交给 [`Self::zoom_at`]，
+    /// 因此与滚轮、[`crate::camera_fit`] 共用最小/最大缩放。
+    /// 非有限值或非正倍数会被忽略。
+    ///
+    /// # 参数
+    /// - `factor`: 相对当前缩放的倍数。键盘放大传入 [`ZOOM_STEP`]，缩小传入它的倒数
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Viewport, ZOOM_STEP};
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let mut viewport = Viewport::new(Vec2::new(800.0, 600.0));
+    /// viewport.move_to(Vec2::new(40.0, -15.0));
+    /// viewport.zoom_by(ZOOM_STEP);
+    /// assert!((viewport.zoom() - ZOOM_STEP).abs() < 1e-5);
+    /// assert_eq!(viewport.center(), Vec2::new(40.0, -15.0));
+    /// ```
+    pub fn zoom_by(&mut self, factor: f32) {
+        if !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        self.zoom_at(self.canvas_size / 2.0, factor);
     }
 
     /// 设置缩放
@@ -298,6 +333,52 @@ mod tests {
         viewport.fit_rect(Rect::new(10.0, 20.0, 1.0, 1.0), 0.0);
         assert!((viewport.zoom() - 10.0).abs() < 1e-4);
         assert_eq!(viewport.center(), Vec2::new(10.5, 20.5));
+    }
+
+    #[test]
+    fn zoom_by_matches_wheel_zoom_at_center_and_keeps_the_center() {
+        let mut stepped = Viewport::new(Vec2::new(800.0, 600.0));
+        let mut wheeled = Viewport::new(Vec2::new(800.0, 600.0));
+        let center = Vec2::new(40.0, -15.0);
+        stepped.move_to(center);
+        wheeled.move_to(center);
+        let anchor = stepped.canvas_size() / 2.0;
+
+        stepped.zoom_by(ZOOM_STEP);
+        wheeled.zoom_at(anchor, ZOOM_STEP);
+        assert!((stepped.zoom() - wheeled.zoom()).abs() < 1e-5);
+        assert!((stepped.zoom() - ZOOM_STEP).abs() < 1e-5);
+        assert_eq!(stepped.center(), center);
+        assert_eq!(wheeled.center(), center);
+
+        stepped.zoom_by(1.0 / ZOOM_STEP);
+        assert!((stepped.zoom() - 1.0).abs() < 1e-4);
+        assert_eq!(stepped.center(), center);
+        stepped.set_zoom(1.0);
+        assert!((stepped.zoom() - 1.0).abs() < 1e-5);
+        assert_eq!(stepped.center(), center);
+
+        for _ in 0..40 {
+            stepped.zoom_by(ZOOM_STEP);
+            wheeled.zoom_at(anchor, ZOOM_STEP);
+        }
+        assert!((stepped.zoom() - stepped.max_zoom()).abs() < 1e-4);
+        assert!((wheeled.zoom() - wheeled.max_zoom()).abs() < 1e-4);
+        assert_eq!(stepped.center(), center);
+
+        for _ in 0..80 {
+            stepped.zoom_by(1.0 / ZOOM_STEP);
+        }
+        assert!((stepped.zoom() - stepped.min_zoom()).abs() < 1e-4);
+        assert_eq!(stepped.center(), center);
+
+        let zoom = stepped.zoom();
+        stepped.zoom_by(f32::NAN);
+        stepped.zoom_by(f32::INFINITY);
+        stepped.zoom_by(0.0);
+        stepped.zoom_by(-ZOOM_STEP);
+        assert_eq!(stepped.zoom(), zoom);
+        assert_eq!(stepped.center(), center);
     }
 
     #[test]

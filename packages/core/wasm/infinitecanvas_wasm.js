@@ -1858,6 +1858,37 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_zoom_at(this.__wbg_ptr, anchor_x, anchor_y, delta_zoom);
     }
     /**
+     * 绕视口中心按倍数缩放。
+     *
+     * 与 [`Self::zoom_at`] 同一条钳制路径，上下限是视口的最小/最大缩放，
+     * 也是 [`infinitecanvas_engine::camera_for_bounds`] 使用的那一组。
+     * 锚点是画布中心，相机中心不动。非有限或非正倍数会被忽略。
+     * 键盘放大传入 [`Self::zoom_step`]，缩小传入它的倒数。
+     *
+     * # 参数
+     * - `factor`: 相对倍数
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.zoom_by(canvas.zoom_step());
+     * ```
+     * @param {number} factor
+     */
+    zoom_by(factor) {
+        wasm.infinitecanvas_zoom_by(this.__wbg_ptr, factor);
+    }
+    /**
+     * 滚轮和键盘共用的一步缩放倍数。
+     *
+     * 大于 1 表示放大。Demo 滚轮把指针交给 [`Self::zoom_at`]，
+     * 键盘把返回值交给 [`Self::zoom_by`]。
+     * @returns {number}
+     */
+    zoom_step() {
+        const ret = wasm.infinitecanvas_zoom_step(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 把相机对准全部可见叶子，使整张场景落在视口内并留出 10% 边距。
      *
      * 包围盒与 [`Self::scene_bounds`] 相同。不改元素几何，也不写入撤销栈。

@@ -103,7 +103,7 @@ pub use vertex_cache::{
     rebuild_all_vertices, GpuVertexWrite, RebuiltGeometry, TexturedDraw, VertexBufferKind,
     VertexCache, VertexSync,
 };
-pub use viewport::Viewport;
+pub use viewport::{Viewport, ZOOM_STEP};
 
 /// 渲染器，负责渲染循环控制
 ///

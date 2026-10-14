@@ -1087,6 +1087,30 @@ export class InfiniteCanvas {
      */
     zoom_at(anchor_x: number, anchor_y: number, delta_zoom: number): void;
     /**
+     * 绕视口中心按倍数缩放。
+     *
+     * 与 [`Self::zoom_at`] 同一条钳制路径，上下限是视口的最小/最大缩放，
+     * 也是 [`infinitecanvas_engine::camera_for_bounds`] 使用的那一组。
+     * 锚点是画布中心，相机中心不动。非有限或非正倍数会被忽略。
+     * 键盘放大传入 [`Self::zoom_step`]，缩小传入它的倒数。
+     *
+     * # 参数
+     * - `factor`: 相对倍数
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.zoom_by(canvas.zoom_step());
+     * ```
+     */
+    zoom_by(factor: number): void;
+    /**
+     * 滚轮和键盘共用的一步缩放倍数。
+     *
+     * 大于 1 表示放大。Demo 滚轮把指针交给 [`Self::zoom_at`]，
+     * 键盘把返回值交给 [`Self::zoom_by`]。
+     */
+    zoom_step(): number;
+    /**
      * 把相机对准全部可见叶子，使整张场景落在视口内并留出 10% 边距。
      *
      * 包围盒与 [`Self::scene_bounds`] 相同。不改元素几何，也不写入撤销栈。
@@ -1244,6 +1268,8 @@ export interface InitOutput {
     readonly infinitecanvas_ungroup: (a: number, b: bigint) => number;
     readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
+    readonly infinitecanvas_zoom_by: (a: number, b: number) => void;
+    readonly infinitecanvas_zoom_step: (a: number) => number;
     readonly infinitecanvas_zoom_to_fit: (a: number) => number;
     readonly infinitecanvas_zoom_to_selection: (a: number) => number;
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;

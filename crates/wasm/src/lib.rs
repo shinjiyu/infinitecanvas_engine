@@ -56,7 +56,7 @@ use infinitecanvas_engine::{
     Rectangle, RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand, Scene,
     SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign,
     TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
-    UpdateTextCommand, Viewport,
+    UpdateTextCommand, Viewport, ZOOM_STEP,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -2593,6 +2593,34 @@ impl InfiniteCanvas {
         );
     }
 
+    /// 绕视口中心按倍数缩放。
+    ///
+    /// 与 [`Self::zoom_at`] 同一条钳制路径，上下限是视口的最小/最大缩放，
+    /// 也是 [`infinitecanvas_engine::camera_for_bounds`] 使用的那一组。
+    /// 锚点是画布中心，相机中心不动。非有限或非正倍数会被忽略。
+    /// 键盘放大传入 [`Self::zoom_step`]，缩小传入它的倒数。
+    ///
+    /// # 参数
+    /// - `factor`: 相对倍数
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.zoom_by(canvas.zoom_step());
+    /// ```
+    #[wasm_bindgen]
+    pub fn zoom_by(&mut self, factor: f32) {
+        self.viewport.zoom_by(factor);
+    }
+
+    /// 滚轮和键盘共用的一步缩放倍数。
+    ///
+    /// 大于 1 表示放大。Demo 滚轮把指针交给 [`Self::zoom_at`]，
+    /// 键盘把返回值交给 [`Self::zoom_by`]。
+    #[wasm_bindgen]
+    pub fn zoom_step(&self) -> f32 {
+        ZOOM_STEP
+    }
+
     /// 获取视口缩放
     #[wasm_bindgen]
     pub fn get_zoom(&self) -> f32 {
@@ -4832,6 +4860,55 @@ mod tests {
         assert!(canvas.selection.is_selected(text_id));
         assert!(canvas.selection.is_selected(left));
         assert!(!canvas.selection.is_selected(right));
+    }
+
+    /// 键盘步进绕中心缩放，倍数和上下限与滚轮的 `zoom_at`、视口 min/max 相同。
+    /// 回到 100% 用 `set_zoom(1)`，中心不动，也不进撤销栈。
+    #[test]
+    fn keyboard_zoom_uses_the_wheel_step_and_viewport_limits() {
+        let mut canvas = blank_canvas();
+        canvas.viewport.resize(Vec2::new(800.0, 600.0));
+        canvas.set_camera_center(30.0, -10.0);
+        let step = canvas.zoom_step();
+        assert!((step - ZOOM_STEP).abs() < 1e-6);
+
+        let mut wheeled = blank_canvas();
+        wheeled.viewport.resize(Vec2::new(800.0, 600.0));
+        wheeled.set_camera_center(30.0, -10.0);
+        wheeled.zoom_at(400.0, 300.0, wheeled.zoom_step());
+
+        let undo = canvas.get_undo_count();
+        canvas.zoom_by(step);
+        assert!((canvas.get_zoom() - wheeled.get_zoom()).abs() < 1e-5);
+        assert!((canvas.get_zoom() - step).abs() < 1e-5);
+        assert_eq!(canvas.get_viewport_center_x(), 30.0);
+        assert_eq!(canvas.get_viewport_center_y(), -10.0);
+
+        canvas.zoom_by(1.0 / step);
+        assert!((canvas.get_zoom() - 1.0).abs() < 1e-4);
+        assert_eq!(canvas.get_viewport_center_x(), 30.0);
+
+        canvas.set_zoom(1.0);
+        assert!((canvas.get_zoom() - 1.0).abs() < 1e-5);
+        assert_eq!(canvas.get_viewport_center_x(), 30.0);
+        assert_eq!(canvas.get_viewport_center_y(), -10.0);
+
+        let max_zoom = canvas.viewport.max_zoom();
+        let min_zoom = canvas.viewport.min_zoom();
+        canvas.zoom_by(1.0e6);
+        assert!((canvas.get_zoom() - max_zoom).abs() < 1e-4);
+        canvas.zoom_by(1.0e-6);
+        assert!((canvas.get_zoom() - min_zoom).abs() < 1e-4);
+        assert_eq!(canvas.get_viewport_center_x(), 30.0);
+        assert_eq!(canvas.get_viewport_center_y(), -10.0);
+
+        canvas.set_zoom(1.0);
+        canvas.zoom_by(f32::NAN);
+        canvas.zoom_by(0.0);
+        canvas.set_zoom(f32::NAN);
+        assert!((canvas.get_zoom() - 1.0).abs() < 1e-5);
+        assert_eq!(canvas.get_viewport_center_x(), 30.0);
+        assert_eq!(canvas.get_undo_count(), undo);
     }
 
     /// 缩放到选中 / 适应全部只改相机。空选不动，空场景回到默认相机。

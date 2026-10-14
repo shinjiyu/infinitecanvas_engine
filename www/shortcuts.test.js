@@ -11,10 +11,13 @@ import {
   SHORTCUTS,
   escapeAction,
   formatChord,
+  formatZoomPercent,
   helpEntries,
+  isCanvasStageFocus,
   isEditableTarget,
   matchShortcut,
   prefersMacModifier,
+  shouldApplyShortcut,
 } from './shortcuts.js';
 
 /**
@@ -123,6 +126,28 @@ test('delete, select all, escape, zoom, and help', () => {
   assert.equal(assertHandler('zoomSelection', { key: '2', code: 'Digit2', shiftKey: true }).id, 'zoom-selection');
   assert.equal(assertHandler('zoom100', { key: ')', code: 'Digit0', shiftKey: true }).id, 'zoom-100');
   assert.equal(assertHandler('zoom100', { code: 'Digit0', shiftKey: true }).id, 'zoom-100');
+  assert.equal(assertHandler('zoomIn', { key: '=', code: 'Equal', ctrlKey: true }).handler, 'zoomIn');
+  assert.equal(assertHandler('zoomIn', { key: '+', code: 'Equal', ctrlKey: true, shiftKey: true }).id, 'zoom-in');
+  assert.equal(assertHandler('zoomIn', { key: '+', code: 'NumpadAdd', metaKey: true }).id, 'zoom-in');
+  assert.equal(assertHandler('zoomOut', { key: '-', code: 'Minus', ctrlKey: true }).id, 'zoom-out');
+  assert.equal(assertHandler('zoomOut', { key: '-', code: 'NumpadSubtract', metaKey: true }).id, 'zoom-out');
+  assert.equal(assertHandler('zoom100', { key: '0', code: 'Digit0', ctrlKey: true }).id, 'zoom-reset');
+  assert.equal(assertHandler('zoom100', { key: '0', code: 'Numpad0', metaKey: true }).id, 'zoom-reset');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: '=', code: 'Equal' }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: '-', code: 'Minus' }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: '0', code: 'Digit0' }), 'down'), null);
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: '_', code: 'Minus', ctrlKey: true, shiftKey: true }), 'down'),
+    null,
+  );
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: '=', code: 'Equal', ctrlKey: true, altKey: true }), 'down'),
+    null,
+  );
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: ')', code: 'Digit0', ctrlKey: true, shiftKey: true }), 'down'),
+    null,
+  );
   assert.equal(
     matchShortcut(SHORTCUTS, keyEvent({ key: '@', code: 'Digit2', shiftKey: true }), 'down')?.handler,
     'zoomSelection',
@@ -278,6 +303,12 @@ test('help rows are generated from the table and show both chords', () => {
   assert.equal(mac.find((row) => row.id === 'zoom-selection')?.chords[0], '⇧2');
   assert.equal(other.find((row) => row.id === 'zoom-selection')?.action, '缩放到选中');
   assert.equal(mac.find((row) => row.id === 'zoom-100')?.chords[0], '⇧0');
+  assert.deepEqual(other.find((row) => row.id === 'zoom-in')?.chords, ['Ctrl++', 'Ctrl+=']);
+  assert.deepEqual(mac.find((row) => row.id === 'zoom-in')?.chords, ['⌘+', '⌘=']);
+  assert.equal(other.find((row) => row.id === 'zoom-out')?.chords[0], 'Ctrl+-');
+  assert.equal(mac.find((row) => row.id === 'zoom-out')?.chords[0], '⌘-');
+  assert.deepEqual(other.find((row) => row.id === 'zoom-100')?.chords, ['Shift+0', 'Ctrl+0']);
+  assert.deepEqual(mac.find((row) => row.id === 'zoom-100')?.chords, ['⇧0', '⌘0']);
   assert.equal(other.find((row) => row.id === 'undo')?.chords[0], 'Ctrl+Z');
   assert.equal(mac.find((row) => row.id === 'select-all')?.chords[0], '⌘A');
   assert.equal(other.find((row) => row.id === 'rulers')?.chords[0], 'G');
@@ -346,6 +377,48 @@ test('formatChord and platform detection', () => {
 test('escape closes help before clearing the selection', () => {
   assert.equal(escapeAction(true), 'closeHelp');
   assert.equal(escapeAction(false), 'clearSelection');
+});
+
+test('keyboard zoom percent matches the camera scale, and only the stage steals browser zoom', () => {
+  assert.equal(formatZoomPercent(1), '100%');
+  assert.equal(formatZoomPercent(1.1), '110%');
+  assert.equal(formatZoomPercent(0.1), '10%');
+  assert.equal(formatZoomPercent(10), '1000%');
+  assert.equal(formatZoomPercent(Number.NaN), '100%');
+
+  const zoomIn = SHORTCUTS.find((shortcut) => shortcut.id === 'zoom-in');
+  const zoomReset = SHORTCUTS.find((shortcut) => shortcut.id === 'zoom-reset');
+  const shift100 = SHORTCUTS.find((shortcut) => shortcut.id === 'zoom-100');
+  const undo = SHORTCUTS.find((shortcut) => shortcut.id === 'undo');
+  assert.ok(zoomIn && zoomReset && shift100 && undo);
+  assert.equal(zoomIn.stealsBrowserZoom, true);
+  assert.equal(zoomReset.stealsBrowserZoom, true);
+  assert.equal(shift100.stealsBrowserZoom, undefined);
+
+  const body = { tagName: 'BODY' };
+  const canvas = { tagName: 'CANVAS', id: 'canvas' };
+  const stage = { tagName: 'DIV', id: 'stage' };
+  const button = { tagName: 'BUTTON', id: 'undo-btn' };
+  const input = { tagName: 'INPUT', id: 'prop-font-size' };
+  const text = { tagName: 'TEXTAREA', id: 'text-editor' };
+  const layers = { tagName: 'DIV', id: 'layer-list' };
+
+  assert.equal(isCanvasStageFocus(body), true);
+  assert.equal(isCanvasStageFocus(canvas), true);
+  assert.equal(isCanvasStageFocus(stage), true);
+  assert.equal(isCanvasStageFocus(button), false);
+  assert.equal(isCanvasStageFocus(layers), false);
+  assert.equal(shouldApplyShortcut(zoomIn, body), true);
+  assert.equal(shouldApplyShortcut(zoomIn, canvas), true);
+  assert.equal(shouldApplyShortcut(zoomReset, stage), true);
+  assert.equal(shouldApplyShortcut(zoomIn, button), false);
+  assert.equal(shouldApplyShortcut(zoomIn, input), false);
+  assert.equal(shouldApplyShortcut(zoomIn, text), false);
+  assert.equal(shouldApplyShortcut(zoomIn, layers), false);
+  assert.equal(shouldApplyShortcut(undo, button), true);
+  assert.equal(shouldApplyShortcut(undo, input), false);
+  assert.equal(shouldApplyShortcut(shift100, button), true);
+  assert.equal(shouldApplyShortcut(null, body), false);
 });
 
 test('editable focus covers input, textarea, and contenteditable', () => {
@@ -428,4 +501,11 @@ test('the page dispatches every handler declared by the table', () => {
   for (const handler of handlers) {
     assert.match(main, new RegExp(`['"]${handler}['"]`), handler);
   }
+  assert.match(main, /zoom_by\(engine\.zoom_step\(\)\)/);
+  assert.match(main, /zoom_by\(1 \/ engine\.zoom_step\(\)\)/);
+  assert.match(main, /const step = engine\.zoom_step\(\)/);
+  assert.match(main, /engine\.zoom_at\(point\.x, point\.y, factor\)/);
+  assert.match(main, /formatZoomPercent\(engine\.get_zoom\(\)\)/);
+  assert.match(main, /shouldApplyShortcut\(shortcut, event\.target\)/);
+  assert.doesNotMatch(main, /deltaY < 0 \? 1\.1/);
 });

@@ -2,6 +2,27 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #61: 键盘缩放
+
+- [x] `ZOOM_STEP`（1.1）是滚轮和键盘共用的一步。`zoom_by` 绕视口中心调用 `zoom_at`，上下限仍是视口 0.1×–10×
+- [x] `Ctrl/Cmd+=` 或 `++` 放大，`Ctrl/Cmd+-` 缩小，`Ctrl/Cmd+0` 与 `Shift+0` 一样 `set_zoom(1)`，中心不动
+- [x] 和弦在 `SHORTCUTS` 里，经 `dispatchShortcut` 进 WASM。`?` 面板列出放大、缩小，以及 100% 的两套键
+- [x] 页脚把 `get_zoom()` 显示成百分比，键盘和滚轮每帧都会刷新
+- [x] 输入框不触发。会挡住浏览器缩放的三组键只在画布 / 舞台 / `body` 上 `preventDefault`
+
+```text
+Ctrl/Cmd+=  Ctrl/Cmd+-  Ctrl/Cmd+0
+        │
+        ▼
+shouldApplyShortcut（画布 / 舞台 / body；输入框和按钮不接管）
+        │
+        ▼
+zoom_by(zoom_step) / set_zoom(1) ──► zoom_at 钳制到 min_zoom..max_zoom
+        │
+        ▼
+页脚 formatZoomPercent(get_zoom())
+```
+
 ## Issue #56: 标尺与手动参考线
 
 - [x] 顶边 / 左边标尺，刻度随平移和缩放更新（世界单位，1/2/5 步长）

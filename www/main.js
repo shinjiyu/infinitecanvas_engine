@@ -11,7 +11,10 @@
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
- * Shift+1 适应全部，Shift+2 缩放到选中。两条都在 `SHORTCUTS` 里，只改相机，不进撤销栈。
+ * Ctrl+L 切换锁定，Ctrl+Shift+H 切换隐藏，和图层面板的锁、眼睛同一条命令。
+ * Shift+1 适应全部，Shift+2 缩放到选中。Ctrl+= / Ctrl++ 放大，Ctrl+- 缩小，Ctrl+0 回到 100%。
+ * 步进倍数来自 `zoom_step`，和滚轮相同；键盘绕视口中心，滚轮绕指针。只改相机，不进撤销栈。
+ * 页脚显示缩放百分比。焦点在输入框、下拉框或按钮上时，Ctrl/Cmd 缩放留给浏览器。
  * 右键空白处可粘贴、全选、缩放到适合；右键元素可复制、粘贴、克隆、删除、成组和调整层级。菜单项调用 `dispatchShortcut`。菜单里的删除只删元素。
  * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
@@ -45,10 +48,12 @@ import {
   SHORTCUTS,
   escapeAction,
   formatChord,
+  formatZoomPercent,
   helpEntries,
   isEditableTarget,
   matchShortcut,
   prefersMacModifier,
+  shouldApplyShortcut,
 } from './shortcuts.js';
 
 const TEXTURE_ID = 'landing-badge';
@@ -815,6 +820,12 @@ function dispatchShortcut(shortcut, engine) {
       break;
     case 'zoomSelection':
       zoomToSelection(engine);
+      break;
+    case 'zoomIn':
+      engine.zoom_by(engine.zoom_step());
+      break;
+    case 'zoomOut':
+      engine.zoom_by(1 / engine.zoom_step());
       break;
     case 'zoom100':
       engine.set_zoom(1);
@@ -1888,7 +1899,8 @@ function bindInput(canvas, engine) {
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
     const point = canvasPoint(event, canvas);
-    const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const step = engine.zoom_step();
+    const factor = event.deltaY < 0 ? step : 1 / step;
     engine.zoom_at(point.x, point.y, factor);
   }, { passive: false });
 
@@ -2039,12 +2051,12 @@ function bindInput(canvas, engine) {
     if (isEditableTarget(event.target)) return;
     if (contextMenuOpen) closeContextMenu();
     const shortcut = matchShortcut(SHORTCUTS, event, 'down');
-    if (shortcut) {
-      // Ctrl/Cmd+V 不拦截默认动作：paste 事件要先看到剪贴板里的图片。
-      if (shortcut.handler !== 'paste') event.preventDefault();
-      if (event.repeat && shortcut.allowRepeat === false) return;
-      dispatchShortcut(shortcut, engine);
-    }
+    // 输入框已在上面返回。会挡住浏览器缩放的和弦还要焦点在画布上，否则不 preventDefault。
+    if (!shortcut || !shouldApplyShortcut(shortcut, event.target)) return;
+    // Ctrl/Cmd+V 不拦截默认动作：paste 事件要先看到剪贴板里的图片。
+    if (shortcut.handler !== 'paste') event.preventDefault();
+    if (event.repeat && shortcut.allowRepeat === false) return;
+    dispatchShortcut(shortcut, engine);
   });
 
   document.addEventListener('keyup', (event) => {
@@ -2082,7 +2094,7 @@ function updateHud(engine) {
   setText('selection-count', engine.get_selection_count());
   setText('vertex-count', stats.vertexCount?.toLocaleString?.() ?? engine.get_last_vertex_count());
   setText('draw-calls', stats.drawCalls ?? engine.get_last_draw_calls());
-  setText('zoom', engine.get_zoom().toFixed(2));
+  setText('zoom', formatZoomPercent(engine.get_zoom()));
   setText('current-tool', engine.get_current_tool());
   canvasEl.style.cursor = lastPointer
     ? engine.cursor_at(lastPointer.x, lastPointer.y)
