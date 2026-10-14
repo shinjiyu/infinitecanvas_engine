@@ -5,6 +5,7 @@
  * 选中元素后右侧属性面板可改填充、描边、线宽和不透明度，文本还可改字号和颜色。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
+ * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。
  *
  * @example
  * ```html
@@ -15,6 +16,13 @@
 import init, { InfiniteCanvas as WasmCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
 import wasmUrl from '../packages/core/wasm/infinitecanvas_wasm_bg.wasm?url';
 import { attachLayerPanel } from './layer-panel.js';
+import {
+  PASTE_STEP,
+  createPasteSession,
+  readTextClipboard,
+  screenToWorld,
+  writeTextClipboard,
+} from './clipboard.js';
 import { rasterizeText } from './text-raster.js';
 
 const TEXTURE_ID = 'landing-badge';
@@ -32,6 +40,11 @@ let lastFpsTime = performance.now();
 let spaceHeld = false;
 /** @type {{ x: number, y: number } | null} */
 let lastPointer = null;
+/** 指针当前是否在画布里。离开后粘贴不再对准最后一次坐标。 */
+let pointerInsideCanvas = false;
+const pasteSession = createPasteSession();
+/** 剪贴板读写串行，避免连续 Ctrl+V 抢同一份计数。 */
+let clipboardQueue = Promise.resolve();
 let autosaveTimer = 0;
 /** @type {{ id: bigint | number, node: HTMLTextAreaElement } | null} */
 let textEditor = null;
@@ -529,6 +542,87 @@ function beginMinimapPointer(engine, local) {
 }
 
 /**
+ * 串行执行剪贴板任务，连续按键时位移计数不会交叉。
+ *
+ * @param {() => Promise<void> | void} task
+ */
+function enqueueClipboard(task) {
+  clipboardQueue = clipboardQueue.then(task, task);
+}
+
+/**
+ * Ctrl+C：把选中元素写成 version 1 JSON。系统剪贴板失败时留在内存里。
+ *
+ * @param {WasmCanvas} engine
+ * @returns {Promise<void>}
+ */
+async function copySelection(engine) {
+  let json = '';
+  try {
+    json = engine.copy_selection_json();
+  } catch (error) {
+    setStatus(`复制失败：${errorText(error)}`, true);
+    return;
+  }
+  if (!json) return;
+  pasteSession.arm(json);
+  await writeTextClipboard(json);
+  setStatus('已复制');
+}
+
+/**
+ * Ctrl+V：解析剪贴板并插入。指针在画布内时以指针为中心，否则从原位置偏移。
+ *
+ * @param {WasmCanvas} engine
+ * @returns {Promise<void>}
+ */
+async function pasteSelection(engine) {
+  const json = await readTextClipboard();
+  if (!json || !json.trim()) return;
+  const inside = pointerInsideCanvas && lastPointer && canvasEl;
+  const placement = pasteSession.nextPlacement(json, Boolean(inside));
+  /** @type {number | undefined} */
+  let focusX;
+  /** @type {number | undefined} */
+  let focusY;
+  if (inside && canvasEl && lastPointer) {
+    const world = screenToWorld(
+      lastPointer,
+      { width: canvasEl.width, height: canvasEl.height },
+      { x: engine.get_viewport_center_x(), y: engine.get_viewport_center_y() },
+      engine.get_zoom(),
+    );
+    focusX = world.x;
+    focusY = world.y;
+  }
+  try {
+    const ids = engine.paste_elements(json, placement.dx, placement.dy, focusX, focusY);
+    const count = ids?.length ?? 0;
+    if (count === 0) {
+      setStatus('剪贴板里没有可粘贴的元素', true);
+      return;
+    }
+    scheduleAutosave(engine);
+    setStatus(`已粘贴 ${count} 个`);
+  } catch (error) {
+    setStatus(`粘贴失败：${errorText(error)}`, true);
+  }
+}
+
+/**
+ * Ctrl+D：按固定步长原地克隆，新元素成为选中。
+ *
+ * @param {WasmCanvas} engine
+ */
+function duplicateSelection(engine) {
+  const ids = engine.duplicate_selection(PASTE_STEP, PASTE_STEP);
+  const count = ids?.length ?? 0;
+  if (count === 0) return;
+  scheduleAutosave(engine);
+  setStatus(`已克隆 ${count} 个`);
+}
+
+/**
  * @param {HTMLCanvasElement} canvas
  * @param {WasmCanvas} engine
  */
@@ -802,9 +896,17 @@ function bindInput(canvas, engine) {
     canvas.setPointerCapture(event.pointerId);
   });
 
+  canvas.addEventListener('pointerenter', () => {
+    pointerInsideCanvas = true;
+  });
+  canvas.addEventListener('pointerleave', () => {
+    pointerInsideCanvas = false;
+  });
+
   canvas.addEventListener('pointermove', (event) => {
     const point = canvasPoint(event, canvas);
     lastPointer = point;
+    pointerInsideCanvas = true;
     engine.handle_pointer_event(
       'move',
       event.pointerId,
@@ -980,6 +1082,21 @@ function bindInput(canvas, engine) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       saveSceneFile(engine);
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
+      event.preventDefault();
+      enqueueClipboard(() => copySelection(engine));
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v') {
+      event.preventDefault();
+      enqueueClipboard(() => pasteSelection(engine));
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'd') {
+      event.preventDefault();
+      duplicateSelection(engine);
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {

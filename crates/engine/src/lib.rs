@@ -38,8 +38,9 @@ pub mod viewport;
 
 // 重导出核心类型
 pub use command::{
-    AddElementCommand, Command, CommandHistory, MoveCommand, RemoveElementCommand,
-    ReorderOutlineCommand, SetStyleCommand, TransformElementsCommand, UpdateTextCommand,
+    AddElementCommand, Command, CommandHistory, DuplicateElementsCommand, MoveCommand,
+    PasteElementsCommand, RemoveElementCommand, ReorderOutlineCommand, SetStyleCommand,
+    TransformElementsCommand, UpdateTextCommand,
 };
 pub use element::{
     Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Rectangle,

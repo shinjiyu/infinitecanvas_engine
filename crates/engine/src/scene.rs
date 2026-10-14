@@ -15,11 +15,14 @@
 //! （文本和矩形同一条路径），并把子树标脏，顶点缓存重写文本纹理四边形。
 //! 场景 JSON 用 `{"type":"group","data":{...}}` 和 `{"type":"text","data":{...}}`。
 //! `parent` / `locked` 在 `props` 里，缺省为根节点和未锁定。文本的光栅字段不进 JSON。
+//! 复制、粘贴和克隆在 [`self::clipboard`]：新 ID、子树重映射，并走命令栈。
 use crate::element::{Circle, Element, ElementId, Group, Image, Line, Path, Rectangle, Text};
 use crate::scene_tree::{SceneTree, SceneTreeNode};
 use infinitecanvas_math::{Transform, Vec2};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+
+mod clipboard;
 
 /// 成组、解散、进组、出组失败的原因。
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -281,6 +281,226 @@ impl Command for ReorderOutlineCommand {
     }
 }
 
+/// 原地克隆一批元素。
+///
+/// 第一次执行调用 [`Scene::duplicate`]。撤销删掉整棵新子树，重做按同样的 ID 插回，
+/// 因此重做不会再分配一套新 ID。新的根会被标成选中，锁定的根除外。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::{CommandHistory, DuplicateElementsCommand, Rectangle, Scene};
+/// use infinitecanvas_math::Vec2;
+///
+/// let mut scene = Scene::new();
+/// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(4.0, 4.0)));
+/// let mut history = CommandHistory::new();
+/// history.execute(
+///     Box::new(DuplicateElementsCommand::new(vec![1], Vec2::new(10.0, 10.0))),
+///     &mut scene,
+/// );
+/// assert_eq!(scene.count(), 2);
+/// history.undo(&mut scene);
+/// assert_eq!(scene.count(), 1);
+/// history.redo(&mut scene);
+/// assert_eq!(scene.count(), 2);
+/// ```
+#[derive(Debug)]
+pub struct DuplicateElementsCommand {
+    source_ids: Vec<ElementId>,
+    offset: Vec2,
+    started: bool,
+    batch: SpawnBatch,
+}
+
+impl DuplicateElementsCommand {
+    /// 克隆 `source_ids`，并把每个副本的世界平移加上 `offset`。
+    ///
+    /// # 参数
+    /// - `source_ids`: 要克隆的元素。祖先也在列表里时，子孙不会再克隆一次
+    /// - `offset`: 世界位移。Demo 的 Ctrl+D 传入 `(10, 10)`
+    pub fn new(source_ids: Vec<ElementId>, offset: Vec2) -> Self {
+        Self {
+            source_ids,
+            offset,
+            started: false,
+            batch: SpawnBatch::default(),
+        }
+    }
+
+    /// 克隆已经写入场景时使用，再 [`CommandHistory::push_executed`]。
+    ///
+    /// 调用前把要选中的根标上 `selected`，快照会连同这个标记一起保存。
+    ///
+    /// # 参数
+    /// - `roots`: [`Scene::duplicate`](crate::Scene::duplicate) 返回的新根
+    pub fn applied(
+        source_ids: Vec<ElementId>,
+        offset: Vec2,
+        roots: Vec<ElementId>,
+        scene: &Scene,
+    ) -> Self {
+        Self {
+            source_ids,
+            offset,
+            started: true,
+            batch: capture_spawn(scene, &roots),
+        }
+    }
+}
+
+impl Command for DuplicateElementsCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        if !self.started {
+            self.started = true;
+            let roots = scene.duplicate(&self.source_ids, self.offset);
+            select_spawn_roots(scene, &roots);
+            self.batch = capture_spawn(scene, &roots);
+            return;
+        }
+        scene.insert_copied(&self.batch.elements);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        remove_spawn(scene, &self.batch);
+    }
+
+    fn name(&self) -> &'static str {
+        "DuplicateElements"
+    }
+}
+
+/// 从版本化 JSON 粘贴元素。
+///
+/// 与 [`DuplicateElementsCommand`] 一样，撤销删除新元素，重做恢复同一批 ID。
+/// `focus` 是叶子包围盒中心要落到的世界坐标；连续粘贴的额外位移放在 `offset` 里。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::{CommandHistory, PasteElementsCommand, Rectangle, Scene};
+/// use infinitecanvas_math::Vec2;
+///
+/// let mut scene = Scene::new();
+/// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(4.0, 4.0)));
+/// let json = scene.copy_elements_json(&[1]).unwrap();
+/// let mut history = CommandHistory::new();
+/// history.execute(
+///     Box::new(PasteElementsCommand::new(json, Vec2::new(10.0, 10.0), None)),
+///     &mut scene,
+/// );
+/// assert_eq!(scene.count(), 2);
+/// history.undo(&mut scene);
+/// assert_eq!(scene.count(), 1);
+/// ```
+#[derive(Debug)]
+pub struct PasteElementsCommand {
+    json: String,
+    offset: Vec2,
+    focus: Option<Vec2>,
+    started: bool,
+    batch: SpawnBatch,
+}
+
+impl PasteElementsCommand {
+    /// 创建一条尚未执行的粘贴命令。
+    ///
+    /// # 参数
+    /// - `json`: [`Scene::copy_elements_json`](crate::Scene::copy_elements_json) 或整份场景 JSON
+    /// - `offset`: 额外世界位移
+    /// - `focus`: 粘贴中心。`None` 时元素留在文档坐标上，只加 `offset`
+    pub fn new(json: String, offset: Vec2, focus: Option<Vec2>) -> Self {
+        Self {
+            json,
+            offset,
+            focus,
+            started: false,
+            batch: SpawnBatch::default(),
+        }
+    }
+
+    /// 粘贴已经写入场景时使用，再 [`CommandHistory::push_executed`]。
+    ///
+    /// # 参数
+    /// - `roots`: [`Scene::paste_json`](crate::Scene::paste_json) 返回的新根
+    pub fn applied(
+        json: String,
+        offset: Vec2,
+        focus: Option<Vec2>,
+        roots: Vec<ElementId>,
+        scene: &Scene,
+    ) -> Self {
+        Self {
+            json,
+            offset,
+            focus,
+            started: true,
+            batch: capture_spawn(scene, &roots),
+        }
+    }
+}
+
+impl Command for PasteElementsCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        if !self.started {
+            self.started = true;
+            if let Ok(roots) = scene.paste_json(&self.json, self.offset, self.focus) {
+                select_spawn_roots(scene, &roots);
+                self.batch = capture_spawn(scene, &roots);
+            }
+            return;
+        }
+        scene.insert_copied(&self.batch.elements);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        remove_spawn(scene, &self.batch);
+    }
+
+    fn name(&self) -> &'static str {
+        "PasteElements"
+    }
+}
+
+#[derive(Debug, Default)]
+struct SpawnBatch {
+    elements: Vec<AnyElement>,
+    roots: Vec<ElementId>,
+}
+
+fn select_spawn_roots(scene: &mut Scene, roots: &[ElementId]) {
+    for id in roots {
+        if !scene.contains(*id) || scene.is_effectively_locked(*id) {
+            continue;
+        }
+        if let Some(element) = scene.get_mut(*id) {
+            element.as_element_mut().props_mut().selected = true;
+        }
+    }
+}
+
+fn capture_spawn(scene: &Scene, roots: &[ElementId]) -> SpawnBatch {
+    let mut seen = std::collections::HashSet::new();
+    let mut elements = Vec::new();
+    for root in roots {
+        for id in scene.subtree_ids(*root) {
+            if seen.insert(id) {
+                if let Some(element) = scene.get(id) {
+                    elements.push(element.clone());
+                }
+            }
+        }
+    }
+    SpawnBatch {
+        elements,
+        roots: roots.to_vec(),
+    }
+}
+
+fn remove_spawn(scene: &mut Scene, batch: &SpawnBatch) {
+    for root in batch.roots.iter().rev() {
+        scene.remove(*root);
+    }
+}
+
 fn apply_text_visual(scene: &mut Scene, id: ElementId, visual: &TextVisual) {
     if let Some(AnyElement::Text(text)) = scene.get_mut(id) {
         let _ = text.apply_visual(visual);

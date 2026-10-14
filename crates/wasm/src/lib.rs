@@ -39,11 +39,12 @@ use infinitecanvas_engine::{
     transform_handles::{
         cursor_for, transforms_differ, HandleGesture, HandleMetrics, SelectionFrame,
     },
-    AddElementCommand, AnyElement, Circle, CommandHistory, Element, ElementId, ElementStyle, Event,
-    EventQueue, Image, Line, MoveCommand, OutlineSnapshot, Path, PointerButton, PointerEvent,
-    Rectangle, RemoveElementCommand, ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox,
-    SelectionManager, Text, TextAlign, TextClickResolver, TextPlacement, Tool, ToolManager,
-    TransformElementsCommand, UpdateTextCommand, Viewport,
+    AddElementCommand, AnyElement, Circle, CommandHistory, DuplicateElementsCommand, Element,
+    ElementId, ElementStyle, Event, EventQueue, Image, Line, MoveCommand, OutlineSnapshot,
+    PasteElementsCommand, Path, PointerButton, PointerEvent, Rectangle, RemoveElementCommand,
+    ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, Text, TextAlign,
+    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
+    UpdateTextCommand, Viewport,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -1162,6 +1163,124 @@ impl InfiniteCanvas {
         }
         log::info!("Imported scene with {} elements", self.scene.count());
         Ok(())
+    }
+
+    /// 把当前选中元素写成剪贴板 JSON。
+    ///
+    /// 格式与 [`export_json`](Self::export_json) 相同，只含选中根和它们的子孙。
+    /// 组会带上整棵子树，父子 ID 仍指向这份文档里的元素。没有选中元素时返回空字符串。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const json = canvas.copy_selection_json();
+    /// await navigator.clipboard.writeText(json);
+    /// ```
+    #[wasm_bindgen]
+    pub fn copy_selection_json(&self) -> Result<String, JsValue> {
+        let ids = self.selection.selected_ids();
+        if ids.is_empty() {
+            return Ok(String::new());
+        }
+        self.scene
+            .copy_elements_json(&ids)
+            .map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// 原地克隆当前选中元素，并让新元素成为选中。
+    ///
+    /// 走 [`DuplicateElementsCommand`]，Ctrl+Z 会删掉副本，Ctrl+Y 按原 ID 恢复。
+    /// 新元素标脏，下一帧顶点缓存会写上它们。组会克隆整棵子树。
+    ///
+    /// # 参数
+    /// - `dx`, `dy`: 世界位移。Demo 的 Ctrl+D 使用 `(10, 10)`
+    ///
+    /// # 返回
+    /// 新根元素的 ID。没有选中元素时为空数组。
+    #[wasm_bindgen]
+    pub fn duplicate_selection(&mut self, dx: f32, dy: f32) -> Array {
+        let ids = self.selection.selected_ids();
+        if ids.is_empty() {
+            return Array::new();
+        }
+        self.selection.clear(&mut self.scene);
+        let offset = Vec2::new(dx, dy);
+        let roots = self.scene.duplicate(&ids, offset);
+        if roots.is_empty() {
+            return Array::new();
+        }
+        for id in &roots {
+            self.selection.select_element(&mut self.scene, *id, true);
+        }
+        self.command_history
+            .push_executed(Box::new(DuplicateElementsCommand::applied(
+                ids,
+                offset,
+                roots.clone(),
+                &self.scene,
+            )));
+        log::info!("Duplicated selection into {} roots", roots.len());
+        selection_ids_to_js_array(roots)
+    }
+
+    /// 把剪贴板 JSON 粘贴进场景，并选中新根。
+    ///
+    /// `focus_x` / `focus_y` 都给出时，叶子包围盒中心对准该世界坐标，再加 `(dx, dy)`。
+    /// 缺一个焦点时只应用位移（鼠标不在画布上时 Demo 传 `(10, 10)` 的倍数）。
+    /// 非法 JSON 不修改场景。
+    ///
+    /// # 参数
+    /// - `json`: [`copy_selection_json`](Self::copy_selection_json) 的文本
+    /// - `dx`, `dy`: 额外世界位移，连续粘贴用来错开
+    /// - `focus_x`, `focus_y`: 可选的粘贴中心
+    ///
+    /// # 返回
+    /// 新根元素 ID
+    ///
+    /// # 错误
+    /// JSON 无法解析、版本不受支持或元素种类未知
+    #[wasm_bindgen]
+    pub fn paste_elements(
+        &mut self,
+        json: &str,
+        dx: f32,
+        dy: f32,
+        focus_x: Option<f32>,
+        focus_y: Option<f32>,
+    ) -> Result<Array, JsValue> {
+        if json.trim().is_empty() {
+            return Ok(Array::new());
+        }
+        let focus = match (focus_x, focus_y) {
+            (Some(x), Some(y)) if x.is_finite() && y.is_finite() => Some(Vec2::new(x, y)),
+            _ => None,
+        };
+        // 先解析，失败时不改选中、不入栈。
+        let incoming = Scene::from_json(json).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        if incoming.is_empty() {
+            return Ok(Array::new());
+        }
+        self.selection.clear(&mut self.scene);
+        let offset = Vec2::new(dx, dy);
+        let roots = self
+            .scene
+            .paste_json(json, offset, focus)
+            .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        if roots.is_empty() {
+            return Ok(Array::new());
+        }
+        for id in &roots {
+            self.selection.select_element(&mut self.scene, *id, true);
+        }
+        self.command_history
+            .push_executed(Box::new(PasteElementsCommand::applied(
+                json.to_string(),
+                offset,
+                focus,
+                roots.clone(),
+                &self.scene,
+            )));
+        log::info!("Pasted {} roots", roots.len());
+        Ok(selection_ids_to_js_array(roots))
     }
 
     /// 把当前视口或选中区域导出为 PNG
