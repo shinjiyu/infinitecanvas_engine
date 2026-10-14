@@ -28,6 +28,7 @@ pub mod selection;
 pub mod selection_box;
 pub mod tool;
 pub mod transform_handles;
+pub mod vertex_cache;
 pub mod viewport;
 
 // 重导出核心类型
@@ -52,6 +53,10 @@ pub use scene::{AnyElement, Scene};
 pub use selection::SelectionManager;
 pub use selection_box::SelectionBox;
 pub use tool::{Tool, ToolManager};
+pub use vertex_cache::{
+    rebuild_all_vertices, GpuVertexWrite, RebuiltGeometry, TexturedDraw, VertexBufferKind,
+    VertexCache, VertexSync,
+};
 pub use viewport::Viewport;
 
 /// 渲染器，负责渲染循环控制

@@ -46,7 +46,7 @@ fn default_opacity() -> f32 {
 ///
 /// JSON 里除 `id` 以外的字段都可省略：变换缺省为单位变换（旋转 0、缩放 1），
 /// `visible` 缺省为 true。未知字段会被忽略。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementProps {
     /// 唯一 ID
     pub id: ElementId,
@@ -62,10 +62,33 @@ pub struct ElementProps {
     /// 层级（z-index）
     #[serde(default)]
     pub z_index: i32,
+    /// 几何、样式或变换已变化，需要重新生成顶点。
+    ///
+    /// 运行时状态，不写入场景 JSON。新建和导入的元素默认为 `true`。
+    /// 视口平移/缩放不修改此标记。场景通过 [`crate::Scene::mark_dirty`] 入队；
+    /// 只改这个字段不会入队。相等比较忽略它，避免污染持久化往返。
+    #[serde(skip, default = "default_dirty")]
+    pub dirty: bool,
+}
+
+impl PartialEq for ElementProps {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.transform == other.transform
+            && self.visible == other.visible
+            && self.selected == other.selected
+            && self.z_index == other.z_index
+    }
+}
+
+fn default_dirty() -> bool {
+    true
 }
 
 impl ElementProps {
     /// 创建元素属性
+    ///
+    /// 新元素的 `dirty` 为 `true`，第一次同步顶点缓存时会生成顶点。
     pub fn new(id: ElementId) -> Self {
         Self {
             id,
@@ -73,6 +96,7 @@ impl ElementProps {
             visible: true,
             selected: false,
             z_index: 0,
+            dirty: true,
         }
     }
 
@@ -86,8 +110,25 @@ impl ElementProps {
     }
 
     /// 设置旋转角（弧度）。
+    ///
+    /// 只改这个字段不会让顶点缓存入队。渲染前还要调用 [`crate::Scene::mark_dirty`]。
     pub fn set_rotation(&mut self, radians: f32) {
         self.transform.rotation = radians;
+    }
+
+    /// 几何或样式是否需要重新生成顶点
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// 标记需要重新生成顶点
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// 顶点已经写回缓存
+    pub fn clear_dirty(&mut self) {
+        self.dirty = false;
     }
 }
 
@@ -233,7 +274,26 @@ pub trait Element {
     }
 
     /// 设置元素旋转角（弧度）。
+    ///
+    /// 调用方还要 [`crate::Scene::mark_dirty`]，顶点缓存才会重生成。
     fn set_rotation(&mut self, radians: f32) {
         self.props_mut().set_rotation(radians);
+    }
+
+    /// 几何、样式或变换是否需要重新生成顶点
+    fn is_dirty(&self) -> bool {
+        self.props().is_dirty()
+    }
+
+    /// 标记需要重新生成顶点。
+    ///
+    /// 渲染热路径还要把 id 放进 [`crate::Scene::mark_dirty`]，否则缓存不知道该刷新谁。
+    fn mark_dirty(&mut self) {
+        self.props_mut().mark_dirty();
+    }
+
+    /// 清除脏标记
+    fn clear_dirty(&mut self) {
+        self.props_mut().clear_dirty();
     }
 }

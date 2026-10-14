@@ -76,14 +76,10 @@ impl Image {
     /// - `size`: 显示尺寸（width, height）
     /// - `texture_id`: 纹理 ID（必须在 TextureManager 中存在）
     pub fn new(id: ElementId, position: Vec2, size: Vec2, texture_id: String) -> Self {
+        let mut props = ElementProps::new(id);
+        props.transform = Transform::from_translation(position);
         Self {
-            props: ElementProps {
-                id,
-                transform: Transform::from_translation(position),
-                visible: true,
-                selected: false,
-                z_index: 0,
-            },
+            props,
             size,
             texture_id,
             uv_rect: None,
@@ -119,14 +115,10 @@ impl Image {
         texture_id: String,
         uv_rect: Rect,
     ) -> Self {
+        let mut props = ElementProps::new(id);
+        props.transform = Transform::from_translation(position);
         Self {
-            props: ElementProps {
-                id,
-                transform: Transform::from_translation(position),
-                visible: true,
-                selected: false,
-                z_index: 0,
-            },
+            props,
             size,
             texture_id,
             uv_rect: Some(uv_rect),

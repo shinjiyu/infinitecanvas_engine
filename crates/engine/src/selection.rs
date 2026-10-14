@@ -34,6 +34,7 @@ impl SelectionManager {
             if let Some(element) = scene.get_mut(id) {
                 element.as_element_mut().props_mut().selected = true;
             }
+            scene.bump_selection_epoch();
             changed = true;
         }
 
@@ -46,6 +47,7 @@ impl SelectionManager {
             if let Some(element) = scene.get_mut(id) {
                 element.as_element_mut().props_mut().selected = false;
             }
+            scene.bump_selection_epoch();
             true
         } else {
             false
@@ -64,6 +66,7 @@ impl SelectionManager {
                 element.as_element_mut().props_mut().selected = false;
             }
         }
+        scene.bump_selection_epoch();
         true
     }
 
@@ -105,12 +108,17 @@ impl SelectionManager {
             }
         }
 
+        let mut changed = false;
         for id in &hits {
             if self.selected.insert(*id) {
                 if let Some(element) = scene.get_mut(*id) {
                     element.as_element_mut().props_mut().selected = true;
                 }
+                changed = true;
             }
+        }
+        if changed {
+            scene.bump_selection_epoch();
         }
 
         hits

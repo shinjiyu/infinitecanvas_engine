@@ -96,6 +96,12 @@ struct PerformanceStats {
     last_draw_calls: usize,
     /// 上一帧渲染时间（毫秒）
     last_frame_time_ms: f64,
+    /// 上一帧重新生成顶点的元素数
+    regenerated_elements: usize,
+    /// 上一帧写入顶点缓冲的字节数（不含 uniform）
+    gpu_bytes_written: u64,
+    /// 上一帧是否只更新了视口 uniform
+    geometry_unchanged: bool,
 }
 
 /// WASM 主接口，提供无限画布的所有功能
@@ -249,13 +255,22 @@ impl InfiniteCanvas {
         let selection_box = self.selection_box.bounds();
         let transform_frame = self.display_selection_frame();
         if let Some(renderer) = &mut self.webgpu_renderer {
-            renderer.render(&self.scene, &self.viewport, selection_box, transform_frame)?;
+            let started = js_sys::Date::now();
+            renderer.render(
+                &mut self.scene,
+                &self.viewport,
+                selection_box,
+                transform_frame,
+            )?;
+            let stats = renderer.last_stats();
 
-            // 更新性能统计
             self.perf_stats.frame_count += 1;
-            // 估算顶点数：每个矩形 6 顶点（2 个三角形），每个圆形约 96 顶点
-            self.perf_stats.last_vertex_count = self.scene.count() * 50; // 平均估算
-            self.perf_stats.last_draw_calls = 3; // fill + stroke + textured（估算）
+            self.perf_stats.last_vertex_count = stats.vertex_count;
+            self.perf_stats.last_draw_calls = stats.draw_calls;
+            self.perf_stats.last_frame_time_ms = js_sys::Date::now() - started;
+            self.perf_stats.regenerated_elements = stats.regenerated_elements;
+            self.perf_stats.gpu_bytes_written = stats.gpu_bytes_written;
+            self.perf_stats.geometry_unchanged = stats.geometry_unchanged;
 
             Ok(())
         } else {
@@ -917,6 +932,7 @@ impl InfiniteCanvas {
     ///
     /// 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
     /// 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+    /// `dirty` 是运行时标记，不会出现在 JSON 里。
     ///
     /// # 返回
     /// 紧凑 JSON 字符串
@@ -937,6 +953,7 @@ impl InfiniteCanvas {
     ///
     /// 缺省字段使用默认值，未知字段会被忽略。导入会按 `selected` 标记重建选择，
     /// 并清空撤销栈和未完成的拖动。解析失败时场景保持不变。
+    /// 成功后顶点缓存整表失效，下一帧全量上传。
     ///
     /// # 参数
     /// - `json`: [`export_json`](Self::export_json) 生成的文本
@@ -952,6 +969,9 @@ impl InfiniteCanvas {
         self.selection_box.cancel();
         self.command_history.clear();
         self.drag_state = DragState::default();
+        if let Some(renderer) = &mut self.webgpu_renderer {
+            renderer.invalidate_geometry();
+        }
         log::info!("Imported scene with {} elements", self.scene.count());
         Ok(())
     }
@@ -975,6 +995,43 @@ impl InfiniteCanvas {
             export_viewport_png(&self.scene, &self.viewport)
         };
         bytes.map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。
+    ///
+    /// 元素按网格铺开。第一次渲染会建立顶点缓存，之后平移/缩放只更新 uniform。
+    #[wasm_bindgen]
+    pub fn load_stress_scene(&mut self, count: u32) {
+        self.selection.clear(&mut self.scene);
+        self.selection_box.cancel();
+        self.scene.clear();
+
+        let colors = [
+            Color::from_hex("#4090f2").unwrap_or(Color::BLUE),
+            Color::from_hex("#36d399").unwrap_or(Color::GREEN),
+            Color::from_hex("#f24040").unwrap_or(Color::RED),
+            Color::from_hex("#f2c94c").unwrap_or(Color::WHITE),
+            Color::from_hex("#9b59b6").unwrap_or(Color::BLACK),
+        ];
+        let columns = 400u32;
+        let spacing = 24.0f32;
+        for index in 0..count {
+            let id = self.scene.next_id();
+            let column = (index % columns) as f32;
+            let row = (index / columns) as f32;
+            let color = colors[(index as usize) % colors.len()];
+            let rect = Rectangle::new(
+                id,
+                Vec2::new(column * spacing, row * spacing),
+                Vec2::new(16.0, 12.0),
+            )
+            .with_style(ElementStyle::fill_only(color));
+            self.scene.add_rect(rect);
+        }
+        if let Some(renderer) = &mut self.webgpu_renderer {
+            renderer.invalidate_geometry();
+        }
+        log::info!("Loaded stress scene with {} rectangles", count);
     }
 
     // ========== 纹理/图片 API ==========
@@ -1099,14 +1156,19 @@ impl InfiniteCanvas {
     /// 是否成功设置
     #[wasm_bindgen]
     pub fn set_image_alpha(&mut self, image_id: u64, alpha: f32) -> bool {
-        if let Some(AnyElement::Image(image)) = self.scene.get_mut(image_id) {
+        let updated = if let Some(AnyElement::Image(image)) = self.scene.get_mut(image_id) {
             image.set_alpha(alpha);
-            log::debug!("Set image {} alpha to {}", image_id, alpha);
             true
         } else {
-            log::warn!("Image {} not found", image_id);
             false
+        };
+        if updated {
+            self.scene.mark_dirty(image_id);
+            log::debug!("Set image {} alpha to {}", image_id, alpha);
+        } else {
+            log::warn!("Image {} not found", image_id);
         }
+        updated
     }
 
     /// 清空场景中所有元素
@@ -1181,8 +1243,11 @@ impl InfiniteCanvas {
     /// - frameCount: 总帧数
     /// - vertexCount: 上一帧顶点数
     /// - drawCalls: 上一帧绘制调用数
-    /// - frameTimeMs: 上一帧渲染时间（毫秒）
+    /// - frameTimeMs: 上一帧渲染时间（毫秒，CPU 提交，不含 GPU 完成）
     /// - elementCount: 场景元素总数
+    /// - regeneratedElements: 本帧重生成顶点的元素数
+    /// - gpuBytesWritten: 本帧写入顶点缓冲的字节数
+    /// - geometryUnchanged: 为 true 时本帧只更新了视口 uniform
     #[wasm_bindgen]
     pub fn get_performance_stats(&self) -> JsValue {
         let obj = Object::new();
@@ -1210,6 +1275,21 @@ impl InfiniteCanvas {
             &obj,
             &JsValue::from_str("elementCount"),
             &JsValue::from(self.scene.count() as u32),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("regeneratedElements"),
+            &JsValue::from(self.perf_stats.regenerated_elements as u32),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("gpuBytesWritten"),
+            &JsValue::from(self.perf_stats.gpu_bytes_written as f64),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("geometryUnchanged"),
+            &JsValue::from(self.perf_stats.geometry_unchanged),
         );
         obj.into()
     }
@@ -1512,6 +1592,7 @@ impl InfiniteCanvas {
             line.set_world_end(world_end);
             line.set_arrow(arrow);
         }
+        self.scene.mark_dirty(id);
     }
 
     fn handle_pen_tool_down(&mut self, event: PointerEvent) {
@@ -1564,8 +1645,14 @@ impl InfiniteCanvas {
         }
         let points = self.drag_state.pen_points.clone();
         if let Some(id) = self.drag_state.preview_id {
-            if let Some(AnyElement::Path(path)) = self.scene.get_mut(id) {
+            let updated = if let Some(AnyElement::Path(path)) = self.scene.get_mut(id) {
                 path.set_world_points(&points);
+                true
+            } else {
+                false
+            };
+            if updated {
+                self.scene.mark_dirty(id);
                 return;
             }
         }
@@ -1728,6 +1815,8 @@ impl InfiniteCanvas {
             if let Some(element) = self.scene.get_mut(*id) {
                 element.as_element_mut().props_mut().transform = *transform;
             }
+            // 实时缩放/旋转、多选和取消都走这里。撤销走 TransformElementsCommand。
+            self.scene.mark_dirty(*id);
         }
     }
 
@@ -1824,6 +1913,7 @@ impl InfiniteCanvas {
                     .transform
                     .translate(delta);
             }
+            self.scene.mark_dirty(*id);
         }
     }
 }

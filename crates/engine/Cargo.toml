@@ -13,3 +13,7 @@ serde_json = { workspace = true }
 png = "0.17"
 log = { workspace = true }
 
+[[bench]]
+name = "vertex_cache"
+harness = false
+

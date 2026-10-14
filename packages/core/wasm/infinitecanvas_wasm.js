@@ -256,6 +256,7 @@ export class InfiniteCanvas {
      *
      * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
      * 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+     * `dirty` 是运行时标记，不会出现在 JSON 里。
      *
      * # 返回
      * 紧凑 JSON 字符串
@@ -377,8 +378,11 @@ export class InfiniteCanvas {
      * - frameCount: 总帧数
      * - vertexCount: 上一帧顶点数
      * - drawCalls: 上一帧绘制调用数
-     * - frameTimeMs: 上一帧渲染时间（毫秒）
+     * - frameTimeMs: 上一帧渲染时间（毫秒，CPU 提交，不含 GPU 完成）
      * - elementCount: 场景元素总数
+     * - regeneratedElements: 本帧重生成顶点的元素数
+     * - gpuBytesWritten: 本帧写入顶点缓冲的字节数
+     * - geometryUnchanged: 为 true 时本帧只更新了视口 uniform
      * @returns {any}
      */
     get_performance_stats() {
@@ -572,6 +576,7 @@ export class InfiniteCanvas {
      *
      * 缺省字段使用默认值，未知字段会被忽略。导入会按 `selected` 标记重建选择，
      * 并清空撤销栈和未完成的拖动。解析失败时场景保持不变。
+     * 成功后顶点缓存整表失效，下一帧全量上传。
      *
      * # 参数
      * - `json`: [`export_json`](Self::export_json) 生成的文本
@@ -619,6 +624,15 @@ export class InfiniteCanvas {
     is_selection_box_active() {
         const ret = wasm.infinitecanvas_is_selection_box_active(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。
+     *
+     * 元素按网格铺开。第一次渲染会建立顶点缓存，之后平移/缩放只更新 uniform。
+     * @param {number} count
+     */
+    load_stress_scene(count) {
+        wasm.infinitecanvas_load_stress_scene(this.__wbg_ptr, count);
     }
     /**
      * 移动选中的元素
@@ -1638,6 +1652,10 @@ function __wbg_get_imports() {
             const ret = new Uint8Array(arg0, arg1 >>> 0, arg2 >>> 0);
             return ret;
         },
+        __wbg_now_aa4ccb83129e9e55: function() {
+            const ret = Date.now();
+            return ret;
+        },
         __wbg_of_d5dbecdc59e02e34: function(arg0) {
             const ret = Array.of(arg0);
             return ret;
@@ -2526,12 +2544,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2418, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2441, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 336, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 346, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

@@ -3,7 +3,7 @@
 //! 管理无限画布上的所有元素
 use crate::element::{Circle, Element, ElementId, Image, Line, Path, Rectangle};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// 元素枚举（支持不同类型元素）
 ///
@@ -74,10 +74,28 @@ impl AnyElement {
 /// scene.add_rect(rect);
 /// assert_eq!(scene.count(), 1);
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Scene {
     elements: HashMap<ElementId, AnyElement>,
     next_id: ElementId,
+    /// 增删元素时递增。顶点缓存据此整表重排，而不是每帧排序。
+    ///
+    /// 不参与 [`PartialEq`]，也不写入 JSON。
+    structure_epoch: u64,
+    /// 几何、样式或变换变了、需要重生成顶点的元素。
+    ///
+    /// 用集合去重，避免多选拖动时按列表扫描。不参与 [`PartialEq`]，也不写入 JSON。
+    dirty_ids: HashSet<ElementId>,
+    /// 选中集合或选中元素几何变化时递增，用来跳过选择框顶点重建。
+    ///
+    /// 不参与 [`PartialEq`]，也不写入 JSON。
+    selection_epoch: u64,
+}
+
+impl PartialEq for Scene {
+    fn eq(&self, other: &Self) -> bool {
+        self.next_id == other.next_id && self.elements == other.elements
+    }
 }
 
 impl Scene {
@@ -86,6 +104,102 @@ impl Scene {
         Self {
             elements: HashMap::new(),
             next_id: 1,
+            structure_epoch: 0,
+            dirty_ids: HashSet::new(),
+            selection_epoch: 0,
+        }
+    }
+
+    /// 插入元素并标记结构变化。
+    ///
+    /// 新元素保持 `dirty = true`。下一次顶点同步会因为 epoch 变化整表重建，
+    /// 因此这里不把 id 放进脏列表。
+    fn insert_element(&mut self, element: AnyElement) -> ElementId {
+        let id = element.id();
+        self.elements.insert(id, element);
+        if let Some(stored) = self.elements.get_mut(&id) {
+            stored.as_element_mut().mark_dirty();
+        }
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        id
+    }
+
+    /// 场景结构版本。增删元素后变化。
+    pub fn structure_epoch(&self) -> u64 {
+        self.structure_epoch
+    }
+
+    /// 选择高亮版本。选择集变化，或被选中元素的几何变化时递增。
+    pub fn selection_epoch(&self) -> u64 {
+        self.selection_epoch
+    }
+
+    /// 选择集发生变化（不涉及顶点几何）。
+    pub fn bump_selection_epoch(&mut self) {
+        self.selection_epoch = self.selection_epoch.wrapping_add(1);
+    }
+
+    /// 是否有元素在等待重生成顶点
+    pub fn has_dirty_elements(&self) -> bool {
+        !self.dirty_ids.is_empty()
+    }
+
+    /// 取出并清空待重生成的元素 id
+    pub fn take_dirty_ids(&mut self) -> Vec<ElementId> {
+        self.dirty_ids.drain().collect()
+    }
+
+    /// 结构被整体替换（例如 JSON 导入）后调用。
+    ///
+    /// 结构版本前进，并把当前每个元素放进脏队列，让下一帧顶点缓存整表重建。
+    pub fn invalidate_geometry(&mut self) {
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        self.dirty_ids.clear();
+        let ids: Vec<ElementId> = self.elements.keys().copied().collect();
+        for id in ids {
+            self.mark_dirty(id);
+        }
+    }
+
+    /// 记录一个元素的几何、样式或变换已经变化。
+    ///
+    /// 平移/缩放视口不要调用。同一元素在被缓存消化前重复调用只会入队一次。
+    /// 被选中的元素同时推进 [`Self::selection_epoch`]，让高亮框跟着动。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Element, Rectangle, Scene};
+    /// use infinitecanvas_engine::math::Vec2;
+    ///
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+    /// scene
+    ///     .get_mut(1)
+    ///     .unwrap()
+    ///     .as_element_mut()
+    ///     .props_mut()
+    ///     .transform
+    ///     .rotate(0.5);
+    /// scene.mark_dirty(1);
+    /// assert!(scene.has_dirty_elements());
+    /// ```
+    pub fn mark_dirty(&mut self, id: ElementId) {
+        // 已经入队的元素不用重复记。新建元素的 dirty 为 true，但还没入队，
+        // 这种情况下仍然要推进去，否则第一次同步前的修改会漏掉选择框刷新。
+        if self.dirty_ids.contains(&id) {
+            return;
+        }
+        let selected = {
+            let Some(element) = self.elements.get_mut(&id) else {
+                return;
+            };
+            let props = element.as_element_mut().props_mut();
+            props.dirty = true;
+            props.selected
+        };
+        self.dirty_ids.insert(id);
+        if selected {
+            self.selection_epoch = self.selection_epoch.wrapping_add(1);
         }
     }
 
@@ -93,7 +207,15 @@ impl Scene {
     ///
     /// `next_id` 是下一次 [`Scene::next_id`] 的返回值。
     pub(crate) fn from_parts(elements: HashMap<ElementId, AnyElement>, next_id: ElementId) -> Self {
-        Self { elements, next_id }
+        let mut scene = Self {
+            elements,
+            next_id,
+            structure_epoch: 0,
+            dirty_ids: HashSet::new(),
+            selection_epoch: 0,
+        };
+        scene.invalidate_geometry();
+        scene
     }
 
     /// 下一次 [`Scene::next_id`] 会返回的 ID，不消耗它
@@ -110,49 +232,41 @@ impl Scene {
 
     /// 添加矩形元素
     pub fn add_rect(&mut self, rect: Rectangle) -> ElementId {
-        let id = rect.props().id;
-        self.elements.insert(id, AnyElement::Rectangle(rect));
-        id
+        self.insert_element(AnyElement::Rectangle(rect))
     }
 
     /// 添加圆形元素
     pub fn add_circle(&mut self, circle: Circle) -> ElementId {
-        let id = circle.props().id;
-        self.elements.insert(id, AnyElement::Circle(circle));
-        id
+        self.insert_element(AnyElement::Circle(circle))
     }
 
     /// 添加图片元素
     pub fn add_image(&mut self, image: Image) -> ElementId {
-        let id = image.props().id;
-        self.elements.insert(id, AnyElement::Image(image));
-        id
+        self.insert_element(AnyElement::Image(image))
     }
 
     /// 添加直线元素
     pub fn add_line(&mut self, line: Line) -> ElementId {
-        let id = line.props().id;
-        self.elements.insert(id, AnyElement::Line(line));
-        id
+        self.insert_element(AnyElement::Line(line))
     }
 
     /// 添加自由画笔路径
     pub fn add_path(&mut self, path: Path) -> ElementId {
-        let id = path.props().id;
-        self.elements.insert(id, AnyElement::Path(path));
-        id
+        self.insert_element(AnyElement::Path(path))
     }
 
     /// 添加任意类型元素
     pub fn add(&mut self, element: AnyElement) -> ElementId {
-        let id = element.id();
-        self.elements.insert(id, element);
-        id
+        self.insert_element(element)
     }
 
     /// 移除元素
     pub fn remove(&mut self, id: ElementId) -> Option<AnyElement> {
-        self.elements.remove(&id)
+        let removed = self.elements.remove(&id);
+        if removed.is_some() {
+            self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        }
+        removed
     }
 
     /// 获取元素
@@ -172,7 +286,11 @@ impl Scene {
 
     /// 清空场景
     pub fn clear(&mut self) {
+        if !self.elements.is_empty() {
+            self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        }
         self.elements.clear();
+        self.dirty_ids.clear();
     }
 
     /// 获取元素数量

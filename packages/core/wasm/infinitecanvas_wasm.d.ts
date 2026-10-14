@@ -142,6 +142,7 @@ export class InfiniteCanvas {
      *
      * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
      * 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+     * `dirty` 是运行时标记，不会出现在 JSON 里。
      *
      * # 返回
      * 紧凑 JSON 字符串
@@ -202,8 +203,11 @@ export class InfiniteCanvas {
      * - frameCount: 总帧数
      * - vertexCount: 上一帧顶点数
      * - drawCalls: 上一帧绘制调用数
-     * - frameTimeMs: 上一帧渲染时间（毫秒）
+     * - frameTimeMs: 上一帧渲染时间（毫秒，CPU 提交，不含 GPU 完成）
      * - elementCount: 场景元素总数
+     * - regeneratedElements: 本帧重生成顶点的元素数
+     * - gpuBytesWritten: 本帧写入顶点缓冲的字节数
+     * - geometryUnchanged: 为 true 时本帧只更新了视口 uniform
      */
     get_performance_stats(): any;
     /**
@@ -272,6 +276,7 @@ export class InfiniteCanvas {
      *
      * 缺省字段使用默认值，未知字段会被忽略。导入会按 `selected` 标记重建选择，
      * 并清空撤销栈和未完成的拖动。解析失败时场景保持不变。
+     * 成功后顶点缓存整表失效，下一帧全量上传。
      *
      * # 参数
      * - `json`: [`export_json`](Self::export_json) 生成的文本
@@ -299,6 +304,12 @@ export class InfiniteCanvas {
      * 检查是否正在框选
      */
     is_selection_box_active(): boolean;
+    /**
+     * 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。
+     *
+     * 元素按网格铺开。第一次渲染会建立顶点缓存，之后平移/缩放只更新 uniform。
+     */
+    load_stress_scene(count: number): void;
     /**
      * 移动选中的元素
      *
@@ -465,6 +476,7 @@ export interface InitOutput {
     readonly infinitecanvas_init: (a: number, b: any) => any;
     readonly infinitecanvas_is_dragging: (a: number) => number;
     readonly infinitecanvas_is_selection_box_active: (a: number) => number;
+    readonly infinitecanvas_load_stress_scene: (a: number, b: number) => void;
     readonly infinitecanvas_move_selection: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_new: () => [number, number, number];
     readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;

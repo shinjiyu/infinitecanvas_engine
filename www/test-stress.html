@@ -83,15 +83,23 @@
     </div>
     
     <div class="controls">
-      <button class="btn-add" onclick="addElements(100)">+100 元素</button>
-      <button class="btn-add" onclick="addElements(500)">+500 元素</button>
-      <button class="btn-add" onclick="addElements(1000)">+1000 元素</button>
-      <button class="btn-add" onclick="addElements(5000)">+5000 元素</button>
+      <button class="btn-add" onclick="loadCount(1000)">1k</button>
+      <button class="btn-add" onclick="loadCount(10000)">10k</button>
+      <button class="btn-add" onclick="loadCount(100000)">100k</button>
+      <button class="btn-add" onclick="nudgePan()">平移一下</button>
       <button class="btn-clear" onclick="clearAll()">清空</button>
     </div>
+    <p style="margin-top: 0.75rem; color: #888; font-size: 0.8rem; max-width: 720px;">
+      帧时间是 CPU 提交耗时。本环境若是软件渲染，GPU 帧时间不作数。
+      平移/缩放之后 geometryUnchanged 应为 true，重生成元素应为 0。
+    </p>
   </div>
   
   <div class="stats-panel">
+    <div class="stat-row">
+      <span class="stat-label">帧时间:</span>
+      <span class="stat-value" id="frame-time">-- ms</span>
+    </div>
     <div class="stat-row">
       <span class="stat-label">FPS:</span>
       <span class="stat-value" id="fps">--</span>
@@ -114,6 +122,18 @@
     <div class="stat-row">
       <span class="stat-label">绘制调用:</span>
       <span class="stat-value" id="draw-calls">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">重生成:</span>
+      <span class="stat-value" id="regenerated">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">顶点写入:</span>
+      <span class="stat-value" id="gpu-bytes">0</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">仅 uniform:</span>
+      <span class="stat-value" id="uniform-only">--</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">选中数:</span>
@@ -144,8 +164,16 @@
         bindPointerEvents(canvas, wasmCanvas);
         
         // 渲染循环
+        const frameSamples = [];
         function renderLoop() {
+          const frameStart = performance.now();
           wasmCanvas.render();
+          const frameMs = performance.now() - frameStart;
+          frameSamples.push(frameMs);
+          if (frameSamples.length > 30) frameSamples.shift();
+          const avg = frameSamples.reduce((sum, value) => sum + value, 0) / frameSamples.length;
+          document.getElementById('frame-time').textContent =
+            frameMs.toFixed(2) + ' ms (avg ' + avg.toFixed(2) + ')';
           
           // FPS 计算
           frameCount++;
@@ -172,6 +200,9 @@
           document.getElementById('frame-count').textContent = stats.frameCount.toLocaleString();
           document.getElementById('vertex-count').textContent = stats.vertexCount.toLocaleString();
           document.getElementById('draw-calls').textContent = stats.drawCalls;
+          document.getElementById('regenerated').textContent = stats.regeneratedElements;
+          document.getElementById('gpu-bytes').textContent = Math.round(stats.gpuBytesWritten).toLocaleString();
+          document.getElementById('uniform-only').textContent = stats.geometryUnchanged ? 'yes' : 'no';
           document.getElementById('selection-count').textContent = wasmCanvas.get_selection_count();
           
           requestAnimationFrame(renderLoop);
@@ -215,26 +246,15 @@
       canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     }
     
-    const colors = ['#4090f2', '#36d399', '#f24040', '#f2c94c', '#9b59b6', '#e91e63', '#00bcd4', '#ff9800'];
-    
-    window.addElements = function(count) {
+    window.loadCount = function(count) {
       const startTime = performance.now();
-      
-      for (let i = 0; i < count; i++) {
-        const x = Math.random() * 1100 + 50;
-        const y = Math.random() * 600 + 50;
-        const size = 10 + Math.random() * 40;
-        const color = colors[Math.floor(Math.random() * colors.length)];
-        
-        if (Math.random() > 0.5) {
-          wasmCanvas.add_rectangle(x, y, size, size * 0.7, color, null, 0);
-        } else {
-          wasmCanvas.add_circle(x, y, size / 2, color, null, 0);
-        }
-      }
-      
+      wasmCanvas.load_stress_scene(count);
       const elapsed = performance.now() - startTime;
-      console.log(`Added ${count} elements in ${elapsed.toFixed(1)}ms`);
+      console.log(`Loaded ${count} rectangles in ${elapsed.toFixed(1)}ms`);
+    };
+
+    window.nudgePan = function() {
+      wasmCanvas.pan(24, 16);
     };
     
     window.clearAll = function() {
