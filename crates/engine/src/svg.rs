@@ -6,7 +6,8 @@
 //!   ▼
 //! rect | circle | line+arrow | polyline | text
 //! image → 注释（像素不在场景里）
-//! group → 跳过（子元素已是世界变换；隐藏组藏住子孙）
+//! group → <g id> 包住子孙，不再套一层组变换
+//!         隐藏组：子孙不导出，也不计入 viewBox
 //!   │
 //!   ▼
 //! SVG 字符串（viewBox = 导出元素的世界包围盒）
@@ -17,10 +18,11 @@
 //!
 //! 文本写成 `<text>` / `<tspan>`。锚点与 [`TextAlign`] 相同：左上、上边中点或右上角。
 
-use crate::element::{Circle, ElementStyle, Line, Path, Rectangle, Text, TextAlign};
+use crate::element::{Circle, ElementId, ElementStyle, Line, Path, Rectangle, Text, TextAlign};
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};
+use std::collections::{HashMap, HashSet};
 
 /// viewBox 在元素包围盒外再留出的世界单位，避免描边贴边被裁掉。
 const VIEW_PADDING: f32 = 2.0;
@@ -28,16 +30,18 @@ const VIEW_PADDING: f32 = 2.0;
 /// 把场景写成 SVG 文档。
 ///
 /// 元素按与 PNG 导出相同的绘制顺序输出（`z_index` 升序，再按 id）。
-/// 自己或祖先不可见的元素跳过。`selected_only` 为 true 时只包含自身
-/// `selected` 的元素，viewBox 取这些元素的包围盒；否则取全部被导出元素的包围盒。
+/// 自己或祖先不可见的元素跳过（[`Scene::is_effectively_visible`]），
+/// 隐藏组的子孙不进入文档，也不计入 viewBox。
+/// `selected_only` 为 true 时导出自身 `selected` 的叶子，以及选中组下的全部可见子孙叶子。
+/// viewBox 取这些叶子的包围盒；没有叶子时用 1×1，避免 `0 0 0 0`。
 ///
-/// 矩形、圆、直线（含箭头）、自由路径和文本写成对应的 SVG 图元。
-/// 组不绘制：子元素的变换已经是世界变换。图片的像素不在场景里，导出时跳过，
-/// 并在 SVG 里留下注释。
+/// 矩形、圆、直线（含箭头）、自由路径和文本写成对应的 SVG 图元，矩阵是叶子自己的世界变换。
+/// 组不画几何。子孙在绘制顺序里连成一段时，组写成不带 `transform` 的 `<g id="eN">`。
+/// 图片的像素不在场景里，导出时跳过，并在 SVG 里留下注释。
 ///
 /// # 参数
 /// - `scene`: 要导出的场景
-/// - `selected_only`: 为 true 时只导出当前选中元素
+/// - `selected_only`: 为 true 时只导出选中叶子，以及选中组的可见子孙叶子
 ///
 /// # 返回
 /// 完整 SVG 文档。没有可导出元素时仍返回合法 SVG，并带说明注释。
@@ -56,44 +60,35 @@ const VIEW_PADDING: f32 = 2.0;
 /// assert!(svg.contains("fill=\"#ff0000\""));
 /// ```
 pub fn export_svg(scene: &Scene, selected_only: bool) -> String {
-    let mut body = String::new();
     let mut bounds: Option<Rect> = None;
-    let mut considered = 0usize;
+    let mut items: Vec<(Vec<ElementId>, String)> = Vec::new();
 
     for element in elements_in_paint_order(scene) {
-        // 组没有几何。隐藏组通过 is_effectively_visible 藏住子孙，与 PNG 相同。
-        if matches!(element, AnyElement::Group(_)) || !scene.is_effectively_visible(element.id()) {
+        if !export_this_leaf(scene, element, selected_only) {
             continue;
         }
-        if selected_only && !element.as_element().props().selected {
+        let Some(fragment) = leaf_fragment(element) else {
             continue;
-        }
-        considered += 1;
-        match element {
-            // 纹理像素在 GPU 上，场景里只有 texture_id，无法嵌成 data URL。
-            AnyElement::Image(image) => {
-                body.push_str(&format!(
-                    "  <!-- image {} skipped: texture pixels are not stored in the scene -->\n",
-                    image.props.id
-                ));
-            }
-            other => {
-                if let Some(fragment) = write_element(other) {
-                    if let Some(element_bounds) = export_bounds(other) {
-                        bounds = Some(match bounds {
-                            Some(existing) => existing.union(&element_bounds),
-                            None => element_bounds,
-                        });
-                    }
-                    body.push_str(&fragment);
-                }
+        };
+        // 图片只有注释，没有像素，不把占位包围盒算进 viewBox。
+        if !matches!(element, AnyElement::Image(_)) {
+            if let Some(element_bounds) = export_bounds(element) {
+                bounds = Some(match bounds {
+                    Some(existing) => existing.union(&element_bounds),
+                    None => element_bounds,
+                });
             }
         }
+        items.push((ancestor_group_chain(scene, element), fragment));
     }
 
+    let mut body = String::new();
+    write_with_group_wrappers(&mut body, &items);
+
+    // 空文档给 1×1，部分查看器拒绝 0×0 的 viewBox。
     let view = match bounds {
         Some(bounds) => bounds.inflate(VIEW_PADDING),
-        None => Rect::new(0.0, 0.0, 0.0, 0.0),
+        None => Rect::new(0.0, 0.0, 1.0, 1.0),
     };
 
     let mut svg = String::new();
@@ -107,7 +102,7 @@ pub fn export_svg(scene: &Scene, selected_only: bool) -> String {
         fmt_num(view.width),
         fmt_num(view.height),
     ));
-    if considered == 0 {
+    if items.is_empty() {
         if selected_only {
             svg.push_str("  <!-- nothing selected -->\n");
         } else {
@@ -117,6 +112,132 @@ pub fn export_svg(scene: &Scene, selected_only: bool) -> String {
     svg.push_str(&body);
     svg.push_str("</svg>\n");
     svg
+}
+
+/// 叶子才输出。组没有几何。可见性走 [`Scene::is_effectively_visible`]，
+/// 这样隐藏组会藏住子孙。`selected_only` 时，选中组带上全部可见子孙叶子。
+fn export_this_leaf(scene: &Scene, element: &AnyElement, selected_only: bool) -> bool {
+    if matches!(element, AnyElement::Group(_)) || !scene.is_effectively_visible(element.id()) {
+        return false;
+    }
+    if !selected_only {
+        return true;
+    }
+    element.as_element().props().selected || selected_via_ancestor(scene, element)
+}
+
+fn selected_via_ancestor(scene: &Scene, element: &AnyElement) -> bool {
+    let mut current = element.as_element().props().parent;
+    while let Some(id) = current {
+        let Some(ancestor) = scene.get(id) else {
+            return false;
+        };
+        if ancestor.as_element().props().selected {
+            return true;
+        }
+        current = ancestor.as_element().props().parent;
+    }
+    false
+}
+
+/// 从根到直接父组。叶子的世界矩阵不在这里，组节点只用来包一层 `<g>`。
+fn ancestor_group_chain(scene: &Scene, element: &AnyElement) -> Vec<ElementId> {
+    let mut chain = Vec::new();
+    let mut current = element.as_element().props().parent;
+    while let Some(id) = current {
+        let Some(ancestor) = scene.get(id) else {
+            break;
+        };
+        if matches!(ancestor, AnyElement::Group(_)) {
+            chain.push(id);
+        }
+        current = ancestor.as_element().props().parent;
+    }
+    chain.reverse();
+    chain
+}
+
+fn leaf_fragment(element: &AnyElement) -> Option<String> {
+    match element {
+        // 纹理像素在 GPU 上，场景里只有 texture_id，无法嵌成 data URL。
+        AnyElement::Image(image) => Some(format!(
+            "  <!-- image {} skipped: texture pixels are not stored in the scene -->\n",
+            image.props.id
+        )),
+        other => write_element(other),
+    }
+}
+
+/// 子孙在绘制顺序里连成一段的组才包 `<g>`。中间夹了别的叶子时不包，以免打乱 z 顺序或写出重复 id。
+fn contiguous_group_ids(items: &[(Vec<ElementId>, String)]) -> HashSet<ElementId> {
+    let mut span: HashMap<ElementId, (usize, usize, usize)> = HashMap::new();
+    for (index, (chain, _)) in items.iter().enumerate() {
+        for id in chain {
+            let entry = span.entry(*id).or_insert((index, index, 0));
+            entry.1 = index;
+            entry.2 += 1;
+        }
+    }
+    span.into_iter()
+        .filter(|(_, (first, last, count))| last - first + 1 == *count)
+        .map(|(id, _)| id)
+        .collect()
+}
+
+fn write_with_group_wrappers(body: &mut String, items: &[(Vec<ElementId>, String)]) {
+    let wrap = contiguous_group_ids(items);
+    let mut open: Vec<ElementId> = Vec::new();
+    for (chain, fragment) in items {
+        let desired: Vec<ElementId> = chain
+            .iter()
+            .copied()
+            .filter(|id| wrap.contains(id))
+            .collect();
+        let mut prefix = 0;
+        while prefix < open.len() && prefix < desired.len() && open[prefix] == desired[prefix] {
+            prefix += 1;
+        }
+        while open.len() > prefix {
+            open.pop();
+            push_indent(body, open.len() + 1);
+            body.push_str("</g>\n");
+        }
+        while open.len() < desired.len() {
+            let id = desired[open.len()];
+            push_indent(body, open.len() + 1);
+            body.push_str(&format!("<g id=\"e{id}\">\n"));
+            open.push(id);
+        }
+        body.push_str(&indent_block(fragment, open.len()));
+    }
+    while !open.is_empty() {
+        open.pop();
+        push_indent(body, open.len() + 1);
+        body.push_str("</g>\n");
+    }
+}
+
+fn push_indent(body: &mut String, level: usize) {
+    for _ in 0..level {
+        body.push_str("  ");
+    }
+}
+
+fn indent_block(fragment: &str, extra_levels: usize) -> String {
+    if extra_levels == 0 {
+        return fragment.to_string();
+    }
+    let pad = "  ".repeat(extra_levels);
+    let mut out = String::new();
+    for line in fragment.split_inclusive('\n') {
+        if line.trim().is_empty() {
+            out.push_str(line);
+        } else {
+            out.push_str(&pad);
+            out.push_str(line);
+        }
+    }
+    out
 }
 
 fn write_element(element: &AnyElement) -> Option<String> {
@@ -669,8 +790,8 @@ mod tests {
 
         let empty = export_svg(&Scene::new(), true);
         assert!(empty.contains("<!-- nothing selected -->"));
-        assert!(empty.contains("<svg"));
-        assert!(empty.contains("</svg>"));
+        assert!(empty.contains("width=\"1\" height=\"1\" viewBox=\"0 0 1 1\""));
+        assert!(!empty.contains("viewBox=\"0 0 0 0\""));
     }
 
     #[test]
@@ -686,9 +807,13 @@ mod tests {
         scene.add_rect(hidden);
         let svg = export_svg(&scene, false);
         assert!(svg.contains("<!-- empty scene -->"));
+        assert!(svg.contains("width=\"1\" height=\"1\" viewBox=\"0 0 1 1\""));
         assert!(!svg.contains("<rect"));
+        assert!(!svg.contains("viewBox=\"0 0 0 0\""));
 
-        assert!(export_svg(&Scene::new(), false).contains("<!-- empty scene -->"));
+        let empty = export_svg(&Scene::new(), false);
+        assert!(empty.contains("<!-- empty scene -->"));
+        assert!(empty.contains("width=\"1\" height=\"1\" viewBox=\"0 0 1 1\""));
     }
 
     #[test]
@@ -706,7 +831,7 @@ mod tests {
             svg.contains("<!-- image 7 skipped: texture pixels are not stored in the scene -->")
         );
         assert!(!svg.contains("<image"));
-        assert!(svg.contains("viewBox=\"0 0 0 0\""));
+        assert!(svg.contains("viewBox=\"0 0 1 1\""));
     }
 
     #[test]
@@ -763,12 +888,77 @@ mod tests {
         assert!(svg.contains("id=\"e1\""));
         assert!(svg.contains("id=\"e2\""));
         assert!(svg.contains("<rect"));
-        assert!(!svg.contains(&format!("id=\"e{group_id}\"")));
+        let group_tag = format!("<g id=\"e{group_id}\">");
+        assert!(
+            svg.contains(&group_tag),
+            "group should wrap children without a transform"
+        );
+        assert!(!svg.contains(&format!("<g id=\"e{group_id}\" transform=")));
 
         scene.set_visible(group_id, false);
         let hidden = export_svg(&scene, false);
         assert!(hidden.contains("<!-- empty scene -->"));
         assert!(!hidden.contains("<rect"));
+        assert!(hidden.contains("width=\"1\" height=\"1\" viewBox=\"0 0 1 1\""));
+    }
+
+    #[test]
+    fn selected_group_exports_rect_and_text_hidden_group_ignores_view_box() {
+        use crate::element::Text;
+
+        let mut scene = Scene::new();
+        scene.add_rect(rect(
+            1,
+            Vec2::ZERO,
+            Vec2::new(10.0, 10.0),
+            ElementStyle::fill_only(Color::RED),
+        ));
+        scene.add_text(Text::new(2, Vec2::new(40.0, 0.0), "Hi").with_font_size(16.0));
+        scene.add_rect(rect(
+            4,
+            Vec2::new(200.0, 200.0),
+            Vec2::new(10.0, 10.0),
+            ElementStyle::fill_only(Color::BLUE),
+        ));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene
+            .get_mut(group_id)
+            .unwrap()
+            .as_element_mut()
+            .props_mut()
+            .selected = true;
+        assert!(!scene.get(1).unwrap().as_element().props().selected);
+        assert!(!scene.get(2).unwrap().as_element().props().selected);
+
+        let svg = export_svg(&scene, true);
+        assert!(svg.contains("<rect"));
+        assert!(svg.contains("<text"));
+        assert!(svg.contains(">Hi</tspan>"));
+        assert!(svg.contains("id=\"e1\""));
+        assert!(svg.contains("id=\"e2\""));
+        assert!(!svg.contains("id=\"e4\""));
+        assert!(!svg.contains("#0000ff"));
+        assert!(svg.contains(&format!("<g id=\"e{group_id}\">")));
+        assert!(!svg.contains(&format!("<g id=\"e{group_id}\" transform=")));
+        assert!(svg.contains("transform=\"matrix(1 0 0 1 40 0)\""));
+        let group_at = svg.find(&format!("id=\"e{group_id}\"")).unwrap();
+        let rect_at = svg.find("id=\"e1\"").unwrap();
+        let text_at = svg.find("id=\"e2\"").unwrap();
+        assert!(group_at < rect_at && rect_at < text_at);
+        assert!(point_in_view_box(&svg, Vec2::ZERO));
+        assert!(point_in_view_box(&svg, Vec2::new(40.0, 0.0)));
+        assert!(!point_in_view_box(&svg, Vec2::new(200.0, 200.0)));
+
+        scene.set_visible(group_id, false);
+        let hidden = export_svg(&scene, false);
+        assert!(!hidden.contains("id=\"e1\""));
+        assert!(!hidden.contains("id=\"e2\""));
+        assert!(!hidden.contains("<text"));
+        assert!(!hidden.contains(&format!("id=\"e{group_id}\"")));
+        assert!(hidden.contains("id=\"e4\""));
+        assert!(point_in_view_box(&hidden, Vec2::new(200.0, 200.0)));
+        assert!(!point_in_view_box(&hidden, Vec2::ZERO));
+        assert!(!point_in_view_box(&hidden, Vec2::new(40.0, 0.0)));
     }
 
     fn point_in_view_box(svg: &str, point: Vec2) -> bool {

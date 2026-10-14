@@ -33,7 +33,7 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 
 ## SVG
 
-`export_svg(selected_only)` 走和 PNG 相同的 `elements_in_paint_order`。自己或祖先不可见（`Scene::is_effectively_visible`）的元素跳过。`selected_only` 为 false 时 viewBox 是全部导出图元的世界包围盒（再外扩 2 个世界单位）；为 true 时只含自身 `selected` 的元素，不把选中组展开成未选中的子元素。
+`export_svg(selected_only)` 走和 PNG 相同的 `elements_in_paint_order`。自己或祖先不可见（`Scene::is_effectively_visible`）的元素跳过，也不计入 viewBox。`selected_only` 为 false 时 viewBox 是全部导出叶子的世界包围盒（再外扩 2 个世界单位）；为 true 时包含自身 `selected` 的叶子，以及选中组下的全部可见子孙叶子。没有叶子时 viewBox 是 `0 0 1 1`。
 
 | 元素 | SVG |
 | --- | --- |
@@ -43,6 +43,6 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 | path | `<polyline>`，`stroke-miterlimit="4"` |
 | image | 跳过。像素不在场景里，文件中留 `<!-- image N skipped: ... -->` |
 | text | `<text>` + `<tspan>`。锚点与 `TextAlign` 一致，`font-size` 是世界单位字号 |
-| group | 不输出。子元素已是世界变换，各自写成上面的图元。隐藏组会藏住子孙 |
+| group | 不画几何。子孙已是世界变换，矩阵不再乘组变换。绘制顺序里连成一段时写成不带 `transform` 的 `<g id="eN">`。隐藏组藏住子孙 |
 
 变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。Y 轴向下。
