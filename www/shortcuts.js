@@ -61,6 +61,7 @@ export const TOOL_LABELS = {
  * 字母工具不要求 Shift 的状态。Shift+H / Shift+V / Shift+R 比工具键更具体，分别翻转或顺时针转 90°；
  * Shift+Alt+R 逆时针转 90°。不带 Shift 的 H / V / R 仍是平移、选择、矩形。
  * Shift+1 缩放到适合，Shift+2 缩放到选中，Shift+0 为 100%。数字键用 `code`，避开 Shift 改写 `key`。
+ * Ctrl/Cmd+L 切换锁定，Ctrl/Cmd+Shift+H 切换隐藏。不带修饰键的 L / H 仍是直线和平移。
  *
  * @type {Shortcut[]}
  */
@@ -458,6 +459,28 @@ export const SHORTCUTS = [
     keys: ['r'],
     shift: true,
     alt: true,
+    allowRepeat: false,
+  },
+  {
+    id: 'toggle-lock',
+    action: '锁定或解锁选中元素',
+    tool: 'canvas',
+    handler: 'toggleLock',
+    label: 'L',
+    keys: ['l'],
+    ctrl: true,
+    shift: false,
+    allowRepeat: false,
+  },
+  {
+    id: 'toggle-hide',
+    action: '隐藏或显示选中元素',
+    tool: 'canvas',
+    handler: 'toggleHide',
+    label: 'H',
+    keys: ['h'],
+    ctrl: true,
+    shift: true,
     allowRepeat: false,
   },
   {

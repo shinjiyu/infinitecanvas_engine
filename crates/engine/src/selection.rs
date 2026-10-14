@@ -21,10 +21,12 @@ impl SelectionManager {
 
     /// Select a single element. When `additive` is false, previous selection is cleared.
     ///
-    /// Locked elements, and elements under a locked ancestor, are rejected. The previous
-    /// selection is left unchanged in that case.
+    /// Locked elements stay selectable: the layers panel uses this, and a lock shortcut
+    /// can toggle them back off. Canvas hit-testing, marquee selection, and
+    /// [`Self::select_all`] still skip locked elements. Transforms are refused separately
+    /// by the scene.
     pub fn select_element(&mut self, scene: &mut Scene, id: ElementId, additive: bool) -> bool {
-        if !scene.contains(id) || scene.is_effectively_locked(id) {
+        if !scene.contains(id) {
             return false;
         }
 
@@ -120,6 +122,10 @@ impl SelectionManager {
         ids
     }
 
+    /// 框选与矩形相交的元素。
+    ///
+    /// 隐藏元素（含被隐藏的祖先）和锁定元素（含被锁定的祖先）不参与。
+    /// `additive` 为 false 时先清空当前选择。矩形任一边短于 2 个世界单位时视为无效。
     pub fn select_in_rect(
         &mut self,
         scene: &mut Scene,
@@ -140,7 +146,8 @@ impl SelectionManager {
 
         let mut hits = Vec::new();
         for element in scene.iter() {
-            if scene.is_effectively_locked(element.id()) {
+            let id = element.id();
+            if scene.is_effectively_locked(id) || !scene.is_effectively_visible(id) {
                 continue;
             }
             let bounds = element.as_element().world_bounds();
@@ -167,8 +174,8 @@ impl SelectionManager {
 
     /// 按元素上的 `selected` 标记重建选择集
     ///
-    /// 导入场景后调用。锁定的元素（含被锁定祖先挡住的子孙）会清掉 `selected`，
-    /// 不能留在选择集里。
+    /// 导入场景后调用。锁定的元素可以留在选择集里，和 [`Self::select_element`] 一致。
+    /// 画布命中、框选和全选仍然跳过它们。
     ///
     /// # 参数
     /// - `scene`: 已载入的场景
@@ -180,12 +187,6 @@ impl SelectionManager {
             .map(|element| element.id())
             .collect();
         for id in flagged {
-            if scene.is_effectively_locked(id) {
-                if let Some(element) = scene.get_mut(id) {
-                    element.as_element_mut().props_mut().selected = false;
-                }
-                continue;
-            }
             self.selected.insert(id);
         }
     }
@@ -379,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn locked_elements_cannot_be_selected_or_marquee_picked() {
+    fn locked_elements_stay_selectable_but_marquee_skips_them() {
         let mut scene = Scene::new();
         scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
         scene.add_rect(Rectangle::new(
@@ -390,9 +391,10 @@ mod tests {
         scene.set_locked(1, true);
 
         let mut selection = SelectionManager::new();
-        assert!(!selection.select_element(&mut scene, 1, false));
-        assert!(selection.is_empty());
-        assert!(!scene.get(1).unwrap().as_element().props().selected);
+        assert!(selection.select_element(&mut scene, 1, false));
+        assert!(selection.is_selected(1));
+        assert!(scene.get(1).unwrap().as_element().props().selected);
+        assert!(scene.translate_element(1, Vec2::new(3.0, 0.0)).is_err());
         assert!(selection.select_element(&mut scene, 2, false));
 
         let hits = selection.select_in_rect(&mut scene, Rect::new(-20.0, -20.0, 80.0, 40.0), false);
@@ -404,12 +406,53 @@ mod tests {
         let group_id = scene.group(&[1, 2]).unwrap();
         scene.set_locked(group_id, true);
         selection.clear(&mut scene);
-        assert!(!selection.select_element(&mut scene, 2, false));
-        assert!(!selection.select_element(&mut scene, group_id, false));
+        assert!(selection.select_element(&mut scene, 2, false));
+        assert!(selection.select_element(&mut scene, group_id, false));
+        assert!(scene.translate_element(2, Vec2::new(3.0, 0.0)).is_err());
+        assert!(scene
+            .translate_element(group_id, Vec2::new(3.0, 0.0))
+            .is_err());
     }
 
     #[test]
-    fn sync_from_scene_drops_locked_selection() {
+    fn hidden_elements_are_not_marquee_picked() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let child = 3;
+        scene.add_rect(Rectangle::new(
+            child,
+            Vec2::new(80.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let sibling = 4;
+        scene.add_rect(Rectangle::new(
+            sibling,
+            Vec2::new(110.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[child, sibling]).unwrap();
+        scene.set_visible(1, false);
+        scene.set_visible(group_id, false);
+
+        let mut selection = SelectionManager::new();
+        let hits =
+            selection.select_in_rect(&mut scene, Rect::new(-20.0, -20.0, 200.0, 40.0), false);
+        assert!(!hits.contains(&1));
+        assert!(hits.contains(&2));
+        assert!(!hits.contains(&child));
+        assert!(!hits.contains(&sibling));
+        assert!(!hits.contains(&group_id));
+        assert!(!selection.is_selected(1));
+        assert!(!selection.is_selected(child));
+    }
+
+    #[test]
+    fn sync_from_scene_keeps_locked_selection() {
         let mut scene = Scene::new();
         let mut locked = Rectangle::new(1, Vec2::ZERO, Vec2::ONE);
         locked.props.selected = true;
@@ -418,7 +461,7 @@ mod tests {
 
         let mut selection = SelectionManager::new();
         selection.sync_from_scene(&mut scene);
-        assert!(selection.is_empty());
-        assert!(!scene.get(1).unwrap().as_element().props().selected);
+        assert!(selection.is_selected(1));
+        assert!(scene.get(1).unwrap().as_element().props().selected);
     }
 }

@@ -51,10 +51,11 @@ pub use camera_fit::{
     zoom_viewport_to_selection, CameraPose, DEFAULT_FIT_PADDING,
 };
 pub use command::{
-    apply_nudge, apply_stack_reorder, AddElementCommand, Command, CommandHistory,
-    DuplicateElementsCommand, MoveCommand, NudgeDirection, NudgeElementsCommand,
-    PasteElementsCommand, RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand,
-    ReorderSelectionCommand, SetStyleCommand, StackOrderAction, TransformElementsCommand,
+    apply_nudge, apply_set_locked, apply_set_visibility, apply_stack_reorder, apply_toggle_locked,
+    apply_toggle_visibility, AddElementCommand, Command, CommandHistory, DuplicateElementsCommand,
+    MoveCommand, NudgeDirection, NudgeElementsCommand, PasteElementsCommand, RemoveElementCommand,
+    RemoveElementsCommand, ReorderOutlineCommand, ReorderSelectionCommand, SetLockedCommand,
+    SetStyleCommand, SetVisibilityCommand, StackOrderAction, TransformElementsCommand,
     UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{

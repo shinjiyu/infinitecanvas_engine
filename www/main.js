@@ -785,6 +785,12 @@ function dispatchShortcut(shortcut, engine) {
     case 'rotate':
       rotateSelectionQuarter(engine, shortcut.dir);
       break;
+    case 'toggleLock':
+      toggleSelectionLocked(engine);
+      break;
+    case 'toggleHide':
+      toggleSelectionVisible(engine);
+      break;
     case 'escape':
       if (escapeAction(isHelpOpen()) === 'closeHelp') {
         setHelpOpen(false);
@@ -857,6 +863,36 @@ function flipSelection(engine, axis) {
     scheduleAutosave(engine);
     syncPropertyPanel(engine);
     setStatus(axis === 'vertical' ? '已垂直翻转' : '已水平翻转');
+  }
+}
+
+/**
+ * 切换当前选中的锁定。与图层面板的锁按钮共用引擎命令，空选不入栈。
+ *
+ * @param {WasmCanvas} engine
+ */
+function toggleSelectionLocked(engine) {
+  if (typeof engine.toggle_selection_locked !== 'function') return;
+  if (engine.toggle_selection_locked()) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+    layerPanel?.sync();
+    setStatus('已切换锁定');
+  }
+}
+
+/**
+ * 切换当前选中的可见性。与图层面板的眼睛按钮共用引擎命令，空选不入栈。
+ *
+ * @param {WasmCanvas} engine
+ */
+function toggleSelectionVisible(engine) {
+  if (typeof engine.toggle_selection_visible !== 'function') return;
+  if (engine.toggle_selection_visible()) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+    layerPanel?.sync();
+    setStatus('已切换隐藏');
   }
 }
 

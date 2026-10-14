@@ -2,8 +2,9 @@
  * 图层面板。
  *
  * 从 `get_scene_tree` 读出场景树，虚拟滚动只挂上视口里的行。
- * 点击行选中画布元素；画布选中反向高亮。拖拽改兄弟顺序或移入/移出组，
- * 走 `reorder_element`（Command，可撤销）。眼睛和锁调用已有的显隐/锁定 API。
+ * 点击行选中画布元素，锁定的行也可以选中，但不能拖拽。画布选中反向高亮。
+ * 拖拽改兄弟顺序或移入/移出组，走 `reorder_element`（Command，可撤销）。
+ * 眼睛和锁调用 `set_element_visible` / `set_element_locked`，和快捷键同一条可撤销命令。
  *
  * 兄弟列表在引擎里从后往前（下标 0 是最底层）。面板把每一层反过来画，
  * 最上面的一行是最前面的元素。
@@ -348,12 +349,14 @@ export function attachLayerPanel(engine, hooks = {}) {
 
   const panel = {
     /**
-     * 结构版本变了就重读场景树。选中变化只改高亮。
+     * 结构版本或显隐/锁定版本变了就重读场景树。选中变化只改高亮。
      *
      * @param {boolean} [force] 忽略版本，强制重读
      */
     sync(force = false) {
-      const nextEpoch = String(engine.get_structure_epoch());
+      const structure = typeof engine.get_structure_epoch === 'function' ? engine.get_structure_epoch() : 0;
+      const flags = typeof engine.get_flags_epoch === 'function' ? engine.get_flags_epoch() : 0;
+      const nextEpoch = `${structure}:${flags}`;
       if (force || nextEpoch !== epoch) {
         const started = performance.now();
         const snapshot = engine.get_scene_tree();
@@ -406,8 +409,13 @@ export function attachLayerPanel(engine, hooks = {}) {
     if (!(rowEl instanceof HTMLElement)) return;
     const index = Number(rowEl.dataset.index);
     const row = rows[index];
-    if (!row || row.locked || row.ancestorLocked) {
+    if (!row) {
       drag = null;
+      return;
+    }
+    if (row.locked || row.ancestorLocked) {
+      drag = null;
+      selectRow(row.id, event.shiftKey || event.metaKey || event.ctrlKey);
       return;
     }
     drag = {

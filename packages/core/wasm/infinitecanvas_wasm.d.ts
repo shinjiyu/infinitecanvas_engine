@@ -404,6 +404,10 @@ export class InfiniteCanvas {
      */
     get_element_info(id: bigint): any;
     /**
+     * 可见性或锁定的版本。图层面板用它重读眼睛和锁，不代表场景结构变了。
+     */
+    get_flags_epoch(): bigint;
+    /**
      * 获取帧计数
      */
     get_frame_count(): bigint;
@@ -836,13 +840,30 @@ export class InfiniteCanvas {
      */
     set_camera_center(x: number, y: number): void;
     /**
-     * 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+     * 设置元素锁定，并记入一条撤销记录。
      *
-     * 锁定时会取消选中该元素和它的子孙，画布上不能再点选或拖动它们。
+     * 与图层面板的锁按钮、[`Self::toggle_selection_locked`] 共用 [`infinitecanvas_engine::SetLockedCommand`]。
+     * 锁定后组和平移、变换会拒绝修改它以及它的子孙。元素仍留在选择集里，图层面板可以继续选中它；
+     * 画布命中、框选和全选会跳过。元素不存在时返回 `false`。已经是目标值时不入栈，仍返回 `true`。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_element_locked(id, true);
+     * canvas.undo();
+     * ```
      */
     set_element_locked(id: bigint, locked: boolean): boolean;
     /**
-     * 设置元素可见性。
+     * 设置元素可见性，并记入一条撤销记录。
+     *
+     * 与图层面板的眼睛按钮、[`Self::toggle_selection_visible`] 共用 [`infinitecanvas_engine::SetVisibilityCommand`]。
+     * 隐藏组不改子孙自己的标志。元素不存在时返回 `false`。已经是目标值时不入栈，仍返回 `true`。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_element_visible(id, false);
+     * canvas.undo();
+     * ```
      */
     set_element_visible(id: bigint, visible: boolean): boolean;
     /**
@@ -931,6 +952,39 @@ export class InfiniteCanvas {
      * `color`, `align`, `fontFamily`, `paddingWorld`, `textureId`
      */
     take_text_raster_jobs(): Array<any>;
+    /**
+     * 切换当前选中元素的锁定，并记入一条撤销记录。
+     *
+     * 可改的选中项里只要有一个未锁定，就把它们锁定；全部已锁定则解锁。
+     * 祖先已锁定、自己未锁定的元素跳过。锁定后仍保持选中，但不能平移或变换。
+     * 空选时不入栈。
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.toggle_selection_locked();
+     * canvas.undo();
+     * ```
+     */
+    toggle_selection_locked(): boolean;
+    /**
+     * 切换当前选中元素的可见性，并记入一条撤销记录。
+     *
+     * 全部已经隐藏时改为显示，否则隐藏仍可见的选中项。选中组时只改组自己的标志，
+     * 子孙的命中和框选按有效可见性跳过。空选或不存在的 id 不入栈。
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.toggle_selection_visible();
+     * canvas.undo();
+     * ```
+     */
+    toggle_selection_visible(): boolean;
     /**
      * 平移一个元素。目标是组时，子孙的世界坐标一起移动。
      */
@@ -1050,6 +1104,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_current_tool: (a: number) => [number, number];
     readonly infinitecanvas_get_element_count: (a: number) => number;
     readonly infinitecanvas_get_element_info: (a: number, b: bigint) => any;
+    readonly infinitecanvas_get_flags_epoch: (a: number) => bigint;
     readonly infinitecanvas_get_frame_count: (a: number) => bigint;
     readonly infinitecanvas_get_last_draw_calls: (a: number) => number;
     readonly infinitecanvas_get_last_vertex_count: (a: number) => number;
@@ -1117,6 +1172,8 @@ export interface InitOutput {
     readonly infinitecanvas_set_zoom: (a: number, b: number) => void;
     readonly infinitecanvas_take_text_edit_request: (a: number) => any;
     readonly infinitecanvas_take_text_raster_jobs: (a: number) => any;
+    readonly infinitecanvas_toggle_selection_locked: (a: number) => number;
+    readonly infinitecanvas_toggle_selection_visible: (a: number) => number;
     readonly infinitecanvas_translate_element: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_undo: (a: number) => number;
     readonly infinitecanvas_ungroup: (a: number, b: bigint) => number;

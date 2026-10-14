@@ -2,6 +2,24 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #57: 锁定/隐藏快捷键
+
+- [x] `SetLockedCommand` / `SetVisibilityCommand`：当前选择或指定 id，一条历史
+- [x] 选中组只改组自己的标志。隐藏后子孙命中和框选按 `is_effectively_visible` 跳过
+- [x] 锁定后不可平移/变换，选择保留；画布命中、框选、全选仍跳过。祖先已锁定时不越过祖先改子元素
+- [x] `flags_epoch` 前进，图层面板重读眼睛和锁；不推进 `structure_epoch`
+- [x] WASM：`toggle_selection_locked` / `toggle_selection_visible`，`set_element_locked` / `set_element_visible` 走同一条命令
+- [x] Demo：`Ctrl/Cmd+L`、`Ctrl/Cmd+Shift+H` 已登记到 `www/shortcuts.js`，帮助面板列出锁定和隐藏
+
+```text
+Ctrl/Cmd+L  /  Ctrl/Cmd+Shift+H
+        │
+        ▼
+toggle_selection_* ──► SetLockedCommand / SetVisibilityCommand
+                              ├─ 一条历史
+                              └─ flags_epoch（图层面板重读，顶点缓存不整表重排）
+```
+
 ## Issue #55: 右键上下文菜单
 
 - [x] Demo 在画布上拦截 `contextmenu`：空白处与命中元素弹出不同菜单
