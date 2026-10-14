@@ -38,6 +38,7 @@ pub mod selection_box;
 pub mod snap;
 pub mod style;
 pub mod svg;
+pub mod svg_import;
 pub mod tool;
 pub mod transform_handles;
 pub mod vertex_cache;
@@ -106,6 +107,7 @@ pub use style::{
     SelectionStyle, StyleField, StylePatch, StyleSnapshot, TextPaint,
 };
 pub use svg::{export_svg, export_svg_with_guides};
+pub use svg_import::{apply_svg_import, import_svg, ImportSvgCommand, SvgImportError};
 pub use tool::{Tool, ToolManager};
 pub use vertex_cache::{
     rebuild_all_vertices, GpuVertexWrite, RebuiltGeometry, TexturedDraw, VertexBufferKind,

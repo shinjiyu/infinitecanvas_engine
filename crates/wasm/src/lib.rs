@@ -40,6 +40,7 @@ use infinitecanvas_engine::{
         GuideSnapshot, RulerBand, RulerOrientation, GUIDE_HIT_PX, RULER_THICKNESS_PX,
     },
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
+    import_svg as import_svg_scene,
     math::{Color, Rect, Transform, Vec2},
     sample_paint_at,
     snap::{
@@ -1916,6 +1917,47 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn export_svg(&self, selected_only: bool) -> String {
         export_svg(&self.scene, selected_only)
+    }
+
+    /// 把 SVG 文本解析成场景元素，并记一条撤销记录。
+    ///
+    /// 支持 `rect`、`circle`、`ellipse`、`line`、`polyline`、`polygon`、`path`、
+    /// `text`，以及 `translate` / `scale` / `rotate` / `matrix` 的嵌套 `g`。
+    /// `image` 只接受 PNG/JPEG 的 data URL。一次导入是一条历史，Ctrl+Z 删掉整批。
+    ///
+    /// # 参数
+    /// - `svg`: SVG 文档
+    /// - `x`, `y`: viewBox 原点（没有 viewBox 时是用户坐标原点）的世界坐标
+    ///
+    /// # 返回
+    /// 新元素 ID，文档顺序。这些元素成为当前选择。
+    ///
+    /// # 错误
+    /// 空文本、非法 XML、根节点不是 `svg`，或没有可识别图元。失败时场景不变。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const ids = canvas.import_svg('<svg><rect width="10" height="10"/></svg>', worldX, worldY);
+    /// ```
+    #[wasm_bindgen]
+    pub fn import_svg(&mut self, svg: &str, x: f32, y: f32) -> Result<Array, JsValue> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(JsValue::from_str("import anchor must be finite"));
+        }
+        let ids = import_svg_scene(
+            &mut self.scene,
+            &mut self.command_history,
+            svg,
+            Vec2::new(x, y),
+        )
+        .map_err(|err| JsValue::from_str(&err.to_string()))?;
+        self.selection.clear(&mut self.scene);
+        for id in &ids {
+            self.selection.select_element(&mut self.scene, *id, true);
+        }
+        self.sync_image_textures();
+        log::info!("Imported SVG into {} elements", ids.len());
+        Ok(selection_ids_to_js_array(ids))
     }
 
     /// 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。

@@ -18,7 +18,7 @@
  * 步进倍数来自 `zoom_step`，和滚轮相同；键盘绕视口中心，滚轮绕指针。只改相机，不进撤销栈。
  * 页脚显示缩放百分比。焦点在输入框、下拉框或按钮上时，Ctrl/Cmd 缩放留给浏览器。
  * 右键空白处可粘贴、全选、缩放到适合；右键元素可复制、粘贴、克隆、删除、成组和调整层级。菜单项调用 `dispatchShortcut`。菜单里的删除只删元素。
- * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
+ * 把 PNG/JPEG 拖进画布会放进资源表。`.svg` 拖进画布或工具栏「导入 SVG」解析成元素，viewBox 原点落在指针处。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
  * @example
  * ```html
@@ -46,6 +46,7 @@ import {
   resolveContextTarget,
 } from './context-menu.js';
 import { rasterizeText } from './text-raster.js';
+import { SVG_IMPORT_DEFAULT_ANCHOR, isRasterImageFile, isSvgFile } from './svg-drop.js';
 import {
   SHORTCUTS,
   escapeAction,
@@ -264,7 +265,38 @@ async function placeImageFiles(engine, canvas, files, screen) {
 }
 
 /**
- * 画布接受拖入的图片文件。
+ * 把 SVG 文件解析进场景。`screen` 为空时 viewBox 原点落在 {@link SVG_IMPORT_DEFAULT_ANCHOR}。
+ *
+ * @param {WasmCanvas} engine
+ * @param {File[]} files
+ * @param {{ x: number, y: number } | null} screen
+ * @returns {Promise<number>}
+ */
+async function placeSvgFiles(engine, files, screen) {
+  const origin = screen
+    ? engineScreenToWorld(engine, screen.x, screen.y)
+    : SVG_IMPORT_DEFAULT_ANCHOR;
+  let placed = 0;
+  for (const file of files) {
+    if (!isSvgFile(file)) continue;
+    try {
+      const text = await file.text();
+      const offset = placed * 24;
+      const ids = engine.import_svg(text, origin.x + offset, origin.y + offset);
+      if (ids.length > 0) placed += 1;
+    } catch (error) {
+      setStatus(`SVG 导入失败：${errorText(error)}`, true);
+    }
+  }
+  if (placed > 0) {
+    scheduleAutosave(engine);
+    setStatus(placed === 1 ? '已导入 SVG' : `已导入 ${placed} 个 SVG`);
+  }
+  return placed;
+}
+
+/**
+ * 画布接受拖入的图片和 SVG。PNG/JPEG 仍走图片元素，`.svg` 解析成形状。
  *
  * @param {HTMLCanvasElement} canvas
  * @param {WasmCanvas} engine
@@ -283,14 +315,14 @@ function bindImageDrop(canvas, engine) {
     }
   });
   stage.addEventListener('drop', (event) => {
-    const files = [...(event.dataTransfer?.files ?? [])].filter((file) => {
-      if (!file.type) return true;
-      return file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/jpg';
-    });
-    if (files.length === 0) return;
+    const files = [...(event.dataTransfer?.files ?? [])];
+    const images = files.filter((file) => isRasterImageFile(file));
+    const svgs = files.filter((file) => isSvgFile(file));
+    if (images.length === 0 && svgs.length === 0) return;
     event.preventDefault();
     const point = canvasPoint(event, canvas);
-    placeImageFiles(engine, canvas, files, point);
+    if (images.length > 0) placeImageFiles(engine, canvas, images, point);
+    if (svgs.length > 0) placeSvgFiles(engine, svgs, point);
   });
 }
 
@@ -2097,6 +2129,17 @@ function bindInput(canvas, engine) {
   document.getElementById('png-selection-btn')?.addEventListener('click', () => exportPng(engine, true));
   document.getElementById('svg-btn')?.addEventListener('click', () => exportSvg(engine, false));
   document.getElementById('svg-selection-btn')?.addEventListener('click', () => exportSvg(engine, true));
+  document.getElementById('import-svg-btn')?.addEventListener('click', () => {
+    document.getElementById('import-svg-file')?.click();
+  });
+  document.getElementById('import-svg-file')?.addEventListener('change', async (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement)) return;
+    const files = [...(input.files ?? [])];
+    input.value = '';
+    if (files.length === 0) return;
+    await placeSvgFiles(engine, files, lastPointer);
+  });
   document.getElementById('snap-btn')?.addEventListener('click', () => {
     engine.set_snap_enabled(!engine.is_snap_enabled());
     syncSnapControls(engine);
@@ -2143,18 +2186,21 @@ function bindInput(canvas, engine) {
     }
     const items = event.clipboardData?.items;
     if (!items) return;
-    const files = [];
+    const imageFiles = [];
+    const svgFiles = [];
     for (const item of items) {
-      if (item.kind === 'file' && item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) files.push(file);
-      }
+      if (item.kind !== 'file') continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      if (isSvgFile(file) || item.type === 'image/svg+xml') svgFiles.push(file);
+      else if (item.type.startsWith('image/')) imageFiles.push(file);
     }
-    if (files.length > 0) {
+    if (imageFiles.length > 0 || svgFiles.length > 0) {
       event.preventDefault();
       imagePasteConsumed = imagePasteSerial;
       const point = lastPointer ?? { x: canvas.width / 2, y: canvas.height / 2 };
-      placeImageFiles(engine, canvas, files, point);
+      if (imageFiles.length > 0) placeImageFiles(engine, canvas, imageFiles, point);
+      if (svgFiles.length > 0) placeSvgFiles(engine, svgFiles, point);
       return;
     }
     // 没有图片：这次 Ctrl+V 留给元素 JSON。阻止浏览器把文本写进页面。
