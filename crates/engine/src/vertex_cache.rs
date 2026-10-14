@@ -434,20 +434,29 @@ fn mesh_for(scene: &Scene, element: &AnyElement) -> Mesh {
 
 fn generate_mesh(element: &AnyElement) -> Mesh {
     match element {
-        AnyElement::Rectangle(rect) => Mesh {
-            fill: rect.generate_fill_vertices(),
-            stroke: rect.generate_stroke_vertices(),
-            textured: Vec::new(),
-            texture_id: None,
-            underlay: false,
-        },
-        AnyElement::Circle(circle) => Mesh {
-            fill: circle.generate_fill_vertices(),
-            stroke: circle.generate_stroke_vertices(),
-            textured: Vec::new(),
-            texture_id: None,
-            underlay: false,
-        },
+        AnyElement::Rectangle(rect) => {
+            let mut fill = rect.generate_fill_vertices();
+            // 线段管线宽度固定，线宽变化靠填充缓冲里的三角形带立刻画出来。
+            fill.extend(rect.stroke_ribbon_vertices());
+            Mesh {
+                fill,
+                stroke: rect.generate_stroke_vertices(),
+                textured: Vec::new(),
+                texture_id: None,
+                underlay: false,
+            }
+        }
+        AnyElement::Circle(circle) => {
+            let mut fill = circle.generate_fill_vertices();
+            fill.extend(circle.stroke_ribbon_vertices());
+            Mesh {
+                fill,
+                stroke: circle.generate_stroke_vertices(),
+                textured: Vec::new(),
+                texture_id: None,
+                underlay: false,
+            }
+        }
         AnyElement::Image(image) => {
             if !image.props.visible {
                 return Mesh {

@@ -23,6 +23,7 @@
 mod canvas;
 mod input;
 mod renderer;
+mod style_api;
 mod texture_manager;
 
 use infinitecanvas_engine::{
@@ -155,6 +156,8 @@ pub struct InfiniteCanvas {
     perf_stats: PerformanceStats,
     /// 拖拽吸附。默认开启，阈值是屏幕像素。
     snap: SnapSettings,
+    /// 属性面板拖动中的样式基线。松手后收成一条撤销记录。
+    style_preview: Option<style_api::StylePreview>,
 }
 
 #[wasm_bindgen]
@@ -197,6 +200,7 @@ impl InfiniteCanvas {
             pending_text_edit: None,
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
+            style_preview: None,
         })
     }
 
@@ -496,6 +500,7 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn undo(&mut self) -> bool {
         self.commit_handle_gesture();
+        self.commit_style_preview();
         let textures = self.snapshot_text_textures();
         let undone = self.command_history.undo(&mut self.scene);
         if undone {
@@ -512,6 +517,7 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn redo(&mut self) -> bool {
         self.commit_handle_gesture();
+        self.commit_style_preview();
         let textures = self.snapshot_text_textures();
         let redone = self.command_history.redo(&mut self.scene);
         if redone {
@@ -1073,6 +1079,7 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn clear_scene(&mut self) {
         self.cancel_handle_gesture();
+        self.cancel_style_preview();
         let textures = self.snapshot_text_textures();
         self.selection.clear(&mut self.scene);
         self.selection_box.cancel();
@@ -1126,6 +1133,7 @@ impl InfiniteCanvas {
     pub fn import_json(&mut self, json: &str) -> Result<(), JsValue> {
         let scene = Scene::from_json(json).map_err(|err| JsValue::from_str(&err.to_string()))?;
         self.cancel_handle_gesture();
+        self.cancel_style_preview();
         let textures = self.snapshot_text_textures();
         self.pending_text_edit = None;
         self.scene = scene;
@@ -1647,6 +1655,17 @@ impl InfiniteCanvas {
                 &obj,
                 &JsValue::from_str("textureId"),
                 &JsValue::from_str(&texture_id),
+            );
+            let stroke_color = text.stroke.map(|color| color.to_hex()).unwrap_or_default();
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("strokeColor"),
+                &JsValue::from_str(&stroke_color),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("strokeWidthWorld"),
+                &JsValue::from(text.stroke_width),
             );
             jobs.push(&obj);
         }
@@ -2929,6 +2948,7 @@ mod tests {
             pending_text_edit: None,
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
+            style_preview: None,
         }
     }
 

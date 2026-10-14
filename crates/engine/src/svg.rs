@@ -349,6 +349,15 @@ fn write_text(text: &Text) -> Option<String> {
         anchor,
     );
     push_alpha_attr(&mut body, "fill-opacity", text.color.a);
+    if text.stroke_width > 0.0 {
+        let stroke = text.stroke.unwrap_or(text.color);
+        body.push_str(" stroke=\"");
+        body.push_str(&rgb_hex(stroke));
+        body.push_str("\" stroke-width=\"");
+        body.push_str(&fmt_num(text.stroke_width));
+        body.push('"');
+        push_alpha_attr(&mut body, "stroke-opacity", stroke.a);
+    }
     body.push_str(">\n");
     let line_height = font_size * 1.25;
     for (index, line) in text.content.split('\n').enumerate() {
@@ -359,7 +368,12 @@ fn write_text(text: &Text) -> Option<String> {
         ));
     }
     body.push_str("    </text>\n");
-    Some(wrap_group(text.props.id, &text.props.transform, 1.0, &body))
+    Some(wrap_group(
+        text.props.id,
+        &text.props.transform,
+        text.opacity,
+        &body,
+    ))
 }
 
 fn write_path(path: &Path) -> Option<String> {

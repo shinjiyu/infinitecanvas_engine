@@ -23,6 +23,8 @@ T 单击 / add_text
 | content | 文本，保留换行 |
 | font_size | 世界单位字号 |
 | color | 填充色 |
+| opacity | 元素不透明度，乘在纹理 tint 上。缺省 1 |
+| stroke / stroke_width | 可选描边。线宽缺省 0；大于 0 时用描边色，没有描边色就用填充色 |
 | align | 左 / 中 / 右，同时是锚点 |
 | texture | 当前 LOD 的光栅结果 |
 
@@ -34,10 +36,10 @@ T 单击 / add_text
 
 编辑用 DOM textarea 盖在文字上。编辑期间不画纹理。Enter 提交并进入撤销栈，Esc 取消，空白内容会删除元素。
 
-场景 JSON（version 1）保存 `content`、`font_size`、`color`、`align`、`font_family`、`size` 和 `props.transform` 的旋转/缩放。光栅用的纹理 id、LOD、`revision`、`editing` 以及元素的 `dirty` 都不写入文件。T 工具的双击计时用 `web_time::Instant`，在 wasm32 上走 `Performance.now`。
+场景 JSON（version 1）保存 `content`、`font_size`、`color`、`opacity`、`stroke`、`stroke_width`、`align`、`font_family`、`size` 和 `props.transform` 的旋转/缩放。这些字段都可省略：不透明度缺省 1，描边缺省无、线宽缺省 0，因此旧文件仍能导入。光栅用的纹理 id、LOD、`revision`、`editing` 以及元素的 `dirty` 都不写入文件。T 工具的双击计时用 `web_time::Instant`，在 wasm32 上走 `Performance.now`。
 
 顶点进持久纹理缓冲。创建、改内容/外观、`commit_text_raster`、进入或离开编辑，以及对应的撤销/重做，都调用 `Scene::mark_dirty`。文本不画纯色底。
 
-SVG 导出不使用光栅纹理，写成 `<text>` / `<tspan>`：锚点与 `TextAlign` 相同，`font-size` 是世界单位字号，行距为字号的 1.25 倍。
+SVG 导出不使用光栅纹理，写成 `<text>` / `<tspan>`：锚点与 `TextAlign` 相同，`font-size` 是世界单位字号，行距为字号的 1.25 倍。不透明度写在外层 `<g>` 上。线宽大于 0 时带 `stroke` 和 `stroke-width`。
 
 PNG 不读取 Canvas2D 纹理。导出用 `font8x8` 把已覆盖的字符画进文字块；中文等没有点阵的字符画成方框。

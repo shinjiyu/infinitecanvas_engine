@@ -267,6 +267,16 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_clear_selection(this.__wbg_ptr);
     }
     /**
+     * 把进行中的样式预览收成一条撤销记录。
+     *
+     * 场景已经是预览后的值，所以只入栈、不再执行。没有变化时返回 false。
+     * @returns {boolean}
+     */
+    commit_style_preview() {
+        const ret = wasm.infinitecanvas_commit_style_preview(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 提交编辑内容。
      *
      * 内容有变化时写入撤销栈。只剩空白时删除元素，撤销会把原文放回来。
@@ -593,6 +603,29 @@ export class InfiniteCanvas {
         return ret >>> 0;
     }
     /**
+     * 读取当前选择的公共样式。
+     *
+     * 没有选中元素时 `count` 为 0，`hasShape` / `hasText` 为 false。
+     * 组会展开到子孙。字段含义：
+     *
+     * - `fill` / `stroke` / `textColor`：`#rrggbbaa`，没有颜色时为 null
+     * - `fillMixed` 等：多选不一致
+     * - `fillNone`：大家都没有填充或描边
+     * - `fillSupported`：选择里有这个字段
+     * - `strokeWidth` / `opacity` / `fontSize`：统一数值，混合或不支持时为 null
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const style = canvas.get_selection_style();
+     * if (style.hasShape && !style.fillMixed) colorInput.value = style.fill.slice(0, 7);
+     * ```
+     * @returns {any}
+     */
+    get_selection_style() {
+        const ret = wasm.infinitecanvas_get_selection_style(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 当前吸附阈值（屏幕像素）。
      * @returns {number}
      */
@@ -905,6 +938,17 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_pop_temporary_tool(this.__wbg_ptr);
     }
     /**
+     * 预览样式。第一次调用记下基线，之后每次都从基线重放。
+     *
+     * 不进入撤销栈。松手后调用 [`Self::commit_style_preview`]。
+     * @param {any} patch
+     * @returns {boolean}
+     */
+    preview_selection_style(patch) {
+        const ret = wasm.infinitecanvas_preview_selection_style(this.__wbg_ptr, patch);
+        return ret !== 0;
+    }
+    /**
      * 临时切换到手型工具（按住空格）
      */
     push_hand_tool() {
@@ -1018,6 +1062,19 @@ export class InfiniteCanvas {
      */
     set_image_alpha(image_id, alpha) {
         const ret = wasm.infinitecanvas_set_image_alpha(this.__wbg_ptr, image_id, alpha);
+        return ret !== 0;
+    }
+    /**
+     * 把补丁写进当前选择并记一条撤销记录。
+     *
+     * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
+     * `strokeWidth`、`opacity`、`fontSize` 是数字。`textColor` 是十六进制颜色。
+     * 没有任何变化时返回 false，也不入栈。
+     * @param {any} patch
+     * @returns {boolean}
+     */
+    set_selection_style(patch) {
+        const ret = wasm.infinitecanvas_set_selection_style(this.__wbg_ptr, patch);
         return ret !== 0;
     }
     /**
@@ -1210,6 +1267,11 @@ function __wbg_get_imports() {
         },
         __wbg___wbindgen_is_null_e343b7d08827ba72: function(arg0) {
             const ret = arg0 === null;
+            return ret;
+        },
+        __wbg___wbindgen_is_object_3c45d4f2dde4e749: function(arg0) {
+            const val = arg0;
+            const ret = typeof(val) === 'object' && val !== null;
             return ret;
         },
         __wbg___wbindgen_is_undefined_8865fb403f8fe9d8: function(arg0) {
@@ -1854,6 +1916,10 @@ function __wbg_get_imports() {
             const ret = arg0.getUniformLocation(arg1, getStringFromWasm0(arg2, arg3));
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
+        __wbg_get_31af05bd4842a84f: function() { return handleError(function (arg0, arg1) {
+            const ret = Reflect.get(arg0, arg1);
+            return ret;
+        }, arguments); },
         __wbg_get_6c896e0571ddae51: function(arg0, arg1) {
             const ret = arg0[arg1 >>> 0];
             return ret;
@@ -1870,6 +1936,10 @@ function __wbg_get_imports() {
             const ret = arg0.gpu;
             return ret;
         },
+        __wbg_has_5d6706e5209576c1: function() { return handleError(function (arg0, arg1) {
+            const ret = Reflect.has(arg0, arg1);
+            return ret;
+        }, arguments); },
         __wbg_height_fc97e1a0c2e7331f: function(arg0) {
             const ret = arg0.height;
             return ret;
@@ -2912,12 +2982,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2526, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2536, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 399, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 409, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

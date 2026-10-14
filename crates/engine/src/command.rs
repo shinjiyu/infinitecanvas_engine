@@ -4,6 +4,9 @@
 
 use crate::element::{ElementId, TextVisual};
 use crate::scene::OutlineSnapshot;
+use crate::style::{
+    apply_style_snapshot, capture_style, style_locked, style_target_ids, StylePatch, StyleSnapshot,
+};
 use crate::{math::Vec2, AnyElement, Scene};
 use std::collections::VecDeque;
 
@@ -286,6 +289,99 @@ fn apply_text_visual(scene: &mut Scene, id: ElementId, visual: &TextVisual) {
     scene.mark_dirty(id);
 }
 
+/// 一次样式修改前后的快照。
+#[derive(Debug, Clone)]
+struct StyleChange {
+    id: ElementId,
+    before: StyleSnapshot,
+    after: StyleSnapshot,
+}
+
+/// 修改一个或多个元素的填充、描边、线宽和不透明度。
+///
+/// 文本还会记录字号和文字颜色。执行和撤销都会 [`Scene::mark_dirty`]，
+/// 顶点缓存和文本光栅因此会刷新。拖动滑块时由调用方合成一条命令：
+/// 预览直接写场景，松手后用 [`SetStyleCommand::from_states`] 入栈。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::{Command, Rectangle, Scene, SetStyleCommand, StylePatch};
+/// use infinitecanvas_math::{Color, Vec2};
+///
+/// let mut scene = Scene::new();
+/// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+/// let patch = StylePatch {
+///     fill: Some(Some(Color::RED)),
+///     opacity: Some(0.5),
+///     ..StylePatch::default()
+/// };
+/// let mut cmd = SetStyleCommand::from_patch(&scene, &[1], &patch).unwrap();
+/// cmd.execute(&mut scene);
+/// ```
+#[derive(Debug)]
+pub struct SetStyleCommand {
+    changes: Vec<StyleChange>,
+}
+
+impl SetStyleCommand {
+    /// 根据当前场景和补丁生成命令。没有实际变化时返回 `None`。
+    ///
+    /// 锁定的元素（含被锁定的祖先）会跳过。选中组时补丁作用在子孙叶子上。
+    pub fn from_patch(scene: &Scene, ids: &[ElementId], patch: &StylePatch) -> Option<Self> {
+        let mut changes = Vec::new();
+        for id in style_target_ids(scene, ids) {
+            if style_locked(scene, id) {
+                continue;
+            }
+            let Some(before) = capture_style(scene, id) else {
+                continue;
+            };
+            let mut after = before.clone();
+            if after.apply_patch(patch) {
+                changes.push(StyleChange { id, before, after });
+            }
+        }
+        if changes.is_empty() {
+            None
+        } else {
+            Some(Self { changes })
+        }
+    }
+
+    /// 用已经发生的前后快照组一条命令。供滑块松手时入栈，不会再次执行。
+    ///
+    /// `before` 与 `after` 按相同元素顺序排列。
+    pub fn from_states(
+        before: Vec<(ElementId, StyleSnapshot)>,
+        after: Vec<(ElementId, StyleSnapshot)>,
+    ) -> Self {
+        let changes = before
+            .into_iter()
+            .zip(after)
+            .map(|((id, before), (_after_id, after))| StyleChange { id, before, after })
+            .collect();
+        Self { changes }
+    }
+}
+
+impl Command for SetStyleCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        for change in &self.changes {
+            apply_style_snapshot(scene, change.id, &change.after);
+        }
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        for change in &self.changes {
+            apply_style_snapshot(scene, change.id, &change.before);
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "SetStyle"
+    }
+}
+
 /// 命令历史（撤销/重做栈）
 #[derive(Default)]
 pub struct CommandHistory {
@@ -544,5 +640,108 @@ mod tests {
         );
         history.redo(&mut scene);
         assert_eq!(scene.children_of(group_id), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn set_style_apply_undo_and_redo_cover_shapes_and_text() {
+        use crate::element::{Circle, ElementStyle, Line, Path, Text};
+        use crate::style::{capture_style, StyleSnapshot};
+        use infinitecanvas_math::Color;
+
+        let mut scene = Scene::new();
+        scene.add_rect(
+            Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 8.0))
+                .with_style(ElementStyle::fill_only(Color::BLACK)),
+        );
+        scene.add_circle(
+            Circle::new(2, Vec2::new(20.0, 0.0), 6.0)
+                .with_style(ElementStyle::fill_only(Color::BLACK)),
+        );
+        scene.add_line(Line::from_world(
+            3,
+            Vec2::ZERO,
+            Vec2::new(12.0, 0.0),
+            ElementStyle::stroke_only(Color::BLACK, 1.0),
+            false,
+        ));
+        scene.add_path(Path::from_world_points(
+            4,
+            &[Vec2::ZERO, Vec2::new(8.0, 3.0)],
+            ElementStyle::stroke_only(Color::BLACK, 1.0),
+        ));
+        scene.add_text(Text::new(5, Vec2::new(0.0, 20.0), "A").with_font_size(16.0));
+
+        let patch = StylePatch {
+            fill: Some(Some(Color::RED)),
+            stroke: Some(Some(Color::BLUE)),
+            stroke_width: Some(5.0),
+            opacity: Some(0.4),
+            font_size: Some(28.0),
+            text_color: Some(Color::GREEN),
+        };
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1, 2, 3, 4, 5], &patch).unwrap()),
+            &mut scene,
+        );
+        assert!(scene.has_dirty_elements());
+        assert_eq!(history.undo_count(), 1);
+        match capture_style(&scene, 1) {
+            Some(StyleSnapshot::Shape(style)) => {
+                assert_eq!(style.fill, Some(Color::RED));
+                assert_eq!(style.stroke, Some(Color::BLUE));
+                assert_eq!(style.stroke_width, 5.0);
+                assert_eq!(style.opacity, 0.4);
+            }
+            other => panic!("shape, got {other:?}"),
+        }
+        match scene.get(5).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.font_size, 28.0);
+                assert_eq!(text.color, Color::GREEN);
+                assert_eq!(text.opacity, 0.4);
+                assert_eq!(text.stroke_width, 5.0);
+                assert!(text.needs_raster(0));
+            }
+            other => panic!("text, got {other:?}"),
+        }
+
+        assert!(history.undo(&mut scene));
+        match capture_style(&scene, 1) {
+            Some(StyleSnapshot::Shape(style)) => {
+                assert_eq!(style.fill, Some(Color::BLACK));
+                assert_eq!(style.stroke, None);
+                assert_eq!(style.opacity, 1.0);
+            }
+            other => panic!("shape, got {other:?}"),
+        }
+        match scene.get(5).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.font_size, 16.0);
+                assert_eq!(text.opacity, 1.0);
+                assert_eq!(text.stroke_width, 0.0);
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        assert!(scene.has_dirty_elements());
+
+        assert!(history.redo(&mut scene));
+        match scene.get(2).unwrap() {
+            AnyElement::Circle(circle) => {
+                assert_eq!(circle.style.fill, Some(Color::RED));
+                assert_eq!(circle.style.stroke_width, 5.0);
+            }
+            other => panic!("circle, got {other:?}"),
+        }
+        match scene.get(3).unwrap() {
+            AnyElement::Line(line) => assert_eq!(line.style.stroke_width, 5.0),
+            other => panic!("line, got {other:?}"),
+        }
+        match scene.get(4).unwrap() {
+            AnyElement::Path(path) => assert_eq!(path.style.opacity, 0.4),
+            other => panic!("path, got {other:?}"),
+        }
+
+        assert!(SetStyleCommand::from_patch(&scene, &[1], &patch).is_none());
     }
 }

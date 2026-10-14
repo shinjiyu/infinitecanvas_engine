@@ -32,6 +32,8 @@ export function rasterizeText(job) {
   const fontSizePx = Math.max(1, Number(job.fontSizePx) || 16);
   const rasterScale = Math.max(0.0001, Number(job.rasterScale) || 1);
   const paddingPx = Math.max(1, Math.ceil((Number(job.paddingWorld) || 0) * rasterScale));
+  const strokeWidthPx = Math.max(0, (Number(job.strokeWidthWorld) || 0) * rasterScale);
+  const pad = paddingPx + Math.ceil(strokeWidthPx);
   const align = job.align === 'center' || job.align === 'right' ? job.align : 'left';
   const fontFamily = job.fontFamily || 'sans-serif';
   const color = job.color || '#f4f7fb';
@@ -53,8 +55,8 @@ export function rasterizeText(job) {
     return width;
   });
 
-  const width = Math.max(1, Math.ceil(maxWidth + paddingPx * 2));
-  const height = Math.max(1, Math.ceil(lineHeight * Math.max(lines.length, 1) + paddingPx * 2));
+  const width = Math.max(1, Math.ceil(maxWidth + pad * 2));
+  const height = Math.max(1, Math.ceil(lineHeight * Math.max(lines.length, 1) + pad * 2));
   if (width > 8192 || height > 8192) {
     throw new Error(`Text raster ${width}x${height} exceeds the texture limit`);
   }
@@ -69,15 +71,21 @@ export function rasterizeText(job) {
   ctx.fillStyle = color;
   ctx.textBaseline = 'middle';
   ctx.textAlign = align;
+  if (strokeWidthPx > 0) {
+    ctx.lineWidth = strokeWidthPx;
+    ctx.strokeStyle = job.strokeColor || color;
+    ctx.lineJoin = 'round';
+  }
 
   lines.forEach((line, index) => {
-    const y = paddingPx + lineHeight * index + lineHeight / 2;
-    let x = paddingPx;
+    const y = pad + lineHeight * index + lineHeight / 2;
+    let x = pad;
     if (align === 'center') {
-      x = paddingPx + maxWidth / 2;
+      x = pad + maxWidth / 2;
     } else if (align === 'right') {
-      x = paddingPx + maxWidth;
+      x = pad + maxWidth;
     }
+    if (strokeWidthPx > 0) ctx.strokeText(line, x, y);
     ctx.fillText(line, x, y);
   });
 

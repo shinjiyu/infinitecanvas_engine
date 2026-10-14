@@ -1,4 +1,5 @@
 //! 圆形元素
+use super::stroke::{color_with_opacity, stroke_triangles, transform_vertices};
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Rect, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,7 @@ impl Circle {
             return Vec::new();
         }
 
-        let color = self.style.fill.unwrap();
+        let color = color_with_opacity(self.style.fill.unwrap(), self.style.opacity);
         let transform = &self.props.transform;
 
         // 中心点（局部坐标系）
@@ -114,11 +115,11 @@ impl Circle {
 
     /// 生成描边顶点（指定分段数）
     pub fn generate_stroke_vertices_with_segments(&self, segments: usize) -> Vec<Vertex> {
-        if self.style.stroke.is_none() || segments < 3 {
+        if self.style.stroke.is_none() || self.style.stroke_width <= 0.0 || segments < 3 {
             return Vec::new();
         }
 
-        let color = self.style.stroke.unwrap();
+        let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
         let transform = &self.props.transform;
 
         let mut vertices = Vec::new();
@@ -142,6 +143,31 @@ impl Circle {
         }
 
         vertices
+    }
+
+    /// 按线宽生成闭合描边三角形。线段管线不能表达线宽，粗描边放进填充缓冲。
+    pub(crate) fn stroke_ribbon_vertices(&self) -> Vec<Vertex> {
+        let Some(stroke) = self.style.stroke else {
+            return Vec::new();
+        };
+        if self.style.stroke_width <= 0.0 {
+            return Vec::new();
+        }
+        let color = color_with_opacity(stroke, self.style.opacity);
+        const SEGMENTS: usize = 32;
+        let mut points = Vec::with_capacity(SEGMENTS + 1);
+        let step = 2.0 * PI / SEGMENTS as f32;
+        for index in 0..=SEGMENTS {
+            let angle = index as f32 * step;
+            points.push(Vec2::new(
+                angle.cos() * self.radius,
+                angle.sin() * self.radius,
+            ));
+        }
+        transform_vertices(
+            stroke_triangles(&points, self.style.stroke_width, color),
+            &self.props.transform,
+        )
     }
 
     /// 生成所有顶点（填充 + 描边）

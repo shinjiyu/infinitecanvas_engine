@@ -30,7 +30,7 @@
       font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
     }
 
-    button, canvas { font: inherit; }
+    button, canvas, input { font: inherit; }
 
     #app {
       height: 100%;
@@ -229,6 +229,75 @@
     #text-editor[hidden] {
       display: none;
     }
+
+    .property-panel {
+      position: absolute;
+      top: 0.75rem;
+      right: 0.75rem;
+      z-index: 5;
+      width: 240px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      padding: 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(24, 27, 34, 0.94);
+      box-shadow: var(--shadow);
+    }
+
+    .property-panel[hidden] { display: none; }
+
+    .property-panel .group-label { margin: 0; }
+
+    .prop-count {
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+
+    .prop-row {
+      display: grid;
+      grid-template-columns: 4.2rem minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.35rem;
+      color: var(--text);
+      font-size: 0.75rem;
+    }
+
+    .prop-row input[type="color"] {
+      width: 100%;
+      height: 1.7rem;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: transparent;
+    }
+
+    .prop-row input[type="range"] { width: 100%; }
+
+    .prop-row input:disabled { opacity: 0.35; }
+
+    .prop-value {
+      min-width: 2.4rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .mixed-tag {
+      color: var(--amber);
+      font-size: 0.68rem;
+    }
+
+    .mixed-tag[hidden] { display: none; }
+
+    #prop-text-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+
+    #prop-text-fields[hidden] { display: none; }
 
     .fallback {
       position: absolute;
@@ -478,13 +547,55 @@
             <input id="snap-threshold" type="range" min="0" max="32" step="1" value="6">
           </label>
         </div>
-        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件。右侧图层面板可点选、拖拽排序或拖进分组，眼睛和锁控制显隐与锁定。</p>
+        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后画布右侧可改填充、描边、线宽和不透明度，文本还可以改字号和颜色；滑块松手只记一条撤销。拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件。右侧图层面板可点选、拖拽排序或拖进分组，眼睛和锁控制显隐与锁定。</p>
       </aside>
 
       <div id="stage">
         <canvas id="canvas" width="960" height="640"></canvas>
         <canvas id="guides" width="960" height="640" aria-hidden="true"></canvas>
         <textarea id="text-editor" hidden rows="1" spellcheck="false" aria-label="编辑文本"></textarea>
+        <aside id="property-panel" class="property-panel" hidden aria-label="属性">
+          <p class="group-label">属性</p>
+          <p class="prop-count">已选 <strong id="prop-count">0</strong></p>
+          <div class="prop-row" id="prop-fill-row">
+            <span>填充</span>
+            <input id="prop-fill" type="color" value="#000000" aria-label="填充颜色">
+            <label class="prop-value"><input id="prop-fill-enabled" type="checkbox" checked aria-label="启用填充"></label>
+          </div>
+          <p id="prop-fill-mixed" class="mixed-tag" hidden>填充：多种</p>
+          <div class="prop-row">
+            <span>描边</span>
+            <input id="prop-stroke" type="color" value="#000000" aria-label="描边颜色">
+            <label class="prop-value"><input id="prop-stroke-enabled" type="checkbox" aria-label="启用描边"></label>
+          </div>
+          <p id="prop-stroke-mixed" class="mixed-tag" hidden>描边：多种</p>
+          <label class="prop-row" for="prop-stroke-width">
+            <span>线宽</span>
+            <input id="prop-stroke-width" type="range" min="0" max="48" step="0.5" value="1">
+            <span id="prop-stroke-width-label" class="prop-value">1</span>
+          </label>
+          <p id="prop-stroke-width-mixed" class="mixed-tag" hidden>线宽：多种</p>
+          <label class="prop-row" for="prop-opacity">
+            <span>不透明度</span>
+            <input id="prop-opacity" type="range" min="0" max="1" step="0.01" value="1">
+            <span id="prop-opacity-label" class="prop-value">100%</span>
+          </label>
+          <p id="prop-opacity-mixed" class="mixed-tag" hidden>不透明度：多种</p>
+          <div id="prop-text-fields" hidden>
+            <label class="prop-row" for="prop-font-size">
+              <span>字号</span>
+              <input id="prop-font-size" type="range" min="8" max="256" step="1" value="32">
+              <span id="prop-font-size-label" class="prop-value">32</span>
+            </label>
+            <p id="prop-font-size-mixed" class="mixed-tag" hidden>字号：多种</p>
+            <div class="prop-row">
+              <span>文字颜色</span>
+              <input id="prop-text-color" type="color" value="#f4f7fb" aria-label="文字颜色">
+              <span></span>
+            </div>
+            <p id="prop-text-color-mixed" class="mixed-tag" hidden>文字颜色：多种</p>
+          </div>
+        </aside>
         <div id="webgpu-fallback" class="fallback" hidden>
           <div class="fallback-card" role="alert">
             <p class="eyebrow">WebGPU</p>

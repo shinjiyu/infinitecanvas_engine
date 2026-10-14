@@ -157,6 +157,12 @@ export class InfiniteCanvas {
     clear_scene(): void;
     clear_selection(): void;
     /**
+     * 把进行中的样式预览收成一条撤销记录。
+     *
+     * 场景已经是预览后的值，所以只入栈、不再执行。没有变化时返回 false。
+     */
+    commit_style_preview(): boolean;
+    /**
      * 提交编辑内容。
      *
      * 内容有变化时写入撤销栈。只剩空白时删除元素，撤销会把原文放回来。
@@ -318,6 +324,25 @@ export class InfiniteCanvas {
     get_selection_box_bounds(): any;
     get_selection_count(): number;
     /**
+     * 读取当前选择的公共样式。
+     *
+     * 没有选中元素时 `count` 为 0，`hasShape` / `hasText` 为 false。
+     * 组会展开到子孙。字段含义：
+     *
+     * - `fill` / `stroke` / `textColor`：`#rrggbbaa`，没有颜色时为 null
+     * - `fillMixed` 等：多选不一致
+     * - `fillNone`：大家都没有填充或描边
+     * - `fillSupported`：选择里有这个字段
+     * - `strokeWidth` / `opacity` / `fontSize`：统一数值，混合或不支持时为 null
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const style = canvas.get_selection_style();
+     * if (style.hasShape && !style.fillMixed) colorInput.value = style.fill.slice(0, 7);
+     * ```
+     */
+    get_selection_style(): any;
+    /**
      * 当前吸附阈值（屏幕像素）。
      */
     get_snap_threshold(): number;
@@ -464,6 +489,12 @@ export class InfiniteCanvas {
      */
     pop_temporary_tool(): void;
     /**
+     * 预览样式。第一次调用记下基线，之后每次都从基线重放。
+     *
+     * 不进入撤销栈。松手后调用 [`Self::commit_style_preview`]。
+     */
+    preview_selection_style(patch: any): boolean;
+    /**
      * 临时切换到手型工具（按住空格）
      */
     push_hand_tool(): void;
@@ -530,6 +561,14 @@ export class InfiniteCanvas {
      * 是否成功设置
      */
     set_image_alpha(image_id: bigint, alpha: number): boolean;
+    /**
+     * 把补丁写进当前选择并记一条撤销记录。
+     *
+     * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
+     * `strokeWidth`、`opacity`、`fontSize` 是数字。`textColor` 是十六进制颜色。
+     * 没有任何变化时返回 false，也不入栈。
+     */
+    set_selection_style(patch: any): boolean;
     /**
      * 开启或关闭拖拽吸附。
      *
@@ -644,6 +683,7 @@ export interface InitOutput {
     readonly infinitecanvas_clear: (a: number) => void;
     readonly infinitecanvas_clear_scene: (a: number) => void;
     readonly infinitecanvas_clear_selection: (a: number) => void;
+    readonly infinitecanvas_commit_style_preview: (a: number) => number;
     readonly infinitecanvas_commit_text_content: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_commit_text_raster: (a: number, b: bigint, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly infinitecanvas_cursor_at: (a: number, b: number, c: number) => [number, number];
@@ -668,6 +708,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_selection_bounds: (a: number) => any;
     readonly infinitecanvas_get_selection_box_bounds: (a: number) => any;
     readonly infinitecanvas_get_selection_count: (a: number) => number;
+    readonly infinitecanvas_get_selection_style: (a: number) => any;
     readonly infinitecanvas_get_snap_threshold: (a: number) => number;
     readonly infinitecanvas_get_state: (a: number) => any;
     readonly infinitecanvas_get_structure_epoch: (a: number) => bigint;
@@ -694,6 +735,7 @@ export interface InitOutput {
     readonly infinitecanvas_new: () => [number, number, number];
     readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_pop_temporary_tool: (a: number) => void;
+    readonly infinitecanvas_preview_selection_style: (a: number, b: any) => number;
     readonly infinitecanvas_push_hand_tool: (a: number) => void;
     readonly infinitecanvas_redo: (a: number) => number;
     readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
@@ -703,6 +745,7 @@ export interface InitOutput {
     readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_element_visible: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
+    readonly infinitecanvas_set_selection_style: (a: number, b: any) => number;
     readonly infinitecanvas_set_snap_enabled: (a: number, b: number) => void;
     readonly infinitecanvas_set_snap_threshold: (a: number, b: number) => void;
     readonly infinitecanvas_set_text_editing: (a: number, b: bigint, c: number) => number;
