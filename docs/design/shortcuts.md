@@ -16,7 +16,7 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 焦点在 `input`、`textarea`、`select` 或 `contenteditable` 上时不触发。Esc 在帮助面板打开时先关闭面板，否则取消选择。`M` 显示或隐藏小地图。
 
-复制、粘贴、克隆走同一张表：`Ctrl/Cmd+C`、`Ctrl/Cmd+V`、`Ctrl/Cmd+D`（不带 Shift）。方向键微调也在表里，普通步长 1 个世界单位，Shift 为 10 倍；带 Ctrl、Alt 或 ⌘ 的方向键不触发。粘贴和复制仍由 `www/clipboard.js` 读写系统剪贴板，失败时退回内存。
+复制、粘贴、克隆走同一张表：`Ctrl/Cmd+C`、`Ctrl/Cmd+V`、`Ctrl/Cmd+D`（不带 Shift）。方向键微调也在表里，普通步长 1 个世界单位，Shift 为 10 倍；带 Ctrl、Alt 或 ⌘ 的方向键不触发。粘贴和复制仍由 `www/clipboard.js` 读写系统剪贴板，失败时退回内存。`Ctrl/Cmd+V` 不调用 `preventDefault`，好让 `paste` 事件先看到剪贴板。有 PNG/JPEG 时页面用 `add_image_bytes` 粘贴图片；没有图片时才粘贴元素 JSON。
 
 层级也在这张表里：`]` 前移，`[` 后移，`Ctrl/Cmd+]` 置顶，`Ctrl/Cmd+[` 置底。Shift 或 Alt 不触发。图层面板上的四个按钮调用同一个 `reorder_selection`。
 

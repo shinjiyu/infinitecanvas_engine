@@ -216,6 +216,7 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] 补齐删除（Delete/Backspace）、全选（Ctrl/Cmd+A）、Esc 取消选择、Shift+1 缩放到适合、Shift+0 为 100%
 - [x] 输入框、textarea、select、contenteditable 聚焦时不触发；Mac 显示 ⌘，其他平台显示 Ctrl
 - [x] Ctrl/Cmd+C / V / D 复制、粘贴、原地克隆，走同一张表
+- [x] Ctrl/Cmd+V 与图片粘贴共用：剪贴板有 PNG/JPEG 时粘贴图片，否则粘贴元素 JSON
 - [x] 方向键微调选中元素（1 世界单位），Shift+方向键为 10 倍；带 Ctrl / Alt / ⌘ 不触发
 - [x] `]` / `[` 前移 / 后移，Ctrl/Cmd+] / Ctrl/Cmd+[ 置顶 / 置底
 - [x] WASM 只新增 `delete_selection`、`select_all`、`zoom_to_fit`、`set_zoom`
