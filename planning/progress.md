@@ -114,13 +114,24 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 - [x] Demo 保存/打开与 localStorage 自动保存
 - [x] JSON round-trip 与 PNG 单元测试
 
-**依赖**: M1 完成。#7 已合并：`rotation` / `scale` 写在 `Transform` 上并参与往返。Text（#4）以 `type: "text"` 进入同一版本。`dirty` 和文本光栅字段都不写入 JSON。未知字段仍会被忽略。
+**依赖**: M1 完成。#7 已合并：`rotation` / `scale` 写在 `Transform` 上并参与往返。Text（#4）以 `type: "text"` 进入同一版本，`parent` / `locked` 一起往返。`dirty` 和文本光栅字段都不写入 JSON。分组（#13）用 `type: group` 写入 `children` 和 `parent`。未知字段仍会被忽略。
 
 ---
 
-## M3: 场景管理 (8/9) - 🔄 进行中
+## 分组与场景树 (#13)
 
-- [ ] M3.1: 场景图树结构（待定：当前扁平结构满足需求）
+- [x] `Group` 元素，按顺序保存子元素 ID；`ElementProps.parent` / `locked`
+- [x] `Scene::group` / `ungroup` / `enter_group` / `leave_group`
+- [x] 平移组时子孙世界坐标同步；旋转和均匀缩放用 `Transform::rebase_between`（与 #7 手柄同一条写回路径）
+- [x] `Scene::scene_tree()`：根 → 组 → 叶子，含可见性与锁定
+- [x] 单测：成组/解散、子元素命中、组变换、场景 JSON 往返（`type: group` + `children` / `parent`）
+- [x] 组平移、旋转、缩放和显隐会把子树标脏，顶点缓存只重写这些元素
+- [x] 拖拽吸附修正走 `translate_ids`；选中组用叶子包围盒并集，不吸附到组本身或正在拖动的子孙
+- [x] Text 可以进组，随组平移/缩放/旋转并标脏；JSON 写出 `parent` / `locked`，光栅字段仍 `serde(skip)`
+
+## M3: 场景管理 (9/9) - ✅ 已完成
+
+- [x] M3.1: 场景图树结构（#13：Group + 场景树；世界变换由组增量传播）
 - [x] M3.2: 空间索引 - QuadTree（基础实现，支持点查询和范围查询）
 - [x] M3.3: 视口裁剪（跳过渲染视口外元素）
 - [x] M3.4: 批量渲染（顶点合并到单个 draw call，60 FPS @ 1100 元素）
@@ -132,15 +143,15 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 
 ### M3 详细子任务规划
 
-**M3.1 场景图树结构**（可选）
-- M3.1.1: 设计 SceneNode 和 SceneTree 结构
-- M3.1.2: 实现父子关系管理
-- M3.1.3: 实现相对变换（子元素继承父变换）
-- M3.1.4: 添加分组/解组 API
+**M3.1 场景图树结构**（#13）
+- [x] M3.1.1: `SceneTree` / `Group`
+- [x] M3.1.2: 父子关系（成组、解散、进组、出组）
+- [x] M3.1.3: 组变换传播到子元素世界坐标（平移、旋转、均匀缩放）
+- [x] M3.1.4: 分组 / 解组 API，以及 WASM `group_elements` / `get_scene_tree`
 
 **M3.5 脏标记**
 - [x] M3.5.1: 元素 dirty 标记，场景维护待更新 id
-- [x] M3.5.2: 只重生成变化元素（矩形/圆/图片/直线/箭头/路径；手柄旋转/缩放、多选与撤销）
+- [x] M3.5.2: 只重生成变化元素（矩形/圆/图片/直线/箭头/路径，以及组移动后的子孙；手柄旋转/缩放、多选与撤销）
 - [x] M3.5.4: `dirty` 不进 JSON；`import_json` 后整表重建顶点
 - [x] M3.5.3: 平移/缩放不重建顶点，只更新投影 uniform
 

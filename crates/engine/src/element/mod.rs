@@ -2,6 +2,7 @@
 //!
 //! 提供无限画布上的各种图形元素
 pub mod circle;
+pub mod group;
 pub mod image;
 pub mod line;
 pub mod path;
@@ -10,6 +11,7 @@ mod stroke;
 pub mod text;
 
 pub use circle::Circle;
+pub use group::Group;
 pub use image::Image;
 pub use line::Line;
 pub use path::Path;
@@ -67,6 +69,14 @@ pub struct ElementProps {
     /// 层级（z-index）
     #[serde(default)]
     pub z_index: i32,
+    /// 父元素。`None` 表示挂在场景根上。只有 [`crate::Group`] 会成为父节点。
+    ///
+    /// `serde(default)` 让还没有层级字段的旧 JSON 仍能反序列化。
+    #[serde(default)]
+    pub parent: Option<ElementId>,
+    /// 是否锁定。锁定的元素及其子孙拒绝变换；大纲面板用它画锁图标。
+    #[serde(default)]
+    pub locked: bool,
     /// 几何、样式或变换已变化，需要重新生成顶点。
     ///
     /// 运行时状态，不写入场景 JSON。新建和导入的元素默认为 `true`。
@@ -83,6 +93,8 @@ impl PartialEq for ElementProps {
             && self.visible == other.visible
             && self.selected == other.selected
             && self.z_index == other.z_index
+            && self.parent == other.parent
+            && self.locked == other.locked
     }
 }
 
@@ -101,6 +113,8 @@ impl ElementProps {
             visible: true,
             selected: false,
             z_index: 0,
+            parent: None,
+            locked: false,
             dirty: true,
         }
     }

@@ -41,7 +41,7 @@ pub fn hit_test_point(scene: &Scene, point: Vec2, options: &HitTestOptions) -> V
     elements.reverse(); // highest z-index first
 
     for element in elements {
-        if !options.include_invisible && !element.as_element().props().visible {
+        if !options.include_invisible && !scene.is_effectively_visible(element.id()) {
             continue;
         }
 

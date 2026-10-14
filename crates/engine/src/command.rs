@@ -37,29 +37,12 @@ impl MoveCommand {
 
 impl Command for MoveCommand {
     fn execute(&mut self, scene: &mut Scene) {
-        for id in &self.element_ids {
-            if let Some(element) = scene.get_mut(*id) {
-                element
-                    .as_element_mut()
-                    .props_mut()
-                    .transform
-                    .translate(self.delta);
-            }
-            scene.mark_dirty(*id);
-        }
+        // 组的平移会带到子孙，并把子树标脏。列表里同时有组及其子孙时只移动一次。
+        scene.translate_ids(&self.element_ids, self.delta);
     }
 
     fn undo(&mut self, scene: &mut Scene) {
-        for id in &self.element_ids {
-            if let Some(element) = scene.get_mut(*id) {
-                element
-                    .as_element_mut()
-                    .props_mut()
-                    .transform
-                    .translate(-self.delta);
-            }
-            scene.mark_dirty(*id);
-        }
+        scene.translate_ids(&self.element_ids, -self.delta);
     }
 
     fn name(&self) -> &'static str {
@@ -162,13 +145,8 @@ impl TransformElementsCommand {
     }
 
     fn apply(scene: &mut Scene, states: &[(ElementId, crate::math::Transform)]) {
-        for (id, transform) in states {
-            if let Some(element) = scene.get_mut(*id) {
-                element.as_element_mut().props_mut().transform = *transform;
-            }
-            // 撤销和重做都要重生成顶点。多选时列表里的每个元素各记一次。
-            scene.mark_dirty(*id);
-        }
+        // 组变换通过 Scene 传播到子孙，并标脏需要重生成的顶点。
+        scene.apply_world_transforms(states);
     }
 }
 

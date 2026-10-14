@@ -96,6 +96,18 @@ struct Mesh {
     underlay: bool,
 }
 
+impl Mesh {
+    fn empty() -> Self {
+        Self {
+            fill: Vec::new(),
+            stroke: Vec::new(),
+            textured: Vec::new(),
+            texture_id: None,
+            underlay: false,
+        }
+    }
+}
+
 const ZERO_VERTEX: Vertex = Vertex {
     position: [0.0, 0.0],
     color: [0.0, 0.0, 0.0, 0.0],
@@ -242,7 +254,7 @@ impl VertexCache {
             let id = self.order[index];
             let mesh = {
                 let element = scene.get(id).expect("ordered element exists");
-                generate_mesh(element)
+                mesh_for(scene, element)
             };
             self.append_slot(id, mesh);
             if let Some(element) = scene.get_mut(id) {
@@ -277,7 +289,7 @@ impl VertexCache {
             if !self.slots.contains_key(&id) {
                 return self.repack(scene);
             }
-            let mesh = generate_mesh(element);
+            let mesh = mesh_for(scene, element);
             if let Some(element) = scene.get_mut(id) {
                 element.as_element_mut().clear_dirty();
             }
@@ -404,12 +416,20 @@ pub fn rebuild_all_vertices(scene: &Scene) -> RebuiltGeometry {
         let Some(element) = scene.get(id) else {
             continue;
         };
-        let mesh = generate_mesh(element);
+        let mesh = mesh_for(scene, element);
         geometry.fill.extend(mesh.fill);
         geometry.stroke.extend(mesh.stroke);
         geometry.textured.extend(mesh.textured);
     }
     geometry
+}
+
+/// 组没有自己的三角形。被隐藏的组会让子孙也返回空网格。
+fn mesh_for(scene: &Scene, element: &AnyElement) -> Mesh {
+    if !scene.is_effectively_visible(element.id()) {
+        return Mesh::empty();
+    }
+    generate_mesh(element)
 }
 
 fn generate_mesh(element: &AnyElement) -> Mesh {
@@ -467,6 +487,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             texture_id: text.texture_id.clone(),
             underlay: false,
         },
+        AnyElement::Group(_) => Mesh::empty(),
     }
 }
 
@@ -656,6 +677,78 @@ mod tests {
             _ => panic!("rect"),
         };
         assert_eq!(after, expected.as_slice());
+    }
+
+    #[test]
+    fn moving_a_group_updates_cached_child_vertices() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(20.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let mut cache = sync_clean(&mut scene);
+        let before_left = cache.fill_slice(1).unwrap().to_vec();
+        let before_right = cache.fill_slice(2).unwrap().to_vec();
+
+        scene
+            .translate_element(group_id, Vec2::new(5.0, -2.0))
+            .unwrap();
+        let sync = cache.sync(&mut scene);
+        assert!(sync.regenerated >= 2);
+        assert!(!sync.geometry_unchanged);
+        assert_ne!(cache.fill_slice(1).unwrap(), before_left.as_slice());
+        assert_ne!(cache.fill_slice(2).unwrap(), before_right.as_slice());
+        assert_eq!(
+            cache.fill_slice(1).unwrap(),
+            rect_fill(&scene, 1).as_slice()
+        );
+        assert_eq!(
+            cache.fill_slice(2).unwrap(),
+            rect_fill(&scene, 2).as_slice()
+        );
+        assert!(cache.fill_slice(group_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn hiding_a_group_clears_cached_child_vertices() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(20.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let mut cache = sync_clean(&mut scene);
+        assert!(!cache.fill_slice(1).unwrap().is_empty());
+
+        assert!(scene.set_visible(group_id, false));
+        let _ = cache.sync(&mut scene);
+        // 非尾部槽位会把顶点清零并保留长度，避免为一次显隐整表重排。
+        assert_ne!(
+            cache.fill_slice(1).unwrap(),
+            rect_fill(&scene, 1).as_slice()
+        );
+        assert!(cache
+            .fill_slice(1)
+            .unwrap()
+            .iter()
+            .all(|vertex| vertex.position == [0.0, 0.0]));
+        assert!(cache
+            .fill_slice(2)
+            .unwrap()
+            .iter()
+            .all(|vertex| vertex.position == [0.0, 0.0]));
+
+        assert!(scene.set_visible(group_id, true));
+        let _ = cache.sync(&mut scene);
+        assert_eq!(
+            cache.fill_slice(1).unwrap(),
+            rect_fill(&scene, 1).as_slice()
+        );
     }
 
     #[test]

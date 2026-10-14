@@ -39,7 +39,7 @@ use infinitecanvas_engine::{
     },
     AddElementCommand, AnyElement, Circle, CommandHistory, Element, ElementId, ElementStyle, Event,
     EventQueue, Image, Line, MoveCommand, Path, PointerButton, PointerEvent, Rectangle,
-    RemoveElementCommand, Scene, SelectionBox, SelectionManager, Text, TextAlign,
+    RemoveElementCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, Text, TextAlign,
     TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
     UpdateTextCommand, Viewport,
 };
@@ -844,6 +844,23 @@ impl InfiniteCanvas {
                 &JsValue::from_str("scaleY"),
                 &JsValue::from(props.transform.scale.y),
             );
+            let parent = match props.parent {
+                Some(parent_id) => JsValue::from(parent_id),
+                None => JsValue::NULL,
+            };
+            let _ = Reflect::set(&obj, &JsValue::from_str("parentId"), &parent);
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("locked"),
+                &JsValue::from(props.locked),
+            );
+            if let Some(group) = element.as_group() {
+                let children = Array::new();
+                for child_id in &group.children {
+                    children.push(&JsValue::from(*child_id));
+                }
+                let _ = Reflect::set(&obj, &JsValue::from_str("childIds"), &children);
+            }
             if let AnyElement::Text(text) = element {
                 let _ = Reflect::set(
                     &obj,
@@ -1039,12 +1056,15 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn remove_element(&mut self, id: u64) -> bool {
         let textures = self.snapshot_text_textures();
-        let _ = self.selection.deselect(&mut self.scene, id);
+        let subtree = self.scene.subtree_ids(id);
+        for element_id in &subtree {
+            let _ = self.selection.deselect(&mut self.scene, *element_id);
+            self.selection.remove_id(*element_id);
+        }
         let removed = self.scene.remove(id).is_some();
         if removed {
-            self.selection.remove_id(id);
             self.release_text_textures_except(textures);
-            log::info!("Removed element {}", id);
+            log::info!("Removed element {} (subtree {})", id, subtree.len());
         }
         removed
     }
@@ -1072,7 +1092,8 @@ impl InfiniteCanvas {
     /// 导出场景为版本化 JSON
     ///
     /// 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）、
-    /// 自由路径和文本都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+    /// 自由路径、文本和分组都会写入。组的 `children` 以及元素的 `parent` / `locked`
+    /// 在 `data` 里。变换的 `rotation` 与 `scale` 在 `props.transform` 里。
     /// `dirty` 和文本光栅字段是运行时标记，不会出现在 JSON 里。
     ///
     /// # 返回
@@ -1128,6 +1149,7 @@ impl InfiniteCanvas {
     /// # 返回
     /// RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
     /// 没有点阵的字符画方框。图片纹理不在场景文件里，导出为纯色占位。
+    /// 分组本身不绘制；隐藏的组会连同子孙一起跳过。
     ///
     /// # 错误
     /// 没有选中元素、区域为空或编码失败
@@ -1176,6 +1198,105 @@ impl InfiniteCanvas {
             renderer.invalidate_geometry();
         }
         log::info!("Loaded stress scene with {} rectangles", count);
+    }
+
+    /// 把至少两个元素组成一个 Group。
+    ///
+    /// # 参数
+    /// - `ids`: 元素 ID。可以是 `BigInt`（`add_*` 的返回值）或数字。
+    ///
+    /// # 返回
+    /// 新组的 ID。失败时返回 0（ID 从 1 开始）。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const groupId = canvas.group_elements([rectA, rectB]);
+    /// canvas.translate_element(groupId, 20, 0);
+    /// canvas.ungroup(groupId);
+    /// ```
+    #[wasm_bindgen]
+    pub fn group_elements(&mut self, ids: &Array) -> u64 {
+        let ids = element_ids_from_js(ids);
+        match self.scene.group(&ids) {
+            Ok(group_id) => {
+                log::info!("Grouped {:?} into {}", ids, group_id);
+                group_id
+            }
+            Err(error) => {
+                log::warn!("group_elements failed: {error}");
+                0
+            }
+        }
+    }
+
+    /// 解散组。子元素留在场景里。
+    #[wasm_bindgen]
+    pub fn ungroup(&mut self, group_id: u64) -> bool {
+        match self.scene.ungroup(group_id) {
+            Ok(children) => {
+                log::info!("Ungrouped {group_id}, children {children:?}");
+                true
+            }
+            Err(error) => {
+                log::warn!("ungroup failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// 把元素放进组，世界坐标不变。
+    #[wasm_bindgen]
+    pub fn enter_group(&mut self, element_id: u64, group_id: u64) -> bool {
+        match self.scene.enter_group(element_id, group_id) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("enter_group failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// 把元素移出当前组，挂回组的父节点或根。
+    #[wasm_bindgen]
+    pub fn leave_group(&mut self, element_id: u64) -> bool {
+        match self.scene.leave_group(element_id) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("leave_group failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// 平移一个元素。目标是组时，子孙的世界坐标一起移动。
+    #[wasm_bindgen]
+    pub fn translate_element(&mut self, id: u64, dx: f32, dy: f32) -> bool {
+        self.scene.translate_element(id, Vec2::new(dx, dy)).is_ok()
+    }
+
+    /// 设置元素可见性。
+    #[wasm_bindgen]
+    pub fn set_element_visible(&mut self, id: u64, visible: bool) -> bool {
+        self.scene.set_visible(id, visible)
+    }
+
+    /// 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+    #[wasm_bindgen]
+    pub fn set_element_locked(&mut self, id: u64, locked: bool) -> bool {
+        self.scene.set_locked(id, locked)
+    }
+
+    /// 场景树。`roots` 里每个节点含 `id`、`elementType`、`parentId`、`visible`、`locked`、`zIndex`、`children`。
+    #[wasm_bindgen]
+    pub fn get_scene_tree(&self) -> JsValue {
+        let tree = self.scene.scene_tree();
+        let roots = Array::new();
+        for root in &tree.roots {
+            roots.push(&scene_tree_node_to_js(root));
+        }
+        let obj = Object::new();
+        let _ = Reflect::set(&obj, &JsValue::from_str("roots"), &roots);
+        obj.into()
     }
 
     // ========== 纹理/图片 API ==========
@@ -2325,7 +2446,9 @@ impl InfiniteCanvas {
         };
         let correction = snapped.translation - self.drag_state.total_delta;
         if correction != Vec2::ZERO {
-            self.move_selected_elements_internal(correction);
+            // 吸附修正和普通拖动同一条路径：选中的组会带着子孙一起移动。
+            self.scene
+                .translate_ids(&self.drag_state.dragged_ids, correction);
         }
         self.drag_state.total_delta = snapped.translation;
         self.drag_state.last_position = pointer;
@@ -2333,32 +2456,57 @@ impl InfiniteCanvas {
     }
 
     /// 按下时、被拖元素还没移动前的可见包围盒。
+    ///
+    /// 组没有几何，对齐主体是子孙叶子的世界包围盒并集。祖先被隐藏时整棵子树不参与。
     fn dragged_origin_bounds(&self) -> Option<Rect> {
-        let rects = self.drag_state.dragged_ids.iter().filter_map(|id| {
-            let element = self.scene.get(*id)?.as_element();
-            if element.props().visible {
-                Some(element.world_bounds())
-            } else {
-                None
-            }
-        });
-        bounds_union(rects)
+        let mut leaves = Vec::new();
+        for id in &self.drag_state.dragged_ids {
+            self.collect_visible_leaf_bounds(*id, &mut leaves);
+        }
+        bounds_union(leaves)
     }
 
-    /// 其他可见元素的世界包围盒。正在拖动的选区不参与，避免吸到自己。
+    /// 其他可见叶子的世界包围盒。
+    ///
+    /// 组本身不参与。正在拖动的元素及其子孙也不参与，避免吸到自己。
+    /// 祖先不可见的元素和命中测试一样跳过。
     fn snap_targets(&self) -> Vec<Rect> {
-        let dragged: HashSet<ElementId> = self.drag_state.dragged_ids.iter().copied().collect();
+        let mut excluded = HashSet::new();
+        for id in &self.drag_state.dragged_ids {
+            for element_id in self.scene.subtree_ids(*id) {
+                excluded.insert(element_id);
+            }
+        }
         self.scene
             .iter()
             .filter_map(|element| {
-                let element = element.as_element();
-                let props = element.props();
-                if !props.visible || dragged.contains(&props.id) {
+                if element.as_group().is_some() {
                     return None;
                 }
-                Some(element.world_bounds())
+                let id = element.id();
+                if excluded.contains(&id) || !self.scene.is_effectively_visible(id) {
+                    return None;
+                }
+                Some(element.as_element().world_bounds())
             })
             .collect()
+    }
+
+    /// 组展开成可见叶子的世界包围盒。叶子自己不可见，或任一祖先不可见，则跳过。
+    fn collect_visible_leaf_bounds(&self, id: ElementId, out: &mut Vec<Rect>) {
+        if !self.scene.is_effectively_visible(id) {
+            return;
+        }
+        let Some(element) = self.scene.get(id) else {
+            return;
+        };
+        if element.as_group().is_some() {
+            for child in self.scene.children_of(id) {
+                self.collect_visible_leaf_bounds(child, out);
+            }
+            return;
+        }
+        out.push(element.as_element().world_bounds());
     }
 
     /// 把当前选中元素收成一个选中框。单选跟元素旋转对齐，多选用包围盒。
@@ -2402,13 +2550,7 @@ impl InfiniteCanvas {
     }
 
     fn apply_transform_list(&mut self, transforms: &[(ElementId, Transform)]) {
-        for (id, transform) in transforms {
-            if let Some(element) = self.scene.get_mut(*id) {
-                element.as_element_mut().props_mut().transform = *transform;
-            }
-            // 实时缩放/旋转、多选和取消都走这里。撤销走 TransformElementsCommand。
-            self.scene.mark_dirty(*id);
-        }
+        self.scene.apply_world_transforms(transforms);
     }
 
     /// 指针落在手柄上时开始缩放或旋转，不改选择集。
@@ -2493,20 +2635,68 @@ impl InfiniteCanvas {
             self.apply_transform_list(&originals);
         }
     }
+}
 
-    /// 移动所有选中的元素（内部方法，不创建命令）
-    fn move_selected_elements_internal(&mut self, delta: Vec2) {
-        for id in &self.drag_state.dragged_ids {
-            if let Some(element) = self.scene.get_mut(*id) {
-                element
-                    .as_element_mut()
-                    .props_mut()
-                    .transform
-                    .translate(delta);
-            }
-            self.scene.mark_dirty(*id);
+fn scene_tree_node_to_js(node: &SceneTreeNode) -> Object {
+    let obj = Object::new();
+    let _ = Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from(node.id));
+    let _ = Reflect::set(
+        &obj,
+        &JsValue::from_str("elementType"),
+        &JsValue::from_str(&node.element_type),
+    );
+    let parent = match node.parent_id {
+        Some(parent_id) => JsValue::from(parent_id),
+        None => JsValue::NULL,
+    };
+    let _ = Reflect::set(&obj, &JsValue::from_str("parentId"), &parent);
+    let _ = Reflect::set(
+        &obj,
+        &JsValue::from_str("visible"),
+        &JsValue::from(node.visible),
+    );
+    let _ = Reflect::set(
+        &obj,
+        &JsValue::from_str("locked"),
+        &JsValue::from(node.locked),
+    );
+    let _ = Reflect::set(
+        &obj,
+        &JsValue::from_str("zIndex"),
+        &JsValue::from(node.z_index),
+    );
+    let children = Array::new();
+    for child in &node.children {
+        children.push(&scene_tree_node_to_js(child));
+    }
+    let _ = Reflect::set(&obj, &JsValue::from_str("children"), &children);
+    obj
+}
+
+fn element_ids_from_js(ids: &Array) -> Vec<ElementId> {
+    let mut out = Vec::with_capacity(ids.length() as usize);
+    for index in 0..ids.length() {
+        if let Some(id) = element_id_from_js(ids.get(index)) {
+            out.push(id);
         }
     }
+    out
+}
+
+fn element_id_from_js(value: JsValue) -> Option<ElementId> {
+    if let Some(number) = value.as_f64() {
+        if number.is_finite() && number >= 0.0 {
+            return Some(number as ElementId);
+        }
+    }
+    let Ok(bigint) = js_sys::BigInt::new(&value) else {
+        return None;
+    };
+    bigint
+        .to_string(10)
+        .ok()
+        .and_then(|text| text.as_string())
+        .and_then(|text| text.parse().ok())
 }
 
 fn polyline_length(points: &[Vec2]) -> f32 {
@@ -2629,4 +2819,172 @@ fn selection_ids_to_js_array(ids: Vec<ElementId>) -> Array {
         array.push(&JsValue::from(id));
     }
     array
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use infinitecanvas_engine::VertexCache;
+
+    /// 不初始化浏览器日志，只给拖拽吸附测试用。
+    fn blank_canvas() -> InfiniteCanvas {
+        InfiniteCanvas {
+            webgpu_renderer: None,
+            scene: Scene::new(),
+            viewport: Viewport::default(),
+            engine: infinitecanvas_engine::Renderer::new(),
+            event_queue: EventQueue::new(),
+            selection: SelectionManager::new(),
+            selection_box: SelectionBox::new(),
+            drag_state: DragState::default(),
+            handle_drag: None,
+            command_history: CommandHistory::new(),
+            tool_manager: ToolManager::new(),
+            text_clicks: TextClickResolver::new(),
+            pending_text_edit: None,
+            perf_stats: PerformanceStats::default(),
+            snap: SnapSettings::default(),
+        }
+    }
+
+    fn translation(scene: &Scene, id: ElementId) -> Vec2 {
+        scene
+            .get(id)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform
+            .translation
+    }
+
+    #[test]
+    fn dragging_a_group_snaps_children_to_an_external_edge() {
+        let mut canvas = blank_canvas();
+        let left = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            left,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let right = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(20.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = canvas.scene.group(&[left, right]).unwrap();
+
+        // 可见目标的左边缘在 x=90。指针位移 59 会把组的右边缘放到 84，刚好在 6px 阈值内。
+        let external = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            external,
+            Vec2::new(100.0, 40.0),
+            Vec2::new(20.0, 10.0),
+        ));
+
+        // 隐藏组里有一条更近的边。祖先不可见时不能抢吸附。
+        let hidden_child = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            hidden_child,
+            Vec2::new(90.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let hidden_decoy = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            hidden_decoy,
+            Vec2::new(110.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let hidden_group = canvas.scene.group(&[hidden_child, hidden_decoy]).unwrap();
+        assert!(canvas.scene.set_visible(hidden_group, false));
+
+        canvas
+            .selection
+            .select_element(&mut canvas.scene, group_id, false);
+        canvas.start_drag(1, Vec2::ZERO);
+
+        let origin = canvas.drag_state.origin_bounds.expect("leaf union");
+        assert_eq!(origin.x, -5.0);
+        assert_eq!(origin.width, 30.0);
+        assert!(canvas
+            .snap_targets()
+            .iter()
+            .all(|rect| (rect.x - 90.0).abs() < 1e-3 && (rect.width - 20.0).abs() < 1e-3));
+        assert_eq!(canvas.snap_targets().len(), 1);
+
+        canvas.drag_selected_to_pointer(Vec2::new(59.0, 0.0));
+
+        assert_eq!(translation(&canvas.scene, left), Vec2::new(65.0, 0.0));
+        assert_eq!(translation(&canvas.scene, right), Vec2::new(85.0, 0.0));
+        assert_eq!(translation(&canvas.scene, group_id), Vec2::new(75.0, 0.0));
+        assert_eq!(canvas.drag_state.total_delta, Vec2::new(65.0, 0.0));
+        assert!(canvas
+            .drag_state
+            .guides
+            .iter()
+            .any(|guide| (guide.position - 90.0).abs() < 1e-3));
+    }
+
+    #[test]
+    fn dragging_a_group_moves_rect_and_text_and_json_keeps_parent() {
+        let mut canvas = blank_canvas();
+        let rect_id = canvas.scene.next_id();
+        canvas.scene.add_rect(Rectangle::new(
+            rect_id,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(20.0, 10.0),
+        ));
+        let text_id = canvas.scene.next_id();
+        let mut text = Text::new(text_id, Vec2::new(40.0, 0.0), "Hi");
+        text.commit_raster(text.revision, 0, "glyph".into(), Vec2::new(16.0, 8.0))
+            .unwrap();
+        canvas.scene.add_text(text);
+        let group_id = canvas.scene.group(&[rect_id, text_id]).unwrap();
+
+        let mut cache = VertexCache::new();
+        let first = cache.sync(&mut canvas.scene);
+        assert!(first.full_upload);
+        let before = cache.textured().to_vec();
+        assert_eq!(before.len(), 6);
+
+        canvas
+            .selection
+            .select_element(&mut canvas.scene, group_id, false);
+        canvas.start_drag(1, Vec2::ZERO);
+        canvas.drag_selected_to_pointer(Vec2::new(15.0, 4.0));
+
+        assert_eq!(translation(&canvas.scene, rect_id), Vec2::new(15.0, 4.0));
+        assert_eq!(translation(&canvas.scene, text_id), Vec2::new(55.0, 4.0));
+        assert!(canvas.scene.get(text_id).unwrap().as_element().is_dirty());
+
+        let sync = cache.sync(&mut canvas.scene);
+        assert!(sync.regenerated >= 1);
+        let expected = match canvas.scene.get(text_id).unwrap() {
+            AnyElement::Text(text) => text.generate_vertices(),
+            _ => panic!("text"),
+        };
+        assert_eq!(cache.textured(), expected.as_slice());
+        assert_ne!(cache.textured(), before.as_slice());
+        assert!(!canvas.scene.get(text_id).unwrap().as_element().is_dirty());
+
+        let json = canvas.scene.to_json().unwrap();
+        assert!(json.contains("\"type\":\"text\""));
+        assert!(json.contains("\"type\":\"group\""));
+        assert!(!json.contains("texture_id"));
+        assert!(!json.contains("editing"));
+        assert!(!json.contains("raster_lod"));
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(restored.parent_of(text_id), Some(group_id));
+        assert_eq!(restored.parent_of(rect_id), Some(group_id));
+        assert_eq!(translation(&restored, text_id), Vec2::new(55.0, 4.0));
+        assert_eq!(translation(&restored, rect_id), Vec2::new(15.0, 4.0));
+        match restored.get(text_id).unwrap() {
+            AnyElement::Text(text) => {
+                assert!(text.texture_id.is_none());
+                assert!(!text.editing);
+                assert_eq!(text.props.parent, Some(group_id));
+            }
+            _ => panic!("text"),
+        }
+    }
 }

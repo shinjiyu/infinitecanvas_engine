@@ -24,6 +24,7 @@ pub mod hit_test;
 pub mod persist;
 pub mod quadtree;
 pub mod scene;
+pub mod scene_tree;
 pub mod selection;
 pub mod selection_box;
 pub mod snap;
@@ -38,8 +39,8 @@ pub use command::{
     TransformElementsCommand, UpdateTextCommand,
 };
 pub use element::{
-    Circle, Element, ElementId, ElementProps, ElementStyle, Image, Line, Path, Rectangle, Text,
-    TextAlign, TextClickResolver, TextPlacement, TextVisual,
+    Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Rectangle,
+    Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };
 pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,
@@ -51,7 +52,8 @@ pub use persist::{
     export_selection_png, export_viewport_png, PersistError, SceneFile, SCENE_FORMAT_VERSION,
 };
 pub use quadtree::QuadTree;
-pub use scene::{AnyElement, Scene};
+pub use scene::{AnyElement, GroupError, Scene};
+pub use scene_tree::{SceneTree, SceneTreeNode};
 pub use selection::SelectionManager;
 pub use selection_box::SelectionBox;
 pub use snap::{

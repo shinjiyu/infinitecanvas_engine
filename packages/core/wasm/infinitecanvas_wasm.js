@@ -345,10 +345,21 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 把元素放进组，世界坐标不变。
+     * @param {bigint} element_id
+     * @param {bigint} group_id
+     * @returns {boolean}
+     */
+    enter_group(element_id, group_id) {
+        const ret = wasm.infinitecanvas_enter_group(this.__wbg_ptr, element_id, group_id);
+        return ret !== 0;
+    }
+    /**
      * 导出场景为版本化 JSON
      *
      * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）、
-     * 自由路径和文本都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+     * 自由路径、文本和分组都会写入。组的 `children` 以及元素的 `parent` / `locked`
+     * 在 `data` 里。变换的 `rotation` 与 `scale` 在 `props.transform` 里。
      * `dirty` 和文本光栅字段是运行时标记，不会出现在 JSON 里。
      *
      * # 返回
@@ -388,6 +399,7 @@ export class InfiniteCanvas {
      * # 返回
      * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
      * 没有点阵的字符画方框。图片纹理不在场景文件里，导出为纯色占位。
+     * 分组本身不绘制；隐藏的组会连同子孙一起跳过。
      *
      * # 错误
      * 没有选中元素、区域为空或编码失败
@@ -503,6 +515,14 @@ export class InfiniteCanvas {
     get_redo_count() {
         const ret = wasm.infinitecanvas_get_redo_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * 场景树。`roots` 里每个节点含 `id`、`elementType`、`parentId`、`visible`、`locked`、`zIndex`、`children`。
+     * @returns {any}
+     */
+    get_scene_tree() {
+        const ret = wasm.infinitecanvas_get_scene_tree(this.__wbg_ptr);
+        return ret;
     }
     /**
      * @returns {Array<any>}
@@ -626,6 +646,28 @@ export class InfiniteCanvas {
     get_zoom() {
         const ret = wasm.infinitecanvas_get_zoom(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * 把至少两个元素组成一个 Group。
+     *
+     * # 参数
+     * - `ids`: 元素 ID。可以是 `BigInt`（`add_*` 的返回值）或数字。
+     *
+     * # 返回
+     * 新组的 ID。失败时返回 0（ID 从 1 开始）。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const groupId = canvas.group_elements([rectA, rectB]);
+     * canvas.translate_element(groupId, 20, 0);
+     * canvas.ungroup(groupId);
+     * ```
+     * @param {Array<any>} ids
+     * @returns {bigint}
+     */
+    group_elements(ids) {
+        const ret = wasm.infinitecanvas_group_elements(this.__wbg_ptr, ids);
+        return BigInt.asUintN(64, ret);
     }
     /**
      * @param {string} kind
@@ -760,6 +802,15 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 把元素移出当前组，挂回组的父节点或根。
+     * @param {bigint} element_id
+     * @returns {boolean}
+     */
+    leave_group(element_id) {
+        const ret = wasm.infinitecanvas_leave_group(this.__wbg_ptr, element_id);
+        return ret !== 0;
+    }
+    /**
      * 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。
      *
      * 元素按网格铺开。第一次渲染会建立顶点缓存，之后平移/缩放只更新 uniform。
@@ -868,6 +919,26 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+     * @param {bigint} id
+     * @param {boolean} locked
+     * @returns {boolean}
+     */
+    set_element_locked(id, locked) {
+        const ret = wasm.infinitecanvas_set_element_locked(this.__wbg_ptr, id, locked);
+        return ret !== 0;
+    }
+    /**
+     * 设置元素可见性。
+     * @param {bigint} id
+     * @param {boolean} visible
+     * @returns {boolean}
+     */
+    set_element_visible(id, visible) {
+        const ret = wasm.infinitecanvas_set_element_visible(this.__wbg_ptr, id, visible);
+        return ret !== 0;
+    }
+    /**
      * 设置图片透明度
      *
      * # 参数
@@ -962,6 +1033,17 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 平移一个元素。目标是组时，子孙的世界坐标一起移动。
+     * @param {bigint} id
+     * @param {number} dx
+     * @param {number} dy
+     * @returns {boolean}
+     */
+    translate_element(id, dx, dy) {
+        const ret = wasm.infinitecanvas_translate_element(this.__wbg_ptr, id, dx, dy);
+        return ret !== 0;
+    }
+    /**
      * 撤销上一个操作
      *
      * # 返回
@@ -970,6 +1052,15 @@ export class InfiniteCanvas {
      */
     undo() {
         const ret = wasm.infinitecanvas_undo(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 解散组。子元素留在场景里。
+     * @param {bigint} group_id
+     * @returns {boolean}
+     */
+    ungroup(group_id) {
+        const ret = wasm.infinitecanvas_ungroup(this.__wbg_ptr, group_id);
         return ret !== 0;
     }
     /**
@@ -1024,6 +1115,10 @@ if (Symbol.dispose) InfiniteCanvas.prototype[Symbol.dispose] = InfiniteCanvas.pr
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg_BigInt_55476612a84195bb: function() { return handleError(function (arg0) {
+            const ret = BigInt(arg0);
+            return ret;
+        }, arguments); },
         __wbg_Window_e0df001eddf1d3fa: function(arg0) {
             const ret = arg0.Window;
             return ret;
@@ -1693,6 +1788,10 @@ function __wbg_get_imports() {
         __wbg_getUniformLocation_cb4e3e121235f91a: function(arg0, arg1, arg2, arg3) {
             const ret = arg0.getUniformLocation(arg1, getStringFromWasm0(arg2, arg3));
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+        },
+        __wbg_get_6c896e0571ddae51: function(arg0, arg1) {
+            const ret = arg0[arg1 >>> 0];
+            return ret;
         },
         __wbg_get_fd12a9100976c296: function(arg0, arg1) {
             const ret = arg0[arg1 >>> 0];
@@ -2595,6 +2694,10 @@ function __wbg_get_imports() {
             const ret = arg0.then(arg1);
             return ret;
         },
+        __wbg_toString_3e46331018353800: function() { return handleError(function (arg0, arg1) {
+            const ret = arg0.toString(arg1);
+            return ret;
+        }, arguments); },
         __wbg_uniform1f_9cfecfaeb8cf43c1: function(arg0, arg1, arg2) {
             arg0.uniform1f(arg1, arg2);
         },
@@ -2744,12 +2847,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2484, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2512, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 372, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 387, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

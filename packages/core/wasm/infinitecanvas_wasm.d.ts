@@ -186,10 +186,15 @@ export class InfiniteCanvas {
     debug_pending_event_count(): number;
     deselect_element(element_id: bigint): boolean;
     /**
+     * 把元素放进组，世界坐标不变。
+     */
+    enter_group(element_id: bigint, group_id: bigint): boolean;
+    /**
      * 导出场景为版本化 JSON
      *
      * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）、
-     * 自由路径和文本都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+     * 自由路径、文本和分组都会写入。组的 `children` 以及元素的 `parent` / `locked`
+     * 在 `data` 里。变换的 `rotation` 与 `scale` 在 `props.transform` 里。
      * `dirty` 和文本光栅字段是运行时标记，不会出现在 JSON 里。
      *
      * # 返回
@@ -211,6 +216,7 @@ export class InfiniteCanvas {
      * # 返回
      * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
      * 没有点阵的字符画方框。图片纹理不在场景文件里，导出为纯色占位。
+     * 分组本身不绘制；隐藏的组会连同子孙一起跳过。
      *
      * # 错误
      * 没有选中元素、区域为空或编码失败
@@ -272,6 +278,10 @@ export class InfiniteCanvas {
      * 获取重做栈大小
      */
     get_redo_count(): number;
+    /**
+     * 场景树。`roots` 里每个节点含 `id`、`elementType`、`parentId`、`visible`、`locked`、`zIndex`、`children`。
+     */
+    get_scene_tree(): any;
     get_selected_ids(): Array<any>;
     /**
      * 获取选中元素的边界框
@@ -334,6 +344,23 @@ export class InfiniteCanvas {
      * 获取视口缩放
      */
     get_zoom(): number;
+    /**
+     * 把至少两个元素组成一个 Group。
+     *
+     * # 参数
+     * - `ids`: 元素 ID。可以是 `BigInt`（`add_*` 的返回值）或数字。
+     *
+     * # 返回
+     * 新组的 ID。失败时返回 0（ID 从 1 开始）。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const groupId = canvas.group_elements([rectA, rectB]);
+     * canvas.translate_element(groupId, 20, 0);
+     * canvas.ungroup(groupId);
+     * ```
+     */
+    group_elements(ids: Array<any>): bigint;
     handle_keyboard_event(kind: string, key: string, code: string, repeat: boolean, shift_key: boolean, ctrl_key: boolean, alt_key: boolean, meta_key: boolean): void;
     handle_pointer_event(kind: string, pointer_id: number, x: number, y: number, movement_x: number, movement_y: number, button: number, buttons_mask: number, shift_key: boolean, ctrl_key: boolean, alt_key: boolean, meta_key: boolean): void;
     handle_wheel_event(delta_x: number, delta_y: number, delta_mode: number, shift_key: boolean, ctrl_key: boolean, alt_key: boolean, meta_key: boolean): void;
@@ -376,6 +403,10 @@ export class InfiniteCanvas {
      * 拖拽吸附是否开启。
      */
     is_snap_enabled(): boolean;
+    /**
+     * 把元素移出当前组，挂回组的父节点或根。
+     */
+    leave_group(element_id: bigint): boolean;
     /**
      * 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。
      *
@@ -440,6 +471,14 @@ export class InfiniteCanvas {
     render(): void;
     select_element(element_id: bigint, additive: boolean): boolean;
     /**
+     * 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+     */
+    set_element_locked(id: bigint, locked: boolean): boolean;
+    /**
+     * 设置元素可见性。
+     */
+    set_element_visible(id: bigint, visible: boolean): boolean;
+    /**
      * 设置图片透明度
      *
      * # 参数
@@ -501,12 +540,20 @@ export class InfiniteCanvas {
      */
     take_text_raster_jobs(): Array<any>;
     /**
+     * 平移一个元素。目标是组时，子孙的世界坐标一起移动。
+     */
+    translate_element(id: bigint, dx: number, dy: number): boolean;
+    /**
      * 撤销上一个操作
      *
      * # 返回
      * 是否成功撤销
      */
     undo(): boolean;
+    /**
+     * 解散组。子元素留在场景里。
+     */
+    ungroup(group_id: bigint): boolean;
     /**
      * 上传纹理到 GPU
      *
@@ -562,6 +609,7 @@ export interface InitOutput {
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
+    readonly infinitecanvas_enter_group: (a: number, b: bigint, c: bigint) => number;
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
     readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
     readonly infinitecanvas_get_alignment_guides: (a: number) => any;
@@ -573,6 +621,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_last_vertex_count: (a: number) => number;
     readonly infinitecanvas_get_performance_stats: (a: number) => any;
     readonly infinitecanvas_get_redo_count: (a: number) => number;
+    readonly infinitecanvas_get_scene_tree: (a: number) => any;
     readonly infinitecanvas_get_selected_ids: (a: number) => any;
     readonly infinitecanvas_get_selection_bounds: (a: number) => any;
     readonly infinitecanvas_get_selection_box_bounds: (a: number) => any;
@@ -585,6 +634,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_viewport_center_x: (a: number) => number;
     readonly infinitecanvas_get_viewport_center_y: (a: number) => number;
     readonly infinitecanvas_get_zoom: (a: number) => number;
+    readonly infinitecanvas_group_elements: (a: number, b: any) => bigint;
     readonly infinitecanvas_handle_keyboard_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => void;
     readonly infinitecanvas_handle_pointer_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number) => void;
     readonly infinitecanvas_handle_wheel_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
@@ -595,6 +645,7 @@ export interface InitOutput {
     readonly infinitecanvas_is_dragging: (a: number) => number;
     readonly infinitecanvas_is_selection_box_active: (a: number) => number;
     readonly infinitecanvas_is_snap_enabled: (a: number) => number;
+    readonly infinitecanvas_leave_group: (a: number, b: bigint) => number;
     readonly infinitecanvas_load_stress_scene: (a: number, b: number) => void;
     readonly infinitecanvas_move_selection: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_new: () => [number, number, number];
@@ -605,6 +656,8 @@ export interface InitOutput {
     readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_render: (a: number) => [number, number];
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
+    readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;
+    readonly infinitecanvas_set_element_visible: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_snap_enabled: (a: number, b: number) => void;
     readonly infinitecanvas_set_snap_threshold: (a: number, b: number) => void;
@@ -612,17 +665,19 @@ export interface InitOutput {
     readonly infinitecanvas_set_tool: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_take_text_edit_request: (a: number) => any;
     readonly infinitecanvas_take_text_raster_jobs: (a: number) => any;
+    readonly infinitecanvas_translate_element: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_undo: (a: number) => number;
+    readonly infinitecanvas_ungroup: (a: number, b: bigint) => number;
     readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_: (a: number, b: number, c: any) => void;
-    readonly __wbindgen_malloc: (a: number, b: number) => number;
-    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_destroy_closure: (a: number, b: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
