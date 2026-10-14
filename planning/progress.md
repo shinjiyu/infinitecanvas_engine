@@ -129,6 +129,20 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 - [x] 拖拽吸附修正走 `translate_ids`；选中组用叶子包围盒并集，不吸附到组本身或正在拖动的子孙
 - [x] Text 可以进组，随组平移/缩放/旋转并标脏；JSON 写出 `parent` / `locked`，光栅字段仍 `serde(skip)`
 
+---
+
+## SVG 导出 (#25) - ✅ 已完成
+
+- [x] `export_svg`：矩形、圆、直线/箭头、自由路径、文本，复用 PNG 的 `elements_in_paint_order`
+- [x] 平移 / 缩放 / 旋转、填充、描边、线宽、透明度、z 顺序
+- [x] 默认导出全部可见叶子的包围盒；没有叶子时 viewBox 为 `0 0 1 1`
+- [x] `selected_only` 导出自身被选中的叶子，以及选中组下的全部可见子孙
+- [x] WASM `export_svg(selected_only)`，Demo「导出 SVG」/「选区 SVG」下载 `.svg`
+- [x] 图片无像素数据，SVG 中跳过并写注释。文本写成 `<text>` / `<tspan>`
+- [x] 组不画几何；叶子保持世界变换。连成一段的组写成不带 transform 的 `<g id="eN">`。隐藏组通过 `is_effectively_visible` 藏住子孙，子孙不计入 viewBox
+
+**依赖**: #6 的元素遍历。#4 已合并，文本一并导出。#13 的可见性复用 `Scene::is_effectively_visible`。选区导出会展开选中组，这一点和 PNG 只看元素自身 `selected` 不同。
+
 ## M3: 场景管理 (9/9) - ✅ 已完成
 
 - [x] M3.1: 场景图树结构（#13：Group + 场景树；世界变换由组增量传播）

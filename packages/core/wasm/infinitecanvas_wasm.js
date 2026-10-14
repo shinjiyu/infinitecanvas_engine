@@ -416,6 +416,38 @@ export class InfiniteCanvas {
         return v1;
     }
     /**
+     * 把场景导出为 SVG 文本。
+     *
+     * 矩形、圆、直线（含箭头）、自由路径和文本按绘制顺序写入。变换使用与画布相同的
+     * `matrix`（缩放、旋转、平移）。`viewBox` 默认是全部可见元素的包围盒。
+     *
+     * # 参数
+     * - `selected_only`: `true` 时只导出当前选中元素，包围盒也只包住这些元素
+     *
+     * # 返回
+     * SVG 文档。图片纹理不在场景里，对应元素会被跳过并在文档中注明。
+     * 文本写成 `<text>`，锚点与对齐方式一致。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const svg = canvas.export_svg(false);
+     * ```
+     * @param {boolean} selected_only
+     * @returns {string}
+     */
+    export_svg(selected_only) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.infinitecanvas_export_svg(this.__wbg_ptr, selected_only);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * 当前生效的对齐参考线。
      *
      * 只在吸附开启且正在拖拽、并且选区进入阈值时非空。
@@ -2847,7 +2879,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2512, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2514, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },

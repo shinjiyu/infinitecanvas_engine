@@ -38,4 +38,6 @@ T 单击 / add_text
 
 顶点进持久纹理缓冲。创建、改内容/外观、`commit_text_raster`、进入或离开编辑，以及对应的撤销/重做，都调用 `Scene::mark_dirty`。文本不画纯色底。
 
+SVG 导出不使用光栅纹理，写成 `<text>` / `<tspan>`：锚点与 `TextAlign` 相同，`font-size` 是世界单位字号，行距为字号的 1.25 倍。
+
 PNG 不读取 Canvas2D 纹理。导出用 `font8x8` 把已覆盖的字符画进文字块；中文等没有点阵的字符画成方框。

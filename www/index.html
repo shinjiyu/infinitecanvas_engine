@@ -355,6 +355,10 @@
             <button type="button" id="png-btn">视口 PNG</button>
             <button type="button" id="png-selection-btn">选区 PNG</button>
           </div>
+          <div class="row">
+            <button type="button" id="svg-btn">导出 SVG</button>
+            <button type="button" id="svg-selection-btn">选区 SVG</button>
+          </div>
           <input id="open-file" type="file" accept="application/json,.json" hidden>
         </div>
         <div class="group">
@@ -374,7 +378,7 @@
             <input id="snap-threshold" type="range" min="0" max="32" step="1" value="6">
           </label>
         </div>
-        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。</p>
+        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件。</p>
       </aside>
 
       <div id="stage">

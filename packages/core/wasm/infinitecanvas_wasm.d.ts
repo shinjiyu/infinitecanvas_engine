@@ -223,6 +223,25 @@ export class InfiniteCanvas {
      */
     export_png(selection_only: boolean): Uint8Array;
     /**
+     * 把场景导出为 SVG 文本。
+     *
+     * 矩形、圆、直线（含箭头）、自由路径和文本按绘制顺序写入。变换使用与画布相同的
+     * `matrix`（缩放、旋转、平移）。`viewBox` 默认是全部可见元素的包围盒。
+     *
+     * # 参数
+     * - `selected_only`: `true` 时只导出当前选中元素，包围盒也只包住这些元素
+     *
+     * # 返回
+     * SVG 文档。图片纹理不在场景里，对应元素会被跳过并在文档中注明。
+     * 文本写成 `<text>`，锚点与对齐方式一致。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const svg = canvas.export_svg(false);
+     * ```
+     */
+    export_svg(selected_only: boolean): string;
+    /**
      * 当前生效的对齐参考线。
      *
      * 只在吸附开启且正在拖拽、并且选区进入阈值时非空。
@@ -612,6 +631,7 @@ export interface InitOutput {
     readonly infinitecanvas_enter_group: (a: number, b: bigint, c: bigint) => number;
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
     readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
+    readonly infinitecanvas_export_svg: (a: number, b: number) => [number, number];
     readonly infinitecanvas_get_alignment_guides: (a: number) => any;
     readonly infinitecanvas_get_current_tool: (a: number) => [number, number];
     readonly infinitecanvas_get_element_count: (a: number) => number;
