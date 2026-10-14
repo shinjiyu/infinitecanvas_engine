@@ -439,6 +439,50 @@ mod tests {
     }
 
     #[test]
+    fn flip_and_quarter_turn_keep_corner_radius_on_the_rectangle() {
+        let mut scene = Scene::new();
+        scene.add_rect(
+            Rectangle::new(1, Vec2::new(20.0, 10.0), Vec2::new(40.0, 20.0)).with_corner_radius(6.0),
+        );
+        let mut history = CommandHistory::new();
+
+        assert!(apply_flip(
+            &mut history,
+            &mut scene,
+            &[1],
+            FlipAxis::Horizontal,
+        ));
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.corner_radius(), 6.0);
+                assert!(rect.generate_fill_vertices().len() > 6);
+                assert!(rect.props.transform.scale.x < 0.0);
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+
+        assert!(apply_rotate_quarter(
+            &mut history,
+            &mut scene,
+            &[1],
+            QuarterTurn::Clockwise,
+        ));
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.corner_radius(), 6.0);
+                assert!(rect.generate_fill_vertices().len() > 6);
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+
+        assert!(history.undo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => assert_eq!(rect.corner_radius(), 6.0),
+            other => panic!("rect, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn multi_selection_uses_the_union_center_and_one_history_entry() {
         let mut scene = Scene::new();
         scene.add_rect(rect(1, Vec2::ZERO));
