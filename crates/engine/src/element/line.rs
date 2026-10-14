@@ -8,7 +8,7 @@ use super::stroke::{
     transform_vertices, HIT_SLOP, MITER_LIMIT,
 };
 use super::{Element, ElementId, ElementProps, ElementStyle};
-use infinitecanvas_math::{Rect, Vec2, Vertex};
+use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 
 /// 直线元素
@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 /// assert!(line.arrow());
 /// assert_eq!(line.generate_vertices().len(), 9);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Line {
     /// 元素属性
     pub props: ElementProps,
@@ -34,9 +34,11 @@ pub struct Line {
     pub start: Vec2,
     /// 终点（局部坐标）
     pub end: Vec2,
-    /// 样式（描边色和线宽）
+    /// 样式（描边色和线宽）。JSON 中可省略。
+    #[serde(default)]
     pub style: ElementStyle,
-    /// 是否在终点绘制箭头
+    /// 是否在终点绘制箭头。JSON 中缺省为 false。
+    #[serde(default)]
     pub arrow: bool,
 }
 
@@ -106,6 +108,32 @@ impl Line {
         self.props.transform.transform_point(self.end)
     }
 
+    /// 世界坐标处的导出颜色
+    ///
+    /// 点在半线宽以内，或落在箭头三角形内时返回描边色。
+    /// 不包含点选余量，供 PNG 导出使用。不可见或完全透明时返回 `None`。
+    ///
+    /// # 参数
+    /// - `world`: 世界坐标
+    ///
+    /// # 返回
+    /// 该点的描边颜色；点在笔画外时为 `None`
+    pub fn color_at(&self, world: Vec2) -> Option<Color> {
+        if !self.props.visible {
+            return None;
+        }
+        let local = try_local(&self.props.transform, world)?;
+        let half = self.stroke_width() * 0.5;
+        let on_shaft = point_to_segment_distance(local, self.start, self.end) <= half;
+        let on_arrow = self
+            .arrow_triangle_local()
+            .is_some_and(|tri| point_in_triangle(local, tri));
+        if !on_shaft && !on_arrow {
+            return None;
+        }
+        opaque_color(paint_color(&self.style))
+    }
+
     /// 生成描边三角形（含可选箭头），坐标已变换到世界空间。
     ///
     /// 直线本身是一条三角形带；箭头是额外的一个三角形。
@@ -146,6 +174,30 @@ impl Line {
             arrow_length_for(self.stroke_width()),
             arrow_width_for(self.stroke_width()),
         )
+    }
+}
+
+fn try_local(transform: &Transform, world: Vec2) -> Option<Vec2> {
+    if !transform.scale.x.is_finite()
+        || !transform.scale.y.is_finite()
+        || transform.scale.x.abs() < 1e-6
+        || transform.scale.y.abs() < 1e-6
+    {
+        return None;
+    }
+    let local = transform.inverse_transform_point(world);
+    if local.x.is_finite() && local.y.is_finite() {
+        Some(local)
+    } else {
+        None
+    }
+}
+
+fn opaque_color(color: Color) -> Option<Color> {
+    if color.a <= 0.0 {
+        None
+    } else {
+        Some(color)
     }
 }
 

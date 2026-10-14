@@ -3,15 +3,24 @@
 //! 提供颜色类型和解析功能
 use serde::{Deserialize, Serialize};
 
+fn default_opaque() -> f32 {
+    1.0
+}
+
 /// RGBA 颜色（GPU 格式）
 ///
-/// 每个通道范围 [0.0, 1.0]
+/// 每个通道范围 [0.0, 1.0]。JSON 里缺省的 RGB 通道为 0，缺省 alpha 为 1，
+/// 这样以后增加可选颜色字段时旧文件仍能读入。
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Color {
+    #[serde(default)]
     pub r: f32,
+    #[serde(default)]
     pub g: f32,
+    #[serde(default)]
     pub b: f32,
+    #[serde(default = "default_opaque")]
     pub a: f32,
 }
 

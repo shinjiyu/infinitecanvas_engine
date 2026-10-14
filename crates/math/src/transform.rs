@@ -4,16 +4,25 @@
 use glam::{Mat3, Mat4, Quat, Vec2};
 use serde::{Deserialize, Serialize};
 
+fn default_scale() -> Vec2 {
+    Vec2::ONE
+}
+
 /// 2D 变换
 ///
-/// 封装平移、旋转、缩放操作
+/// 封装平移、旋转、缩放操作。
+/// JSON 中缺省的 `translation` 为 0，`rotation` 为 0，`scale` 为 1，
+/// 未知字段会被忽略，便于以后增加变换属性而不升版本号。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
     /// 平移
+    #[serde(default)]
     pub translation: Vec2,
     /// 旋转（弧度）
+    #[serde(default)]
     pub rotation: f32,
     /// 缩放
+    #[serde(default = "default_scale")]
     pub scale: Vec2,
 }
 

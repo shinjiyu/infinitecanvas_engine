@@ -87,12 +87,47 @@ export class InfiniteCanvas {
   }
 
   /**
+   * 导出当前场景为版本化 JSON。
+   *
+   * @returns 含 `version` 的场景文档
+   */
+  exportJson(): string {
+    return this.requireWasm().export_json();
+  }
+
+  /**
+   * 用版本化 JSON 替换当前场景。
+   *
+   * @param json - `exportJson` 生成的文本
+   */
+  importJson(json: string): void {
+    this.requireWasm().import_json(json);
+  }
+
+  /**
+   * 导出视口或选中区域的 PNG。
+   *
+   * @param selectionOnly - 为 true 时只导出选中元素
+   * @returns RGBA PNG 字节
+   */
+  exportPng(selectionOnly = false): Uint8Array {
+    return this.requireWasm().export_png(selectionOnly);
+  }
+
+  /**
    * 销毁实例
    */
   destroy(): void {
     this.stopRenderLoop();
     this.wasmInstance = null;
     this.canvasElement = null;
+  }
+
+  private requireWasm(): WasmCanvas {
+    if (!this.wasmInstance) {
+      throw new Error('Canvas not initialized. Call init() first.');
+    }
+    return this.wasmInstance;
   }
 }
 

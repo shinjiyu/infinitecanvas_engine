@@ -20,6 +20,22 @@ use serde::{Deserialize, Serialize};
 /// 元素 ID 类型
 pub type ElementId = u64;
 
+fn default_visible() -> bool {
+    true
+}
+
+fn default_fill() -> Option<Color> {
+    Some(Color::BLACK)
+}
+
+fn default_stroke_width() -> f32 {
+    1.0
+}
+
+fn default_opacity() -> f32 {
+    1.0
+}
+
 /// 元素通用属性
 ///
 /// # 职责
@@ -27,17 +43,24 @@ pub type ElementId = u64;
 /// - 位置和变换
 /// - 可见性和选中状态
 /// - 层级顺序
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// JSON 里除 `id` 以外的字段都可省略：变换缺省为单位变换（旋转 0、缩放 1），
+/// `visible` 缺省为 true。未知字段会被忽略。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ElementProps {
     /// 唯一 ID
     pub id: ElementId,
     /// 变换（位置、旋转、缩放）
+    #[serde(default)]
     pub transform: Transform,
     /// 是否可见
+    #[serde(default = "default_visible")]
     pub visible: bool,
     /// 是否选中
+    #[serde(default)]
     pub selected: bool,
     /// 层级（z-index）
+    #[serde(default)]
     pub z_index: i32,
 }
 
@@ -69,15 +92,21 @@ impl ElementProps {
 }
 
 /// 元素样式
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// 省略的字段使用与 [`ElementStyle::new`] 相同的缺省值。未知字段会被忽略。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ElementStyle {
     /// 填充颜色（None 表示不填充）
+    #[serde(default = "default_fill")]
     pub fill: Option<Color>,
     /// 描边颜色（None 表示不描边）
+    #[serde(default)]
     pub stroke: Option<Color>,
     /// 描边宽度
+    #[serde(default = "default_stroke_width")]
     pub stroke_width: f32,
     /// 不透明度 (0.0-1.0)
+    #[serde(default = "default_opacity")]
     pub opacity: f32,
 }
 

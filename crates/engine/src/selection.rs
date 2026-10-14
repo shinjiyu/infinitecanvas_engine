@@ -116,6 +116,21 @@ impl SelectionManager {
         hits
     }
 
+    /// 按元素上的 `selected` 标记重建选择集
+    ///
+    /// 导入场景后调用。不修改元素本身的标记。
+    ///
+    /// # 参数
+    /// - `scene`: 已载入的场景
+    pub fn sync_from_scene(&mut self, scene: &Scene) {
+        self.selected.clear();
+        for element in scene.iter() {
+            if element.as_element().props().selected {
+                self.selected.insert(element.id());
+            }
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.selected.len()
     }
@@ -189,5 +204,20 @@ mod tests {
         assert_eq!(hits, vec![1]);
         assert!(selection.is_selected(1));
         assert!(!selection.is_selected(2));
+    }
+
+    #[test]
+    fn sync_from_scene_reads_selected_flags() {
+        let mut scene = Scene::new();
+        let mut selected = Rectangle::new(1, Vec2::ZERO, Vec2::ONE);
+        selected.props.selected = true;
+        scene.add_rect(selected);
+        scene.add_rect(Rectangle::new(2, Vec2::ZERO, Vec2::ONE));
+
+        let mut selection = SelectionManager::new();
+        selection.sync_from_scene(&scene);
+        assert!(selection.is_selected(1));
+        assert!(!selection.is_selected(2));
+        assert_eq!(selection.len(), 1);
     }
 }

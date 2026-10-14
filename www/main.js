@@ -1,8 +1,8 @@
 /**
  * InfiniteCanvas 首页 Demo。
  *
- * 把选择、压力测试和纹理上传放在同一张画布上：
- * 工具栏切换选择 / 直线 / 画笔 / 绘制 / 平移，压力按钮批量加元素，纹理按钮上传一张程序生成的图片。
+ * 把选择、直线、画笔、压力测试和纹理上传放在同一张画布上。
+ * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，改动会写入 localStorage。
  *
  * @example
  * ```html
@@ -14,6 +14,7 @@ import init, { InfiniteCanvas as WasmCanvas } from '../packages/core/wasm/infini
 import wasmUrl from '../packages/core/wasm/infinitecanvas_wasm_bg.wasm?url';
 
 const TEXTURE_ID = 'landing-badge';
+const STORAGE_KEY = 'infinitecanvas.scene.v1';
 const COLORS = ['#4090f2', '#36d399', '#f2c94c', '#f24040', '#9b59b6', '#e91e63', '#00bcd4', '#ff9800'];
 
 /** @type {WasmCanvas | null} */
@@ -27,6 +28,7 @@ let lastFpsTime = performance.now();
 let spaceHeld = false;
 /** @type {{ x: number, y: number } | null} */
 let lastPointer = null;
+let autosaveTimer = 0;
 
 /**
  * 浏览器没有可用的 WebGPU 时抛出，用来展示友好提示而不是原始异常。
@@ -213,6 +215,98 @@ function loadSample(engine, canvas) {
   engine.add_rectangle(w * 0.22, h * 0.7, 90, 70, '#9b59b6', null, 0);
   ensureTexture(engine);
   engine.add_image(w * 0.08, h * 0.12, 168, 168, TEXTURE_ID);
+  engine.add_line(w * 0.12, h * 0.48, w * 0.4, h * 0.22, '#111827', 3, true);
+  engine.add_path(
+    new Float32Array([w * 0.18, h * 0.84, w * 0.3, h * 0.64, w * 0.44, h * 0.82]),
+    '#7c5cff',
+    3,
+  );
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function errorText(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 把当前场景写入 localStorage。失败时只更新状态，不打断绘制。
+ *
+ * @param {WasmCanvas} engine
+ */
+function persistLocal(engine) {
+  try {
+    localStorage.setItem(STORAGE_KEY, engine.export_json());
+  } catch (error) {
+    setStatus(`自动保存失败：${errorText(error)}`, true);
+  }
+}
+
+/**
+ * 合并连续编辑，稍后再写入 localStorage。
+ *
+ * @param {WasmCanvas} engine
+ */
+function scheduleAutosave(engine) {
+  window.clearTimeout(autosaveTimer);
+  autosaveTimer = window.setTimeout(() => persistLocal(engine), 600);
+}
+
+/**
+ * @param {string} filename
+ * @param {Blob} blob
+ */
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * 下载场景 JSON，并同步一份到 localStorage。
+ *
+ * @param {WasmCanvas} engine
+ */
+function saveSceneFile(engine) {
+  try {
+    const json = engine.export_json();
+    downloadBlob('scene.json', new Blob([json], { type: 'application/json' }));
+    persistLocal(engine);
+    setStatus('已保存场景 JSON');
+  } catch (error) {
+    setStatus(`保存失败：${errorText(error)}`, true);
+  }
+}
+
+/**
+ * @param {WasmCanvas} engine
+ * @param {boolean} selectionOnly
+ */
+function exportPng(engine, selectionOnly) {
+  try {
+    const bytes = engine.export_png(selectionOnly);
+    const name = selectionOnly ? 'selection.png' : 'viewport.png';
+    downloadBlob(name, new Blob([bytes], { type: 'image/png' }));
+    setStatus(selectionOnly ? '已导出选区 PNG' : '已导出视口 PNG');
+  } catch (error) {
+    setStatus(errorText(error), true);
+  }
+}
+
+/**
+ * @param {WasmCanvas} engine
+ * @returns {boolean} 是否恢复了本地场景
+ */
+function restoreLocal(engine) {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (!saved) return false;
+  engine.import_json(saved);
+  return true;
 }
 
 /**
@@ -239,6 +333,7 @@ async function addElements(engine, canvas, count) {
       }
     }
     setStatus(`已添加 ${count} 个元素`);
+    scheduleAutosave(engine);
   } finally {
     adding = false;
     buttons.forEach((button) => {
@@ -321,6 +416,7 @@ function bindInput(canvas, engine) {
     if (canvas.hasPointerCapture(event.pointerId)) {
       canvas.releasePointerCapture(event.pointerId);
     }
+    scheduleAutosave(engine);
   });
 
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
@@ -341,12 +437,15 @@ function bindInput(canvas, engine) {
 
   document.getElementById('undo-btn')?.addEventListener('click', () => {
     if (engine.can_undo()) engine.undo();
+    scheduleAutosave(engine);
   });
   document.getElementById('redo-btn')?.addEventListener('click', () => {
     if (engine.can_redo()) engine.redo();
+    scheduleAutosave(engine);
   });
   document.getElementById('sample-btn')?.addEventListener('click', () => {
     loadSample(engine, canvas);
+    scheduleAutosave(engine);
     setStatus('已载入示例');
   });
   document.getElementById('texture-btn')?.addEventListener('click', () => {
@@ -354,15 +453,38 @@ function bindInput(canvas, engine) {
     const x = 24 + Math.random() * Math.max(24, canvas.width - 200);
     const y = 24 + Math.random() * Math.max(24, canvas.height - 200);
     engine.add_image(x, y, 160, 160, TEXTURE_ID);
+    scheduleAutosave(engine);
     setStatus('已添加纹理');
   });
   document.getElementById('clear-btn')?.addEventListener('click', () => {
     engine.clear_scene();
+    scheduleAutosave(engine);
     setStatus('场景已清空');
   });
   document.getElementById('clear-selection-btn')?.addEventListener('click', () => {
     engine.clear_selection();
+    scheduleAutosave(engine);
   });
+  document.getElementById('save-btn')?.addEventListener('click', () => saveSceneFile(engine));
+  document.getElementById('open-btn')?.addEventListener('click', () => {
+    document.getElementById('open-file')?.click();
+  });
+  document.getElementById('open-file')?.addEventListener('change', async (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement)) return;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      engine.import_json(await file.text());
+      persistLocal(engine);
+      setStatus(`已打开 ${file.name}`);
+    } catch (error) {
+      setStatus(`打开失败：${errorText(error)}`, true);
+    }
+  });
+  document.getElementById('png-btn')?.addEventListener('click', () => exportPng(engine, false));
+  document.getElementById('png-selection-btn')?.addEventListener('click', () => exportPng(engine, true));
   document.querySelectorAll('[data-count]').forEach((button) => {
     button.addEventListener('click', () => {
       const count = Number(button.dataset.count);
@@ -377,11 +499,23 @@ function bindInput(canvas, engine) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
       event.preventDefault();
       if (engine.can_undo()) engine.undo();
+      scheduleAutosave(engine);
       return;
     }
     if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))) {
       event.preventDefault();
       if (engine.can_redo()) engine.redo();
+      scheduleAutosave(engine);
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      saveSceneFile(engine);
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
+      event.preventDefault();
+      document.getElementById('open-file')?.click();
       return;
     }
     if (event.key === ' ' && !spaceHeld) {
@@ -502,8 +636,22 @@ async function main() {
     wasm = new WasmCanvas();
     await wasm.init(canvasEl);
     bindInput(canvasEl, wasm);
-    loadSample(wasm, canvasEl);
-    setStatus('运行中');
+    try {
+      if (restoreLocal(wasm)) {
+        setStatus('已从本地恢复场景');
+      } else {
+        loadSample(wasm, canvasEl);
+        persistLocal(wasm);
+        setStatus('运行中');
+      }
+    } catch (error) {
+      loadSample(wasm, canvasEl);
+      setStatus(`本地场景无法读入，已载入示例：${errorText(error)}`, true);
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') persistLocal(wasm);
+    });
+    window.addEventListener('beforeunload', () => persistLocal(wasm));
     startLoop(wasm);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

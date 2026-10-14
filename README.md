@@ -33,17 +33,25 @@ Only behavior that exists in this repository is listed here.
 
 ### Interaction
 
-- Pointer events drive select, marquee select, drag-move, and drawing, according to the active tool. Drawing tools cover rectangle, circle, line (Shift adds an arrow), pen, and pan.
-- Hit testing walks the flat scene from the highest z-index. It does not consult the QuadTree.
-- Command history for add, remove, and move, exposed as `undo` and `redo`.
+- Pointer events drive select, marquee select, drag-move, resize and rotate handles, and drawing, according to the active tool. Drawing tools cover rectangle, circle, line (Shift adds an arrow), pen, and pan.
+- Hit testing walks the flat scene from the highest z-index and inverse-transforms rotation and scale. It does not consult the QuadTree.
+- Command history for add, remove, move, and transform, exposed as `undo` and `redo`.
 - Tools: Select, Line, Pen, Rectangle, Circle, Pan, and a temporary Hand tool (`push_hand_tool` / `pop_temporary_tool`).
 - `www/index.html` binds V / L / P / R / O / H, Space, and Ctrl+Z / Ctrl+Y. Those shortcuts live in the page script. The WASM dispatcher applies pointer events; keyboard and wheel events are queued and otherwise ignored.
 
 ### Scene and math
 
-- Flat scene of `Rectangle`, `Circle`, `Image`, `Line`, and `Path`. No groups, inherited transforms, or text.
+- Flat scene of `Rectangle`, `Circle`, `Image`, `Line`, and `Path`. No groups, inherited transforms, or text. Rotation (radians) and scale live on each element's `Transform` (`ElementProps::rotation`).
 - `infinitecanvas-math` provides `Vec2`, glam matrices, `Rect`, `Transform`, `Color`, and `Vertex`.
 - `QuadTree` supports insert, point query, and range query, and has unit tests. Rendering and hit testing do not call it.
+
+### Persistence
+
+- `Scene::to_json` / `Scene::from_json` write version 1 JSON (`version`, `next_id`, `elements`). Rectangle, circle, image, line (including `arrow`), and path round-trip, including `props.transform.rotation` and `scale`.
+- Missing optional fields use serde defaults (rotation 0, scale 1, arrow off, visible, opacity 1, color alpha 1). Unknown fields are ignored, so later optional fields can be added without a version bump. An unknown `version`, malformed JSON, a duplicate id, or an unknown element type such as `text` is an error.
+- WASM exposes the same document as `export_json` and `import_json`. Import replaces the scene, rebuilds selection from the `selected` flags, and clears the undo stack.
+- `export_png(selectionOnly)` encodes an RGBA PNG of the current viewport, or of the selected elements' bounds when `selectionOnly` is true. Lines, arrows, and paths are rasterized at their stroke width. Image elements use a flat placeholder because GPU textures are not part of the scene file.
+- The landing demo (`www/index.html`) saves and opens that JSON (Ctrl+S / Ctrl+O) and downloads a viewport or selection PNG. It also writes the JSON to `localStorage` under `infinitecanvas.scene.v1`.
 
 ### Collaboration
 

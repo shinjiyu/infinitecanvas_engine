@@ -6,8 +6,13 @@
 /// - UV 裁剪（显示纹理的一部分）
 /// - 透明度（通过 alpha）
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
+use serde::{Deserialize, Serialize};
 
 use crate::element::{Element, ElementId, ElementProps};
+
+fn default_image_alpha() -> f32 {
+    1.0
+}
 
 /// Image 元素
 ///
@@ -34,7 +39,7 @@ use crate::element::{Element, ElementId, ElementProps};
 ///     Rect::new(0.0, 0.0, 0.5, 0.5),
 /// );
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Image {
     /// 元素通用属性（ID, transform, visible, z_index）
     pub props: ElementProps,
@@ -48,12 +53,16 @@ pub struct Image {
     /// - (0.0, 0.0) = 左上角
     /// - (1.0, 1.0) = 右下角
     ///
-    /// 如果为 None，使用完整纹理 (0,0)-(1,1)
+    /// 如果为 None，使用完整纹理 (0,0)-(1,1)。JSON 中可省略。
+    #[serde(default)]
     pub uv_rect: Option<Rect>,
     /// 透明度 [0.0 - 1.0]
     ///
     /// - 0.0 = 完全透明
     /// - 1.0 = 完全不透明
+    ///
+    /// JSON 中缺省为 1。
+    #[serde(default = "default_image_alpha")]
     pub alpha: f32,
 }
 
