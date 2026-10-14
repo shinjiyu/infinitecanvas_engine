@@ -41,19 +41,19 @@ infinitecanvas_engine/
 
 ## 性能
 
-数字与英文 [README.md](./README.md) 的 Performance 一节相同，测量日 **2026-10-14**，commit `ee29c09`。原始记录在 [docs/perf/2026-10-14.md](./docs/perf/2026-10-14.md)。
+数字与英文 [README.md](./README.md) 的 Performance 一节相同，测量日 **2026-10-14**，commit `5a20273`（已变基到 `df248f5`）。原始记录在 [docs/perf/2026-10-14.md](./docs/perf/2026-10-14.md)。
 
-环境：Linux 6.12.94+，4 个逻辑 CPU（Intel Xeon），16 GB 内存，无 `/dev/dri`。Headless Chrome 154.0.8037.92，WebGPU 适配器 SwiftShader Device (Subzero)。画布 1280×720。发布版 `infinitecanvas_wasm_bg.wasm` **3,114,826** 字节（rustc 1.99.0，wasm-pack 0.13.1，wasm-opt）。
+环境：Linux 6.12.94+，4 个逻辑 CPU（Intel Xeon），16 GB 内存，无 `/dev/dri`。Headless Chrome 154.0.8037.92，WebGPU 适配器 SwiftShader Device (Subzero)。画布 1280×720。发布版 `infinitecanvas_wasm_bg.wasm` **3,161,892** 字节（rustc 1.99.0，wasm-pack 0.13.1，wasm-opt）。
 
 场景是 `load_stress_scene` 的填充矩形。稳态帧间隔约 16.7 ms，是 60 Hz 动画帧节拍。`render()` 的 CPU 提交约 0.1 ms，且不随元素数上升，因为顶点缓存未脏、只更新了视口 uniform。这个时间不含 GPU 时间戳。冷启动帧包含建缓存和全量上传，会随规模变长。约 60 FPS 的判据：平均 FPS ≥ 55 且 P95 帧间隔 ≤ 20 ms。没有关闭脏标记。
 
 | 元素 | 平均帧 | P95 帧 | 平均 FPS | ~60 FPS | 平均提交 | P95 提交 | 冷启动帧 | WASM 堆 | JS 堆 |
 | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 16.67 ms | 16.90 ms | 60.0 | 是 | 0.11 ms | 0.20 ms | 8.10 ms | 2,686,976 | 2,099,374 |
-| 10,000 | 16.67 ms | 16.90 ms | 60.0 | 是 | 0.10 ms | 0.20 ms | 13.70 ms | 11,796,480 | 3,826,925 |
-| 100,000 | 16.67 ms | 17.00 ms | 60.0 | 是 | 0.12 ms | 0.20 ms | 99.10 ms | 89,980,928 | 20,944,602 |
+| 1,000 | 16.67 ms | 17.00 ms | 60.0 | 是 | 0.10 ms | 0.20 ms | 6.80 ms | 2,686,976 | 2,104,111 |
+| 10,000 | 16.67 ms | 17.00 ms | 60.0 | 是 | 0.11 ms | 0.20 ms | 17.40 ms | 11,796,480 | 3,832,546 |
+| 100,000 | 16.66 ms | 17.10 ms | 60.0 | 是 | 0.12 ms | 0.20 ms | 87.50 ms | 89,980,928 | 20,949,663 |
 
-100k 在这台机器上跑完了（加载 41.2 ms，冷启动上传 19,200,000 字节，600,000 顶点，1 次绘制）。冷启动帧只有一次采样，同机再跑时 100k 冷启动大约在 76 ms 到 99 ms 之间。稳态帧间隔和提交时间保持在上表。复现：
+100k 在这台机器上跑完了（加载 36.5 ms，冷启动上传 19,200,000 字节，600,000 顶点，1 次绘制）。冷启动帧只有一次采样，同机另几次大约在 76 ms 到 99 ms。稳态帧间隔和提交时间保持在上表。复现：
 
 ```bash
 cd crates/wasm && wasm-pack build --target web --out-dir ../../packages/core/wasm && cd ../..

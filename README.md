@@ -128,9 +128,9 @@ flowchart TB
 
 ## Performance
 
-Measured on **2026-10-14** at commit `ee29c09` (`ee29c092e3977b826041acface05d63d64acab08`). This harness does not change the renderer. Raw log: [docs/perf/2026-10-14.md](./docs/perf/2026-10-14.md) and [docs/perf/2026-10-14.json](./docs/perf/2026-10-14.json).
+Measured on **2026-10-14** at `5a20273` (`5a202732b4bbd99218063430b7b9bf0fd0b096a0`), rebased onto `df248f5`. This harness does not change the renderer. Raw log: [docs/perf/2026-10-14.md](./docs/perf/2026-10-14.md) and [docs/perf/2026-10-14.json](./docs/perf/2026-10-14.json).
 
-Environment: Linux 6.12.94+ x64, 4 logical CPUs (Intel Xeon), 16 GB RAM, no `/dev/dri`. Headless Chrome 154.0.8037.92. WebGPU adapter: SwiftShader Device (Subzero), not a fallback adapter. Canvas 1280×720. rustc 1.99.0, wasm-pack 0.13.1 with wasm-opt. Release `infinitecanvas_wasm_bg.wasm` is **3,114,826 bytes**.
+Environment: Linux 6.12.94+ x64, 4 logical CPUs (Intel Xeon), 16 GB RAM, no `/dev/dri`. Headless Chrome 154.0.8037.92. WebGPU adapter: SwiftShader Device (Subzero), not a fallback adapter. Canvas 1280×720. rustc 1.99.0, wasm-pack 0.13.1 with wasm-opt. Release `infinitecanvas_wasm_bg.wasm` is **3,161,892 bytes**.
 
 The scene is `load_stress_scene`: filled rectangles, 400 columns, 24 px spacing, 16×12. Steady samples are 119 frame intervals (120 `render()` calls after 30 warmup frames). The first interval is dropped. About 60 FPS means average FPS ≥ 55 and P95 frame interval ≤ 20 ms. Dirty flags stayed on: after the steady sample and after `pan(24, 16)`, `geometryUnchanged` was true and regenerated elements were 0. The draw path submits the whole vertex cache (one draw of `count * 6` vertices). Culling was not turned off.
 
@@ -138,11 +138,11 @@ Frame interval is the animation-frame period, so a 60 Hz headless Chrome sits ne
 
 | Elements | Avg frame | P95 frame | Avg FPS | ~60 FPS | Avg submit | P95 submit | Cold frame | WASM heap | JS heap used |
 | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 16.67 ms | 16.90 ms | 60.0 | yes | 0.11 ms | 0.20 ms | 8.10 ms | 2,686,976 | 2,099,374 |
-| 10,000 | 16.67 ms | 16.90 ms | 60.0 | yes | 0.10 ms | 0.20 ms | 13.70 ms | 11,796,480 | 3,826,925 |
-| 100,000 | 16.67 ms | 17.00 ms | 60.0 | yes | 0.12 ms | 0.20 ms | 99.10 ms | 89,980,928 | 20,944,602 |
+| 1,000 | 16.67 ms | 17.00 ms | 60.0 | yes | 0.10 ms | 0.20 ms | 6.80 ms | 2,686,976 | 2,104,111 |
+| 10,000 | 16.67 ms | 17.00 ms | 60.0 | yes | 0.11 ms | 0.20 ms | 17.40 ms | 11,796,480 | 3,832,546 |
+| 100,000 | 16.66 ms | 17.10 ms | 60.0 | yes | 0.12 ms | 0.20 ms | 87.50 ms | 89,980,928 | 20,949,663 |
 
-100k ran on this machine (load 41.2 ms, cold upload 19,200,000 bytes, 600,000 vertices, 1 draw call). Heap figures are `WebAssembly.Memory.buffer.byteLength` and Chromium `performance.memory.usedJSHeapSize` after that scene was resident. Cold frame time is a single sample; a second run on the same host moved the 100k cold frame between about 76 ms and 99 ms. Steady frame interval and submit time stayed on the figures above.
+100k ran on this machine (load 36.5 ms, cold upload 19,200,000 bytes, 600,000 vertices, 1 draw call). Heap figures are `WebAssembly.Memory.buffer.byteLength` and Chromium `performance.memory.usedJSHeapSize` after that scene was resident. Cold frame time is a single sample; earlier runs on the same host put the 100k cold frame between about 76 ms and 99 ms. Steady frame interval and submit time stayed on the figures above.
 
 Reproduce (Chrome required; the script adds headless WebGPU / SwiftShader flags):
 
