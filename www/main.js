@@ -3,13 +3,13 @@
  *
  * 把选择、直线、画笔、压力测试、纹理和小地图放在同一张画布上。
  * 选中元素后右侧属性面板可改填充、描边、线宽、线型、线帽、线结和不透明度，文本还可改字号和颜色。文本描边暂不支持线型。
- * 方向键按世界单位微调选中元素（Shift 为 10 倍）；输入框内不触发。
+ * 键盘操作只读 `www/shortcuts.js`：方向键按世界单位微调（Shift 为 10 倍），
+ * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。输入框、下拉框内不触发。
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
  * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，按钮在工具栏和属性面板，进撤销栈。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，面板上有同样的四个按钮。
- * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。
  * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
  * @example
@@ -29,7 +29,6 @@ import {
   writeTextClipboard,
 } from './clipboard.js';
 import { orientAction } from './flip-keys.js';
-import { arrowNudge } from './nudge-keys.js';
 import { stackOrderAction } from './stack-order-keys.js';
 import { rasterizeText } from './text-raster.js';
 import {
@@ -737,6 +736,30 @@ function dispatchShortcut(shortcut, engine) {
     case 'ungroup':
       ungroupSelection(engine);
       break;
+    case 'copy':
+      enqueueClipboard(() => copySelection(engine));
+      break;
+    case 'paste': {
+      // 序号先于 paste 事件。图片路径会把已消费序号抬到这里，元素 JSON 就不再跑。
+      const serial = ++imagePasteSerial;
+      enqueueClipboard(() => new Promise((resolve) => {
+        setTimeout(async () => {
+          try {
+            if (imagePasteConsumed >= serial) return;
+            await pasteSelection(engine);
+          } finally {
+            resolve();
+          }
+        }, 0);
+      }));
+      break;
+    }
+    case 'duplicate':
+      duplicateSelection(engine);
+      break;
+    case 'nudge':
+      nudgeSelection(engine, shortcut);
+      break;
     case 'escape':
       if (escapeAction(isHelpOpen()) === 'closeHelp') {
         setHelpOpen(false);
@@ -757,6 +780,23 @@ function dispatchShortcut(shortcut, engine) {
       break;
     default:
       break;
+  }
+}
+
+/**
+ * 方向键微调当前选中。普通步长 1 个世界单位，Shift 为 10 倍，由引擎计算。
+ *
+ * @param {WasmCanvas} engine
+ * @param {import('./shortcuts.js').Shortcut} shortcut
+ */
+function nudgeSelection(engine, shortcut) {
+  const direction = shortcut.direction;
+  if (direction !== 'left' && direction !== 'right' && direction !== 'up' && direction !== 'down') {
+    return;
+  }
+  if (engine.nudge_selection(direction, shortcut.shift === true)) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
   }
 }
 
@@ -1619,36 +1659,10 @@ function bindInput(canvas, engine) {
     if (isEditableTarget(event.target)) return;
     const shortcut = matchShortcut(SHORTCUTS, event, 'down');
     if (shortcut) {
-      event.preventDefault();
+      // Ctrl/Cmd+V 不拦截默认动作：paste 事件要先看到剪贴板里的图片。
+      if (shortcut.handler !== 'paste') event.preventDefault();
       if (event.repeat && shortcut.allowRepeat === false) return;
       dispatchShortcut(shortcut, engine);
-      return;
-    }
-    // Ctrl/Cmd+C/V/D 和方向键还在页面里。表里补上之后这里就删掉。
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'c') {
-      event.preventDefault();
-      enqueueClipboard(() => copySelection(engine));
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v') {
-      // 不 preventDefault：paste 事件要先看到剪贴板里的图片。
-      // 有图片则粘贴图片；否则在下一拍走元素 JSON。
-      const serial = ++imagePasteSerial;
-      enqueueClipboard(() => new Promise((resolve) => {
-        setTimeout(async () => {
-          try {
-            if (imagePasteConsumed >= serial) return;
-            await pasteSelection(engine);
-          } finally {
-            resolve();
-          }
-        }, 0);
-      }));
-      return;
-    }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'd') {
-      event.preventDefault();
-      duplicateSelection(engine);
       return;
     }
     const stackAction = stackOrderAction(event);
@@ -1661,21 +1675,12 @@ function bindInput(canvas, engine) {
       return;
     }
     const orient = orientAction(event);
-    if (orient) {
-      event.preventDefault();
-      const changed = orient.kind === 'flip'
-        ? engine.flip_selection(orient.axis)
-        : engine.rotate_selection_quarter(orient.dir);
-      if (changed) {
-        scheduleAutosave(engine);
-        syncPropertyPanel(engine);
-      }
-      return;
-    }
-    const nudge = arrowNudge(event);
-    if (!nudge) return;
+    if (!orient) return;
     event.preventDefault();
-    if (engine.nudge_selection(nudge.direction, nudge.shift)) {
+    const changed = orient.kind === 'flip'
+      ? engine.flip_selection(orient.axis)
+      : engine.rotate_selection_quarter(orient.dir);
+    if (changed) {
       scheduleAutosave(engine);
       syncPropertyPanel(engine);
     }

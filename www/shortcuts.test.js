@@ -71,9 +71,13 @@ test('tool keys select the tools that exist', () => {
 });
 
 test('modifier letters do not switch tools', () => {
-  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'v', ctrlKey: true }), 'down'), null);
-  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'v', metaKey: true }), 'down'), null);
+  const ctrlV = matchShortcut(SHORTCUTS, keyEvent({ key: 'v', ctrlKey: true }), 'down');
+  assert.equal(ctrlV?.handler, 'paste');
+  assert.notEqual(ctrlV?.handler, 'tool');
+  const metaV = matchShortcut(SHORTCUTS, keyEvent({ key: 'v', metaKey: true }), 'down');
+  assert.equal(metaV?.handler, 'paste');
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'v', altKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'l', ctrlKey: true }), 'down'), null);
 });
 
 test('undo, redo, save, and open keep their previous chords', () => {
@@ -117,6 +121,36 @@ test('delete, select all, escape, zoom, and help', () => {
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: '?', code: 'Slash' }), 'down'), null);
 });
 
+test('copy, paste, and duplicate use Ctrl or Cmd without Shift', () => {
+  assert.equal(assertHandler('copy', { key: 'c', ctrlKey: true }).id, 'copy');
+  assert.equal(assertHandler('copy', { key: 'C', metaKey: true }).id, 'copy');
+  assert.equal(assertHandler('paste', { key: 'v', ctrlKey: true }).id, 'paste');
+  assert.equal(assertHandler('duplicate', { key: 'd', metaKey: true }).id, 'duplicate');
+  assert.equal(assertHandler('duplicate', { key: 'D', ctrlKey: true }).id, 'duplicate');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'c' }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'd' }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'c', ctrlKey: true, shiftKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'v', ctrlKey: true, shiftKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'd', metaKey: true, altKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'v', ctrlKey: true }), 'down')?.tool, 'canvas');
+});
+
+test('arrow keys nudge, and Shift is the 10x step', () => {
+  assert.equal(assertHandler('nudge', { key: 'ArrowLeft' }).direction, 'left');
+  assert.equal(assertHandler('nudge', { key: 'ArrowRight' }).direction, 'right');
+  assert.equal(assertHandler('nudge', { key: 'ArrowUp' }).direction, 'up');
+  assert.equal(assertHandler('nudge', { key: 'ArrowDown' }).direction, 'down');
+  assert.equal(assertHandler('nudge', { key: 'ArrowLeft' }).shift, false);
+  const fast = assertHandler('nudge', { key: 'ArrowUp', shiftKey: true });
+  assert.equal(fast.direction, 'up');
+  assert.equal(fast.shift, true);
+  assert.equal(fast.id, 'nudge-up-fast');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'ArrowRight', ctrlKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'ArrowLeft', metaKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'ArrowDown', altKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'ArrowRight', ctrlKey: true, shiftKey: true }), 'down'), null);
+});
+
 test('space pushes the hand tool on keydown and pops it on keyup', () => {
   assert.equal(assertHandler('pushHand', { key: ' ', code: 'Space' }, 'down').id, 'temp-pan');
   assert.equal(assertHandler('popHand', { key: ' ', code: 'Space' }, 'up').id, 'temp-pan-up');
@@ -148,6 +182,17 @@ test('help rows are generated from the table and show both chords', () => {
   assert.equal(mac.find((row) => row.id === 'group')?.chords[0], '⌘G');
   assert.equal(other.find((row) => row.id === 'ungroup')?.chords[0], 'Ctrl+Shift+G');
   assert.equal(mac.find((row) => row.id === 'ungroup')?.chords[0], '⌘⇧G');
+  assert.equal(other.find((row) => row.id === 'copy')?.chords[0], 'Ctrl+C');
+  assert.equal(mac.find((row) => row.id === 'paste')?.chords[0], '⌘V');
+  assert.equal(other.find((row) => row.id === 'duplicate')?.chords[0], 'Ctrl+D');
+  assert.deepEqual(other.find((row) => row.id === 'nudge')?.chords, ['←', '→', '↑', '↓']);
+  assert.deepEqual(mac.find((row) => row.id === 'nudge-fast')?.chords, ['⇧←', '⇧→', '⇧↑', '⇧↓']);
+  assert.deepEqual(other.find((row) => row.id === 'nudge-fast')?.chords, [
+    'Shift+←',
+    'Shift+→',
+    'Shift+↑',
+    'Shift+↓',
+  ]);
   assert.equal(other.find((row) => row.id === 'help')?.chords[0], 'Shift+/');
   assert.equal(mac.find((row) => row.id === 'help')?.chords[0], '⇧/');
 
@@ -182,6 +227,8 @@ test('escape closes help before clearing the selection', () => {
 
 test('editable focus covers input, textarea, and contenteditable', () => {
   assert.equal(isEditableTarget({ tagName: 'INPUT', parentElement: null }), true);
+  assert.equal(isEditableTarget({ tagName: 'SELECT', parentElement: null }), true);
+  assert.equal(isEditableTarget({ tagName: 'select', parentElement: null }), true);
   assert.equal(isEditableTarget({ tagName: 'input', parentElement: null }), true);
   assert.equal(isEditableTarget({ tagName: 'TEXTAREA', parentElement: null }), true);
   assert.equal(

@@ -25,4 +25,4 @@ NudgeElementsCommand ── translate_ids（只加 translation）
 
 拖拽吸附（#14）仍只在指针拖动里生效。方向键不读吸附阈值，也不产生对齐参考线。
 
-Demo 在 `www` 的 `keydown` 里调用 `nudge_selection`。输入框、下拉框和 contenteditable 里的方向键留给光标。空格临时平移、Ctrl/Cmd+Z、以及 V/L/P/R/O/H/T/M 工具键不走这条路径。#26 的快捷键帮助面板还没进 master，因此没有登记到那张表。
+Demo 的 `SHORTCUTS` 表把方向键分发到 `nudge_selection`，`?` 帮助面板列出 1 倍和 10 倍两行。输入框、下拉框和 contenteditable 里的方向键留给光标。空格临时平移、Ctrl/Cmd+Z、复制粘贴，以及 V/L/P/R/O/H/T/M 工具键不走这条路径。带 Ctrl、Alt 或 ⌘ 的方向键也不微调。

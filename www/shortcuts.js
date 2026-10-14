@@ -29,6 +29,7 @@
  * @property {boolean | null} [alt] 为 true 时需要 Alt。缺省则不能按下 Alt。`null` 表示忽略
  * @property {ShortcutPhase} [phase] 监听阶段，默认 `down`
  * @property {string} [scope] 作用域。缺省 `canvas`。文本编辑框里的快捷键是 `text-editor`
+ * @property {'left' | 'right' | 'up' | 'down'} [direction] 方向键微调的方向。`handler` 为 `nudge` 时使用
  * @property {string} [helpGroup] 合并到同一行帮助的组名。缺省用 `id`
  * @property {boolean} [help] 为 false 时不单独成行，但仍可并进 `helpGroup` 的键帽
  * @property {boolean} [allowRepeat] 按住不放时是否重复触发。默认允许
@@ -53,7 +54,7 @@ export const TOOL_LABELS = {
 /**
  * 全部快捷键，顺序即帮助面板的行序。
  *
- * 已有的 V/L/P/R/O/H、空格临时平移、撤销重做、保存打开都留在这里。
+ * 已有的 V/L/P/R/O/H、空格临时平移、撤销重做、保存打开、复制粘贴克隆和方向键微调都留在这里。
  * 字母工具不要求 Shift 的状态，和原来的 `keydown` 一致：Shift+V 仍然切到选择。
  *
  * @type {Shortcut[]}
@@ -246,6 +247,124 @@ export const SHORTCUTS = [
     shift: true,
   },
   {
+    id: 'copy',
+    action: '复制选中',
+    tool: 'canvas',
+    handler: 'copy',
+    label: 'C',
+    keys: ['c'],
+    ctrl: true,
+    shift: false,
+  },
+  {
+    id: 'paste',
+    action: '粘贴',
+    tool: 'canvas',
+    handler: 'paste',
+    label: 'V',
+    keys: ['v'],
+    ctrl: true,
+    shift: false,
+  },
+  {
+    id: 'duplicate',
+    action: '原地克隆选中',
+    tool: 'canvas',
+    handler: 'duplicate',
+    label: 'D',
+    keys: ['d'],
+    ctrl: true,
+    shift: false,
+  },
+  {
+    id: 'nudge-left',
+    action: '微调选中元素（1 世界单位）',
+    tool: 'canvas',
+    handler: 'nudge',
+    direction: 'left',
+    label: '←',
+    keys: ['ArrowLeft'],
+    shift: false,
+    helpGroup: 'nudge',
+  },
+  {
+    id: 'nudge-right',
+    action: '微调选中元素（1 世界单位）',
+    tool: 'canvas',
+    handler: 'nudge',
+    direction: 'right',
+    label: '→',
+    keys: ['ArrowRight'],
+    shift: false,
+    helpGroup: 'nudge',
+  },
+  {
+    id: 'nudge-up',
+    action: '微调选中元素（1 世界单位）',
+    tool: 'canvas',
+    handler: 'nudge',
+    direction: 'up',
+    label: '↑',
+    keys: ['ArrowUp'],
+    shift: false,
+    helpGroup: 'nudge',
+  },
+  {
+    id: 'nudge-down',
+    action: '微调选中元素（1 世界单位）',
+    tool: 'canvas',
+    handler: 'nudge',
+    direction: 'down',
+    label: '↓',
+    keys: ['ArrowDown'],
+    shift: false,
+    helpGroup: 'nudge',
+  },
+  {
+    id: 'nudge-left-fast',
+    action: '微调选中元素（10 倍步长）',
+    tool: 'canvas',
+    handler: 'nudge',
+    direction: 'left',
+    label: '←',
+    keys: ['ArrowLeft'],
+    shift: true,
+    helpGroup: 'nudge-fast',
+  },
+  {
+    id: 'nudge-right-fast',
+    action: '微调选中元素（10 倍步长）',
+    tool: 'canvas',
+    handler: 'nudge',
+    direction: 'right',
+    label: '→',
+    keys: ['ArrowRight'],
+    shift: true,
+    helpGroup: 'nudge-fast',
+  },
+  {
+    id: 'nudge-up-fast',
+    action: '微调选中元素（10 倍步长）',
+    tool: 'canvas',
+    handler: 'nudge',
+    direction: 'up',
+    label: '↑',
+    keys: ['ArrowUp'],
+    shift: true,
+    helpGroup: 'nudge-fast',
+  },
+  {
+    id: 'nudge-down-fast',
+    action: '微调选中元素（10 倍步长）',
+    tool: 'canvas',
+    handler: 'nudge',
+    direction: 'down',
+    label: '↓',
+    keys: ['ArrowDown'],
+    shift: true,
+    helpGroup: 'nudge-fast',
+  },
+  {
     id: 'escape',
     action: '取消选择或关闭帮助面板',
     tool: 'canvas',
@@ -333,7 +452,7 @@ export function prefersMacModifier(platform = defaultPlatform()) {
 /**
  * 焦点是否在输入控件里。为 true 时画布快捷键不触发。
  *
- * 沿父节点查找 `input`、`textarea`，以及 `contenteditable` 不是 `false` 的元素。
+ * 沿父节点查找 `input`、`textarea`、`select`，以及 `contenteditable` 不是 `false` 的元素。
  *
  * @param {EventTarget | null | undefined} target 事件目标
  * @returns {boolean} 处于可编辑焦点时为 true
@@ -347,7 +466,7 @@ export function isEditableTarget(target) {
   let node = target;
   while (node) {
     const tag = typeof node.tagName === 'string' ? node.tagName.toUpperCase() : '';
-    if (tag === 'INPUT' || tag === 'TEXTAREA') {
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
       return true;
     }
     if (node.isContentEditable === true) {

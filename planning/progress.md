@@ -62,7 +62,7 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] 步长 1 世界单位，与缩放无关；Shift ×10。多选一条历史
 - [x] 单选 / 多选 / 组、Shift、撤销重做、锁定或空选 no-op
 - [x] Demo：非输入框方向键调用 `nudge_selection`；不抢空格平移、撤销、复制粘贴和工具键
-- [ ] #26 快捷键帮助面板尚未合并，未登记「方向键微调 / Shift 加速」
+- [x] 方向键和 Shift+方向键已登记到 `www/shortcuts.js`，帮助面板列出 1 倍和 10 倍
 
 ```text
 方向键 ──► nudge_targets ──► NudgeElementsCommand ──► translate_ids
@@ -118,7 +118,7 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] `DuplicateElementsCommand` / `PasteElementsCommand`：撤销删除，重做按原 ID 恢复
 - [x] 新元素进入 `Scene::mark_dirty`
 - [x] Demo：Ctrl+C / Ctrl+V / Ctrl+D；系统剪贴板失败退回内存，不抛错
-- [x] #26 快捷键表尚未合并，三个快捷键写在 `www/main.js`
+- [x] Ctrl+C / Ctrl+V / Ctrl+D 已登记到 `www/shortcuts.js`，和帮助面板共用这一张表
 
 ---
 
@@ -214,7 +214,9 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] `www/shortcuts.js` 一张表同时驱动按键分发和 `?` 帮助面板
 - [x] 保留 V/L/P/R/O/T/H、空格临时平移、Ctrl/Cmd+Z/Y/Shift+Z、Ctrl/Cmd+S/O
 - [x] 补齐删除（Delete/Backspace）、全选（Ctrl/Cmd+A）、Esc 取消选择、Shift+1 缩放到适合、Shift+0 为 100%
-- [x] 输入框、textarea、contenteditable 聚焦时不触发；Mac 显示 ⌘，其他平台显示 Ctrl
+- [x] 输入框、textarea、select、contenteditable 聚焦时不触发；Mac 显示 ⌘，其他平台显示 Ctrl
+- [x] Ctrl/Cmd+C / V / D 复制、粘贴、原地克隆，走同一张表
+- [x] 方向键微调选中元素（1 世界单位），Shift+方向键为 10 倍；带 Ctrl / Alt / ⌘ 不触发
 - [x] WASM 只新增 `delete_selection`、`select_all`、`zoom_to_fit`、`set_zoom`
 - [x] #4 文本已合并：`T` 切换文本工具，编辑框里 Enter 确认、Esc 取消
 - [x] #13 已合并：`Ctrl+G` 成组（`group_elements`），`Ctrl+Shift+G` 取消分组（`ungroup`）
