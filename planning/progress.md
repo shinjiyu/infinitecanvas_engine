@@ -2,6 +2,24 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #45: 层级快捷键
+
+- [x] `ReorderSelectionCommand`：置顶 / 置底 / 前移 / 后移，同一父节点下的兄弟，一条历史
+- [x] 选中组只移动组根；跨父或空选不入栈；锁定（含祖先）跳过，隐藏仍可重排
+- [x] `structure_epoch` 前进，顶点缓存整表重排；不把元素标成几何脏
+- [x] WASM：`reorder_selection(action)`，`front` / `back` / `forward` / `backward`
+- [x] Demo：图层面板四个按钮，以及 `]` / `[` / Ctrl+] / Ctrl+[（或 Cmd）
+- [ ] #26 快捷键帮助面板尚未合并，未登记进 `SHORTCUTS`
+
+```text
+] / [ / Ctrl+] / Ctrl+[
+        │
+        ▼
+reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
+                                                      ├─ 一条历史
+                                                      └─ structure_epoch（顶点缓存重排）
+```
+
 ## Issue #40: 多选对齐与分布
 
 - [x] `AlignElementsCommand`：左 / 水平居中 / 右 / 顶 / 垂直居中 / 底，参考框是目标世界包围盒的并集

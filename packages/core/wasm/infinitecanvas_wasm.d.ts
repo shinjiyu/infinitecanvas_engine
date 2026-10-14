@@ -683,6 +683,23 @@ export class InfiniteCanvas {
      */
     reorder_element(id: bigint, parent_id: bigint, index: number): boolean;
     /**
+     * 按当前选中重排同一层的兄弟，并记入一条撤销记录。
+     *
+     * `action` 为 `front`（置顶）、`back`（置底）、`forward`（前移一层）或 `backward`（后移一层）。
+     * 只在同一个父节点下移动。选中组时移动组根，不拆开子树。
+     * 空选、跨父节点、全部锁定（含锁定的祖先）或顺序不变时返回 `false`，不入栈。
+     * 同一层里锁定的选中项会跳过。隐藏不阻止重排。
+     *
+     * 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次重排。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.reorder_selection("front");
+     * canvas.undo();
+     * ```
+     */
+    reorder_selection(action: string): boolean;
+    /**
      * 可见叶子的世界包围盒。
      *
      * 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
@@ -919,6 +936,7 @@ export interface InitOutput {
     readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_render: (a: number) => [number, number];
     readonly infinitecanvas_reorder_element: (a: number, b: bigint, c: bigint, d: number) => number;
+    readonly infinitecanvas_reorder_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_scene_bounds: (a: number) => any;
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_camera_center: (a: number, b: number, c: number) => void;

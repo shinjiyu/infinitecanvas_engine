@@ -1247,6 +1247,30 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 按当前选中重排同一层的兄弟，并记入一条撤销记录。
+     *
+     * `action` 为 `front`（置顶）、`back`（置底）、`forward`（前移一层）或 `backward`（后移一层）。
+     * 只在同一个父节点下移动。选中组时移动组根，不拆开子树。
+     * 空选、跨父节点、全部锁定（含锁定的祖先）或顺序不变时返回 `false`，不入栈。
+     * 同一层里锁定的选中项会跳过。隐藏不阻止重排。
+     *
+     * 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次重排。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.reorder_selection("front");
+     * canvas.undo();
+     * ```
+     * @param {string} action
+     * @returns {boolean}
+     */
+    reorder_selection(action) {
+        const ptr0 = passStringToWasm0(action, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_reorder_selection(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
      * 可见叶子的世界包围盒。
      *
      * 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
@@ -3256,7 +3280,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2568, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2583, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },

@@ -542,6 +542,273 @@ impl Command for ReorderOutlineCommand {
     }
 }
 
+/// 选中元素在同一层兄弟之间的 z 序动作。
+///
+/// 下标 `0` 是最底层。`Front` / `Back` 把选中块整组放到最前或最后，并保持它们原来的相对顺序。
+/// `Forward` / `Backward` 只跨过一个未选中的兄弟；挨在一起的选中元素会作为一块移动。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackOrderAction {
+    /// 置顶。
+    Front,
+    /// 置底。
+    Back,
+    /// 前移一层。
+    Forward,
+    /// 后移一层。
+    Backward,
+}
+
+impl StackOrderAction {
+    /// 解析 `reorder_selection` 的动作名。
+    ///
+    /// 接受 `front`、`back`、`forward`、`backward`。大小写不敏感，两端空白忽略。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::StackOrderAction;
+    ///
+    /// assert_eq!(StackOrderAction::parse("Front"), Some(StackOrderAction::Front));
+    /// assert!(StackOrderAction::parse("up").is_none());
+    /// ```
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "front" => Some(Self::Front),
+            "back" => Some(Self::Back),
+            "forward" => Some(Self::Forward),
+            "backward" => Some(Self::Backward),
+            _ => None,
+        }
+    }
+}
+
+/// 对当前选中做一次同层重排，整次操作是一条历史。
+///
+/// 只在同一个父节点下改兄弟顺序。选中组时移动组根，不改组内子元素顺序。
+/// 执行前记下 [`OutlineSnapshot`]，撤销时写回父指针、子列表和 `z_index`。
+/// 世界坐标不动。绘制顺序靠 [`Scene::structure_epoch`] 让顶点缓存整表重排，
+/// 不把元素标成几何脏。
+#[derive(Debug)]
+pub struct ReorderSelectionCommand {
+    action: StackOrderAction,
+    parent: Option<ElementId>,
+    order: Vec<ElementId>,
+    before: Option<OutlineSnapshot>,
+}
+
+impl ReorderSelectionCommand {
+    /// 按当前选择构造一条尚未执行的重排命令。
+    ///
+    /// 空选、跨父、全部被锁定（含锁定的祖先），或顺序不会变化时返回 `None`。
+    /// 同一层里被锁定的 id 会跳过，其余未锁定的兄弟照常重排。
+    /// 隐藏（含被隐藏的祖先挡住）不阻止重排，和图层面板拖拽一致。
+    ///
+    /// # 参数
+    /// - `scene`: 当前场景
+    /// - `selected_ids`: 当前选中的元素。重复 id 只算一次
+    /// - `action`: 置顶、置底、前移或后移
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, ReorderSelectionCommand, Scene, StackOrderAction};
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(4.0, 4.0)));
+    /// scene.add_rect(Rectangle::new(2, Vec2::new(10.0, 0.0), Vec2::new(4.0, 4.0)));
+    /// assert!(ReorderSelectionCommand::from_selection(
+    ///     &scene,
+    ///     &[1],
+    ///     StackOrderAction::Front,
+    /// )
+    /// .is_some());
+    /// assert!(ReorderSelectionCommand::from_selection(&scene, &[], StackOrderAction::Back).is_none());
+    /// ```
+    pub fn from_selection(
+        scene: &Scene,
+        selected_ids: &[ElementId],
+        action: StackOrderAction,
+    ) -> Option<Self> {
+        let (parent, order) = plan_stack_order(scene, selected_ids, action)?;
+        Some(Self {
+            action,
+            parent,
+            order,
+            before: None,
+        })
+    }
+}
+
+impl Command for ReorderSelectionCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        if self.before.is_none() {
+            self.before = Some(scene.outline_snapshot());
+        }
+        let _ = scene.arrange_siblings(self.parent, &self.order);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        if let Some(before) = &self.before {
+            scene.restore_outline(before, &[]);
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self.action {
+            StackOrderAction::Front => "ReorderSelectionFront",
+            StackOrderAction::Back => "ReorderSelectionBack",
+            StackOrderAction::Forward => "ReorderSelectionForward",
+            StackOrderAction::Backward => "ReorderSelectionBackward",
+        }
+    }
+}
+
+/// 把选中元素按 [`StackOrderAction`] 重排，并压入一条撤销记录。
+///
+/// 没有产生顺序变化时不入栈，返回 `false`。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::{
+///     apply_stack_reorder, CommandHistory, Rectangle, Scene, StackOrderAction,
+/// };
+/// use infinitecanvas_math::Vec2;
+///
+/// let mut scene = Scene::new();
+/// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+/// scene.add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::new(10.0, 10.0)));
+/// scene.add_rect(Rectangle::new(3, Vec2::new(40.0, 0.0), Vec2::new(10.0, 10.0)));
+/// let mut history = CommandHistory::new();
+/// assert!(apply_stack_reorder(
+///     &mut history,
+///     &mut scene,
+///     &[1],
+///     StackOrderAction::Front,
+/// ));
+/// assert_eq!(scene.sibling_order(None), vec![2, 3, 1]);
+/// assert!(history.undo(&mut scene));
+/// assert_eq!(scene.sibling_order(None), vec![1, 2, 3]);
+/// ```
+pub fn apply_stack_reorder(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    selected: &[ElementId],
+    action: StackOrderAction,
+) -> bool {
+    let Some(command) = ReorderSelectionCommand::from_selection(scene, selected, action) else {
+        return false;
+    };
+    history.execute(Box::new(command), scene);
+    true
+}
+
+/// 算出重排后的整层兄弟顺序。不会改场景。
+fn plan_stack_order(
+    scene: &Scene,
+    selected_ids: &[ElementId],
+    action: StackOrderAction,
+) -> Option<(Option<ElementId>, Vec<ElementId>)> {
+    let mut known = Vec::new();
+    for id in selected_ids {
+        if scene.contains(*id) && !known.contains(id) {
+            known.push(*id);
+        }
+    }
+    if known.is_empty() {
+        return None;
+    }
+    let parent = scene.parent_of(known[0]);
+    if known.iter().any(|id| scene.parent_of(*id) != parent) {
+        return None;
+    }
+    known.retain(|id| !scene.is_effectively_locked(*id));
+    if known.is_empty() {
+        return None;
+    }
+    let siblings = scene.sibling_order(parent);
+    let selected: HashSet<ElementId> = known.into_iter().collect();
+    if selected.iter().any(|id| !siblings.contains(id)) {
+        return None;
+    }
+    let order = match action {
+        StackOrderAction::Front => move_selected(&siblings, &selected, StackEnd::Front),
+        StackOrderAction::Back => move_selected(&siblings, &selected, StackEnd::Back),
+        StackOrderAction::Forward => step_selected(&siblings, &selected, StepWay::Forward),
+        StackOrderAction::Backward => step_selected(&siblings, &selected, StepWay::Backward),
+    };
+    if order == siblings {
+        None
+    } else {
+        Some((parent, order))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum StackEnd {
+    Front,
+    Back,
+}
+
+#[derive(Clone, Copy)]
+enum StepWay {
+    Forward,
+    Backward,
+}
+
+/// 保持选中元素的相对顺序，整组放到最前或最后。
+fn move_selected(
+    siblings: &[ElementId],
+    selected: &HashSet<ElementId>,
+    end: StackEnd,
+) -> Vec<ElementId> {
+    let mut rest = Vec::with_capacity(siblings.len());
+    let mut picked = Vec::with_capacity(selected.len());
+    for id in siblings {
+        if selected.contains(id) {
+            picked.push(*id);
+        } else {
+            rest.push(*id);
+        }
+    }
+    match end {
+        StackEnd::Front => {
+            rest.extend(picked);
+            rest
+        }
+        StackEnd::Back => {
+            picked.extend(rest);
+            picked
+        }
+    }
+}
+
+/// 每个选中元素只跨过一个未选中兄弟。从移动方向的远端开始交换，避免互相挡住。
+fn step_selected(
+    siblings: &[ElementId],
+    selected: &HashSet<ElementId>,
+    way: StepWay,
+) -> Vec<ElementId> {
+    let mut order = siblings.to_vec();
+    match way {
+        StepWay::Forward => {
+            let mut index = order.len();
+            while index > 1 {
+                index -= 1;
+                if selected.contains(&order[index - 1]) && !selected.contains(&order[index]) {
+                    order.swap(index - 1, index);
+                }
+            }
+        }
+        StepWay::Backward => {
+            for index in 0..order.len().saturating_sub(1) {
+                if !selected.contains(&order[index]) && selected.contains(&order[index + 1]) {
+                    order.swap(index, index + 1);
+                }
+            }
+        }
+    }
+    order
+}
+
 /// 原地克隆一批元素。
 ///
 /// 第一次执行调用 [`Scene::duplicate`]。撤销删掉整棵新子树，重做按同样的 ID 插回，
@@ -1527,5 +1794,253 @@ mod tests {
         approx_eq(translation_of(&scene, 1), Vec2::new(6.0, 7.0));
         approx_eq(translation_of(&scene, 2), Vec2::new(16.0, 7.0));
         assert!(!history.can_undo());
+    }
+
+    fn stack_scene() -> Scene {
+        let mut scene = Scene::new();
+        for (id, x) in [(1, 0.0), (2, 20.0), (3, 40.0), (4, 60.0), (5, 80.0)] {
+            scene.add_rect(Rectangle::new(id, Vec2::new(x, 0.0), Vec2::new(10.0, 10.0)));
+        }
+        scene
+    }
+
+    fn assert_stack(action: StackOrderAction, selected: &[ElementId], expected: &[ElementId]) {
+        let mut scene = stack_scene();
+        let mut history = CommandHistory::new();
+        let origin = translation_of(&scene, selected[0]);
+        assert!(apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            selected,
+            action
+        ));
+        assert_eq!(scene.sibling_order(None), expected);
+        assert_eq!(history.undo_count(), 1);
+        assert_eq!(history.redo_count(), 0);
+        approx_eq(translation_of(&scene, selected[0]), origin);
+        assert!(history.undo(&mut scene));
+        assert_eq!(scene.sibling_order(None), vec![1, 2, 3, 4, 5]);
+        assert!(history.redo(&mut scene));
+        assert_eq!(scene.sibling_order(None), expected);
+    }
+
+    #[test]
+    fn stack_actions_reorder_same_parent_siblings() {
+        assert_stack(StackOrderAction::Front, &[2, 4], &[1, 3, 5, 2, 4]);
+        assert_stack(StackOrderAction::Back, &[2, 4], &[2, 4, 1, 3, 5]);
+        assert_stack(StackOrderAction::Forward, &[2, 4], &[1, 3, 2, 5, 4]);
+        assert_stack(StackOrderAction::Backward, &[2, 4], &[2, 1, 4, 3, 5]);
+        assert_stack(StackOrderAction::Forward, &[2, 3], &[1, 4, 2, 3, 5]);
+        assert_stack(StackOrderAction::Backward, &[2, 3], &[2, 3, 1, 4, 5]);
+        assert_stack(StackOrderAction::Front, &[1], &[2, 3, 4, 5, 1]);
+        assert_stack(StackOrderAction::Back, &[5], &[5, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn stack_reorder_already_at_end_is_noop() {
+        let mut scene = stack_scene();
+        let mut history = CommandHistory::new();
+        let epoch = scene.structure_epoch();
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[5],
+            StackOrderAction::Front,
+        ));
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[1],
+            StackOrderAction::Back,
+        ));
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[4, 5],
+            StackOrderAction::Forward,
+        ));
+        assert_eq!(scene.sibling_order(None), vec![1, 2, 3, 4, 5]);
+        assert_eq!(scene.structure_epoch(), epoch);
+        assert_eq!(history.undo_count(), 0);
+    }
+
+    #[test]
+    fn cross_parent_or_empty_selection_does_not_reorder() {
+        let mut scene = stack_scene();
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let mut history = CommandHistory::new();
+        let epoch = scene.structure_epoch();
+        let roots = scene.sibling_order(None);
+        let children = scene.children_of(group_id);
+
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[],
+            StackOrderAction::Front,
+        ));
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[99],
+            StackOrderAction::Back,
+        ));
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[1, 3],
+            StackOrderAction::Forward,
+        ));
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[group_id, 1],
+            StackOrderAction::Backward,
+        ));
+        assert_eq!(scene.sibling_order(None), roots);
+        assert_eq!(scene.children_of(group_id), children);
+        assert_eq!(scene.structure_epoch(), epoch);
+        assert!(!history.can_undo());
+    }
+
+    #[test]
+    fn selecting_a_group_moves_only_the_group_root() {
+        let mut scene = stack_scene();
+        let group_id = scene.group(&[1, 2]).unwrap();
+        assert_eq!(scene.children_of(group_id), vec![1, 2]);
+        assert_eq!(scene.sibling_order(None), vec![3, 4, 5, group_id]);
+
+        let mut history = CommandHistory::new();
+        assert!(apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[group_id],
+            StackOrderAction::Back,
+        ));
+        assert_eq!(scene.sibling_order(None), vec![group_id, 3, 4, 5]);
+        assert_eq!(scene.children_of(group_id), vec![1, 2]);
+        assert_eq!(scene.parent_of(1), Some(group_id));
+        assert_eq!(scene.parent_of(2), Some(group_id));
+        approx_eq(translation_of(&scene, 1), Vec2::ZERO);
+        approx_eq(translation_of(&scene, 2), Vec2::new(20.0, 0.0));
+        assert_eq!(history.undo_count(), 1);
+
+        assert!(history.undo(&mut scene));
+        assert_eq!(scene.sibling_order(None), vec![3, 4, 5, group_id]);
+        assert!(apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[1],
+            StackOrderAction::Front,
+        ));
+        assert_eq!(scene.children_of(group_id), vec![2, 1]);
+        assert_eq!(scene.sibling_order(None), vec![3, 4, 5, group_id]);
+        assert_eq!(scene.parent_of(1), Some(group_id));
+    }
+
+    #[test]
+    fn locked_selection_is_skipped_and_hidden_still_reorders() {
+        let mut scene = stack_scene();
+        let mut history = CommandHistory::new();
+        scene.set_locked(2, true);
+        assert!(apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[1, 2],
+            StackOrderAction::Front,
+        ));
+        assert_eq!(scene.sibling_order(None), vec![2, 3, 4, 5, 1]);
+        assert!(history.undo(&mut scene));
+
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[2],
+            StackOrderAction::Back,
+        ));
+        assert_eq!(history.undo_count(), 0);
+
+        let group_id = scene.group(&[3, 4]).unwrap();
+        scene.set_locked(group_id, true);
+        let children = scene.children_of(group_id);
+        let roots = scene.sibling_order(None);
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[3],
+            StackOrderAction::Forward,
+        ));
+        assert!(!apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[group_id],
+            StackOrderAction::Front,
+        ));
+        assert_eq!(scene.children_of(group_id), children);
+        assert_eq!(scene.sibling_order(None), roots);
+
+        scene.set_locked(group_id, false);
+        scene.set_visible(group_id, false);
+        assert!(apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[4],
+            StackOrderAction::Back,
+        ));
+        assert_eq!(scene.children_of(group_id), vec![4, 3]);
+        assert!(!scene.is_effectively_visible(4));
+        scene.set_visible(group_id, true);
+        scene.set_visible(4, false);
+        assert!(apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[4],
+            StackOrderAction::Front,
+        ));
+        assert_eq!(scene.children_of(group_id), vec![3, 4]);
+    }
+
+    #[test]
+    fn stack_reorder_repacks_vertex_cache_without_geometry_dirty() {
+        use crate::VertexCache;
+
+        let mut scene = stack_scene();
+        let mut cache = VertexCache::new();
+        let first = cache.sync(&mut scene);
+        assert!(first.full_upload);
+        let epoch = scene.structure_epoch();
+        let mut history = CommandHistory::new();
+        assert!(apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[1, 2],
+            StackOrderAction::Front,
+        ));
+        assert_eq!(scene.structure_epoch(), epoch + 1);
+        assert!(!scene.has_dirty_elements());
+        let second = cache.sync(&mut scene);
+        assert!(second.full_upload);
+        assert!(!second.geometry_unchanged);
+        assert_eq!(scene.sibling_order(None), vec![3, 4, 5, 1, 2]);
+    }
+
+    #[test]
+    fn drag_reorder_and_stack_reorder_undo_separately() {
+        let mut scene = stack_scene();
+        let mut history = CommandHistory::new();
+        history.execute(Box::new(ReorderOutlineCommand::new(1, None, 4)), &mut scene);
+        assert_eq!(scene.sibling_order(None), vec![2, 3, 4, 5, 1]);
+        assert!(apply_stack_reorder(
+            &mut history,
+            &mut scene,
+            &[2, 3],
+            StackOrderAction::Front,
+        ));
+        assert_eq!(scene.sibling_order(None), vec![4, 5, 1, 2, 3]);
+        assert_eq!(history.undo_count(), 2);
+        assert!(history.undo(&mut scene));
+        assert_eq!(scene.sibling_order(None), vec![2, 3, 4, 5, 1]);
+        assert!(history.undo(&mut scene));
+        assert_eq!(scene.sibling_order(None), vec![1, 2, 3, 4, 5]);
     }
 }

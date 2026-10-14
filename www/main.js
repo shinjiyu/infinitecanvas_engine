@@ -7,6 +7,7 @@
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
+ * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，面板上有同样的四个按钮。
  * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。
  *
  * @example
@@ -26,6 +27,7 @@ import {
   writeTextClipboard,
 } from './clipboard.js';
 import { arrowNudge } from './nudge-keys.js';
+import { stackOrderAction } from './stack-order-keys.js';
 import { rasterizeText } from './text-raster.js';
 
 const TEXTURE_ID = 'landing-badge';
@@ -1102,6 +1104,19 @@ function bindInput(canvas, engine) {
       if (count > 0) addElements(engine, canvas, count);
     });
   });
+  for (const [id, action] of [
+    ['layer-front-btn', 'front'],
+    ['layer-back-btn', 'back'],
+    ['layer-forward-btn', 'forward'],
+    ['layer-backward-btn', 'backward'],
+  ]) {
+    document.getElementById(id)?.addEventListener('click', () => {
+      if (engine.reorder_selection(action)) {
+        scheduleAutosave(engine);
+        layerPanel?.sync();
+      }
+    });
+  }
 
   document.addEventListener('keydown', (event) => {
     const inField = event.target instanceof HTMLElement
@@ -1146,6 +1161,15 @@ function bindInput(canvas, engine) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
       event.preventDefault();
       document.getElementById('open-file')?.click();
+      return;
+    }
+    const stackAction = stackOrderAction(event);
+    if (stackAction) {
+      event.preventDefault();
+      if (engine.reorder_selection(stackAction)) {
+        scheduleAutosave(engine);
+        layerPanel?.sync();
+      }
       return;
     }
     if (event.key === ' ' && !spaceHeld) {

@@ -28,7 +28,7 @@ mod texture_manager;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
-    apply_align, apply_distribute, apply_nudge,
+    apply_align, apply_distribute, apply_nudge, apply_stack_reorder,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
@@ -44,8 +44,8 @@ use infinitecanvas_engine::{
     DuplicateElementsCommand, Element, ElementId, ElementStyle, Event, EventQueue, Image, Line,
     MoveCommand, NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton,
     PointerEvent, Rectangle, RemoveElementCommand, ReorderOutlineCommand, Scene, SceneTreeNode,
-    SelectionBox, SelectionManager, Text, TextAlign, TextClickResolver, TextPlacement, Tool,
-    ToolManager, TransformElementsCommand, UpdateTextCommand, Viewport,
+    SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign, TextClickResolver,
+    TextPlacement, Tool, ToolManager, TransformElementsCommand, UpdateTextCommand, Viewport,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -1554,6 +1554,39 @@ impl InfiniteCanvas {
                 false
             }
         }
+    }
+
+    /// 按当前选中重排同一层的兄弟，并记入一条撤销记录。
+    ///
+    /// `action` 为 `front`（置顶）、`back`（置底）、`forward`（前移一层）或 `backward`（后移一层）。
+    /// 只在同一个父节点下移动。选中组时移动组根，不拆开子树。
+    /// 空选、跨父节点、全部锁定（含锁定的祖先）或顺序不变时返回 `false`，不入栈。
+    /// 同一层里锁定的选中项会跳过。隐藏不阻止重排。
+    ///
+    /// 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次重排。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.reorder_selection("front");
+    /// canvas.undo();
+    /// ```
+    #[wasm_bindgen]
+    pub fn reorder_selection(&mut self, action: &str) -> bool {
+        let Some(action) = StackOrderAction::parse(action) else {
+            return false;
+        };
+        if self.drag_state.is_dragging {
+            self.finish_drag();
+        }
+        self.commit_handle_gesture();
+        self.commit_style_preview();
+        let selected = self.selection.selected_ids();
+        apply_stack_reorder(
+            &mut self.command_history,
+            &mut self.scene,
+            &selected,
+            action,
+        )
     }
 
     /// 场景结构版本。增删元素或大纲重排后变化，图层面板用它决定是否重读场景树。
@@ -3591,5 +3624,33 @@ mod tests {
         assert!((translation(&canvas.scene, 1).y).abs() < 1e-3);
         assert!((translation(&canvas.scene, 3).y + 10.0).abs() < 1e-3);
         assert_eq!(canvas.get_undo_count(), 0);
+    }
+
+    /// `reorder_selection` 走当前选择。未知动作、空选不入栈；置顶后撤销和重做恢复兄弟顺序。
+    #[test]
+    fn reorder_selection_uses_current_selection_and_undoes() {
+        let mut canvas = blank_canvas();
+        canvas
+            .scene
+            .add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0)));
+        canvas
+            .scene
+            .add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::new(8.0, 8.0)));
+        canvas
+            .scene
+            .add_rect(Rectangle::new(3, Vec2::new(40.0, 0.0), Vec2::new(8.0, 8.0)));
+        assert!(canvas.select_element(1, false));
+        assert!(!canvas.reorder_selection("nope"));
+        assert_eq!(canvas.get_undo_count(), 0);
+        assert!(canvas.reorder_selection("front"));
+        assert_eq!(canvas.scene.sibling_order(None), vec![2, 3, 1]);
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.undo());
+        assert_eq!(canvas.scene.sibling_order(None), vec![1, 2, 3]);
+        assert!(canvas.redo());
+        assert_eq!(canvas.scene.sibling_order(None), vec![2, 3, 1]);
+        canvas.clear_selection();
+        assert!(!canvas.reorder_selection("back"));
+        assert_eq!(canvas.get_undo_count(), 1);
     }
 }
