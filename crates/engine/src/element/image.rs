@@ -4,6 +4,7 @@
 /// - 位置和尺寸控制
 /// - 旋转和缩放变换
 /// - UV 裁剪（显示纹理的一部分）
+/// - 归一化裁剪窗口（只露出一部分，像素仍留在资源里）
 /// - 透明度（通过 alpha）
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,19 @@ use crate::element::{DropShadow, Element, ElementId, ElementProps};
 
 fn default_image_alpha() -> f32 {
     1.0
+}
+
+/// 整张图。JSON 缺省用这个，旧文档不用补 `crop`。
+pub fn default_image_crop() -> Rect {
+    Rect::new(0.0, 0.0, 1.0, 1.0)
+}
+
+/// 整张图不写入 JSON，和缺省字段读回来的值相同。
+fn image_crop_is_full(crop: &Rect) -> bool {
+    crop.x.abs() <= 1.0e-4
+        && crop.y.abs() <= 1.0e-4
+        && (crop.width - 1.0).abs() <= 1.0e-4
+        && (crop.height - 1.0).abs() <= 1.0e-4
 }
 
 /// Image 元素
@@ -82,6 +96,16 @@ pub struct Image {
     /// JSON 中缺省为 1。
     #[serde(default = "default_image_alpha")]
     pub alpha: f32,
+    /// 归一化裁剪窗口，相对整张显示矩形。
+    ///
+    /// `(0, 0, 1, 1)` 是整张图。裁剪只改可见四边形和采样范围，
+    /// 不改 [`ElementProps::transform`]，也不改 [`Self::size`] 或资源像素。
+    /// JSON 缺省为整张图，旧文档仍能打开。
+    #[serde(
+        default = "default_image_crop",
+        skip_serializing_if = "image_crop_is_full"
+    )]
+    pub crop: Rect,
     /// 投影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
     ///
     /// 按显示矩形画偏移羽化，不模糊纹理像素。
@@ -116,6 +140,7 @@ impl Image {
             intrinsic_height: 0,
             uv_rect: None,
             alpha: 1.0,
+            crop: default_image_crop(),
             shadow: DropShadow::default(),
             blend_mode: BlendMode::Normal,
         }
@@ -203,6 +228,7 @@ impl Image {
             intrinsic_height: 0,
             uv_rect: Some(uv_rect),
             alpha: 1.0,
+            crop: default_image_crop(),
             shadow: DropShadow::default(),
             blend_mode: BlendMode::Normal,
         }
@@ -286,6 +312,94 @@ impl Image {
         self.uv_rect = uv_rect;
     }
 
+    /// 把归一化裁剪钳进整张图。宽高至少 1 个显示像素，并且不超过图片本身。
+    ///
+    /// 非有限数字退回整张图。`size` 用显示尺寸，不是资源像素。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::element::Image;
+    /// use infinitecanvas_math::{Rect, Vec2};
+    ///
+    /// let size = Vec2::new(100.0, 40.0);
+    /// let crop = Image::clamp_crop(size, Rect::new(-1.0, 0.2, 0.5, 0.5));
+    /// assert_eq!(crop.x, 0.0);
+    /// assert_eq!(crop.y, 0.2);
+    /// assert_eq!(crop.width, 0.5);
+    /// assert_eq!(crop.height, 0.5);
+    /// ```
+    pub fn clamp_crop(size: Vec2, crop: Rect) -> Rect {
+        if ![crop.x, crop.y, crop.width, crop.height]
+            .into_iter()
+            .all(f32::is_finite)
+        {
+            return default_image_crop();
+        }
+        let span_x = size.x.abs();
+        let span_y = size.y.abs();
+        if span_x < 1.0e-4 || span_y < 1.0e-4 {
+            return default_image_crop();
+        }
+        let min_w = (1.0 / span_x).min(1.0);
+        let min_h = (1.0 / span_y).min(1.0);
+        let width = crop.width.abs().clamp(min_w, 1.0);
+        let height = crop.height.abs().clamp(min_h, 1.0);
+        let x = crop.x.clamp(0.0, 1.0 - width);
+        let y = crop.y.clamp(0.0, 1.0 - height);
+        Rect::new(x, y, width, height)
+    }
+
+    /// 当前裁剪，已经钳进整张图。
+    pub fn normalized_crop(&self) -> Rect {
+        Self::clamp_crop(self.size, self.crop)
+    }
+
+    /// 写入裁剪窗口。不改变换和显示尺寸。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::element::Image;
+    /// use infinitecanvas_math::{Rect, Vec2};
+    ///
+    /// let mut image = Image::new(1, Vec2::ZERO, Vec2::new(80.0, 40.0), "photo".into());
+    /// let before = image.props.transform;
+    /// image.set_crop(Rect::new(0.25, 0.0, 0.5, 1.0));
+    /// assert_eq!(image.props.transform, before);
+    /// assert_eq!(image.size, Vec2::new(80.0, 40.0));
+    /// assert!(!image.crop_is_full());
+    /// ```
+    pub fn set_crop(&mut self, crop: Rect) {
+        self.crop = Self::clamp_crop(self.size, crop);
+    }
+
+    /// 裁剪是否盖住整张显示矩形。
+    pub fn crop_is_full(&self) -> bool {
+        image_crop_is_full(&self.normalized_crop())
+    }
+
+    /// 可见区域在局部坐标里的矩形。原点仍是整张图的左上角。
+    pub fn visible_local_rect(&self) -> Rect {
+        let crop = self.normalized_crop();
+        Rect::new(
+            crop.x * self.size.x,
+            crop.y * self.size.y,
+            crop.width * self.size.x,
+            crop.height * self.size.y,
+        )
+    }
+
+    /// 纹理上实际采样的归一化窗口。先取 `uv_rect`（缺省整张），再乘上裁剪。
+    pub fn sample_uv(&self) -> Rect {
+        let base = self.uv_rect.unwrap_or_else(default_image_crop);
+        let crop = self.normalized_crop();
+        Rect::new(
+            base.x + crop.x * base.width,
+            base.y + crop.y * base.height,
+            crop.width * base.width,
+            crop.height * base.height,
+        )
+    }
+
     /// 元素 ID
     pub fn id(&self) -> ElementId {
         self.props.id
@@ -313,17 +427,14 @@ impl Image {
 
     /// 获取 UV 坐标（用于顶点生成）
     ///
+    /// 结果已经叠上 [`Self::crop`]。整张图且没有 `uv_rect` 时是 `(0,0)-(1,1)`。
+    ///
     /// # 返回
     ///
     /// `((uv_min_x, uv_min_y), (uv_max_x, uv_max_y))`
     pub fn get_uv_coords(&self) -> ((f32, f32), (f32, f32)) {
-        match &self.uv_rect {
-            Some(rect) => (
-                (rect.x, rect.y),
-                (rect.x + rect.width, rect.y + rect.height),
-            ),
-            None => ((0.0, 0.0), (1.0, 1.0)),
-        }
+        let uv = self.sample_uv();
+        ((uv.x, uv.y), (uv.x + uv.width, uv.y + uv.height))
     }
 
     /// 计算世界空间中的边界框
@@ -335,14 +446,15 @@ impl Image {
         self.world_bounds()
     }
 
-    /// 显示矩形的投影。关闭或不可见时为空。命中仍是显示矩形。
+    /// 裁剪后显示矩形的投影。关闭或不可见时为空。命中跟裁剪窗口走，不跟投影走。
     pub(crate) fn shadow_vertices(&self) -> Vec<Vertex> {
         if !self.props.visible {
             return Vec::new();
         }
+        let local = self.visible_local_rect();
         quad_shadow(
-            Vec2::ZERO,
-            self.size,
+            Vec2::new(local.x, local.y),
+            Vec2::new(local.width, local.height),
             self.shadow,
             self.alpha,
             &self.props.transform,
@@ -371,11 +483,16 @@ impl Image {
         let (uv_min, uv_max) = self.get_uv_coords();
         let color = Color::new(1.0, 1.0, 1.0, self.alpha);
         let transform = &self.props.transform;
+        let visible = self.visible_local_rect();
         let local = [
-            (Vec2::ZERO, uv_min.0, uv_min.1),
-            (Vec2::new(self.size.x, 0.0), uv_max.0, uv_min.1),
-            (Vec2::new(0.0, self.size.y), uv_min.0, uv_max.1),
-            (Vec2::new(self.size.x, self.size.y), uv_max.0, uv_max.1),
+            (Vec2::new(visible.x, visible.y), uv_min.0, uv_min.1),
+            (Vec2::new(visible.right(), visible.y), uv_max.0, uv_min.1),
+            (Vec2::new(visible.x, visible.bottom()), uv_min.0, uv_max.1),
+            (
+                Vec2::new(visible.right(), visible.bottom()),
+                uv_max.0,
+                uv_max.1,
+            ),
         ];
         let world: Vec<(Vec2, f32, f32)> = local
             .iter()
@@ -413,8 +530,8 @@ impl Element for Image {
     }
 
     fn local_bounds(&self) -> Rect {
-        // Image 的局部边界是从 (0, 0) 开始的矩形
-        Rect::new(0.0, 0.0, self.size.x, self.size.y)
+        // 命中和包围盒跟裁剪窗口走。整张图时仍是从 (0, 0) 开始的显示矩形。
+        self.visible_local_rect()
     }
 
     fn type_name(&self) -> &'static str {
@@ -605,5 +722,74 @@ mod tests {
 
         img.set_z_index(10);
         assert_eq!(img.z_index(), 10);
+    }
+
+    #[test]
+    fn crop_trims_vertices_uv_hit_test_and_keeps_transform() {
+        let mut image = Image::new(
+            1,
+            Vec2::new(10.0, 20.0),
+            Vec2::new(100.0, 40.0),
+            "photo".into(),
+        );
+        image.set_uv_rect(Some(Rect::new(0.0, 0.0, 0.5, 1.0)));
+        let transform = image.props.transform;
+        image.set_crop(Rect::new(0.5, 0.0, 0.5, 1.0));
+        assert_eq!(image.props.transform, transform);
+        assert_eq!(image.size, Vec2::new(100.0, 40.0));
+        assert_eq!(image.normalized_crop(), Rect::new(0.5, 0.0, 0.5, 1.0));
+
+        let (min, max) = image.get_uv_coords();
+        assert_eq!(min, (0.25, 0.0));
+        assert_eq!(max, (0.5, 1.0));
+
+        let vertices = image.generate_vertices();
+        assert_eq!(vertices[0].position, [60.0, 20.0]);
+        assert_eq!(vertices[0].uv, [0.25, 0.0]);
+        assert_eq!(vertices[5].position, [110.0, 60.0]);
+        assert_eq!(vertices[5].uv, [0.5, 1.0]);
+
+        assert!(!image.contains_point(Vec2::new(10.0, 20.0)));
+        assert!(image.contains_point(Vec2::new(60.0, 20.0)));
+        assert!(image.contains_point(Vec2::new(109.0, 59.0)));
+        let bounds = image.bounding_box();
+        assert_eq!(bounds.x, 60.0);
+        assert_eq!(bounds.width, 50.0);
+        assert_eq!(bounds.height, 40.0);
+    }
+
+    #[test]
+    fn crop_samples_the_original_pixels_inside_the_window() {
+        let mut image = Image::from_asset(1, Vec2::ZERO, "px", 4, 1);
+        let pixels = [
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+        ];
+        image.set_crop(Rect::new(0.5, 0.0, 0.5, 1.0));
+        assert!(image
+            .sample_pixels(Vec2::new(0.5, 0.5), 4, 1, &pixels)
+            .is_none());
+        let color = image
+            .sample_pixels(Vec2::new(2.5, 0.5), 4, 1, &pixels)
+            .expect("right half");
+        assert_eq!(color, Color::new(0.0, 0.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn missing_crop_field_deserializes_as_the_full_image() {
+        let size = serde_json::to_value(Vec2::new(8.0, 4.0)).unwrap();
+        let json = serde_json::json!({
+            "props": { "id": 1 },
+            "size": size,
+            "texture_id": "old"
+        });
+        let image: Image = serde_json::from_value(json).unwrap();
+        assert!(image.crop_is_full());
+        assert!(!serde_json::to_string(&image).unwrap().contains("\"crop\""));
+        let mut cropped = image;
+        cropped.set_crop(Rect::new(0.0, 0.25, 1.0, 0.5));
+        let text = serde_json::to_string(&cropped).unwrap();
+        assert!(text.contains("\"crop\""));
+        let restored: Image = serde_json::from_str(&text).unwrap();
+        assert_eq!(restored.normalized_crop(), cropped.normalized_crop());
     }
 }

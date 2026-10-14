@@ -856,6 +856,9 @@ function dispatchShortcut(shortcut, engine) {
     case 'escape':
       if (escapeAction(isHelpOpen()) === 'closeHelp') {
         setHelpOpen(false);
+      } else if (typeof engine.crop_mode === 'function' && engine.crop_mode()) {
+        engine.set_crop_mode(false);
+        syncPropertyPanel(engine);
       } else {
         engine.clear_selection();
         scheduleAutosave(engine);
@@ -1525,7 +1528,7 @@ function syncRange(id, labelId, value, mixed, format) {
 /**
  * 按当前选择显示或隐藏属性面板，并把公共样式填进控件。
  * 多选不一致时标成「多种」，下一次编辑会写到全部选中元素。
- * 只选中图片时只留下不透明度、投影和混合模式；填充和描边仍只出现在形状或文本上。
+ * 只选中图片时留下不透明度、投影、混合模式和裁剪；填充和描边仍只出现在形状或文本上。
  *
  * @param {WasmCanvas} engine
  */
@@ -1580,6 +1583,7 @@ function syncPropertyPanel(engine) {
   syncCornerRadius(style);
   syncPolygonFields(style);
   syncShadow(style);
+  syncImageCrop(engine);
   syncGradient(style);
   const blendRow = document.getElementById('prop-blend-row');
   if (blendRow) blendRow.hidden = !style.blendModeSupported;
@@ -1832,6 +1836,7 @@ function bindPropertyPanel(engine) {
   bindCornerRadius(engine);
   bindPolygonFields(engine);
   bindShadow(engine);
+  bindImageCrop(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
 
   document.getElementById('prop-frame-name')?.addEventListener('change', (event) => {
@@ -2356,6 +2361,70 @@ function bindShadow(engine) {
       engine.set_selection_style({ shadowOpacity: 0 });
     }
     scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+  });
+}
+
+/**
+ * 图片裁剪窗口。0–1，整张图是左 0、上 0、宽 1、高 1。
+ * 多选某一边不一致时标成多种，正在编辑的输入框不覆盖。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncImageCrop(engine) {
+  const block = document.getElementById('prop-crop');
+  if (!block || typeof engine.get_image_crop !== 'function') return;
+  const crop = engine.get_image_crop();
+  const supported = Boolean(crop && crop.supported);
+  block.hidden = !supported;
+  const mode = document.getElementById('prop-crop-mode');
+  if (mode) mode.classList.toggle('active', typeof engine.crop_mode === 'function' && engine.crop_mode());
+  if (!supported || !crop) return;
+  for (const key of ['x', 'y', 'width', 'height']) {
+    const id = `prop-crop-${key}`;
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement) || activeStyleControl === id) continue;
+    const value = crop[key];
+    const mixed = Boolean(crop[`${key}Mixed`]);
+    if (!mixed && typeof value === 'number' && Number.isFinite(value)) {
+      input.value = String(Math.round(value * 1000) / 1000);
+    }
+  }
+  const mixedEl = document.getElementById('prop-crop-mixed');
+  if (mixedEl) {
+    mixedEl.hidden = !['x', 'y', 'width', 'height'].some((key) => Boolean(crop[`${key}Mixed`]));
+  }
+}
+
+/**
+ * 数字框走预览，松手收成一条 `SetImageCrop`。裁剪手柄不占用快捷键。
+ *
+ * @param {WasmCanvas} engine
+ */
+function bindImageCrop(engine) {
+  if (typeof engine.preview_image_crop !== 'function') return;
+  for (const key of ['x', 'y', 'width', 'height']) {
+    const input = document.getElementById(`prop-crop-${key}`);
+    if (!(input instanceof HTMLInputElement)) continue;
+    input.addEventListener('input', () => {
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return;
+      activeStyleControl = input.id;
+      engine.preview_image_crop({ [key]: value });
+    });
+    input.addEventListener('change', () => finishStyleEdit(engine));
+  }
+  document.getElementById('prop-crop-mode')?.addEventListener('click', () => {
+    if (typeof engine.set_crop_mode !== 'function') return;
+    engine.set_crop_mode(!engine.crop_mode());
+    syncPropertyPanel(engine);
+  });
+  document.getElementById('prop-crop-reset')?.addEventListener('click', () => {
+    if (typeof engine.set_image_crop !== 'function') return;
+    if (engine.set_image_crop({ x: 0, y: 0, width: 1, height: 1 })) {
+      scheduleAutosave(engine);
+      setStatus('已重置裁剪');
+    }
     syncPropertyPanel(engine);
   });
 }

@@ -302,6 +302,12 @@ export class InfiniteCanvas {
     clear_scene(): void;
     clear_selection(): void;
     /**
+     * 把进行中的裁剪预览收成一条撤销记录。
+     *
+     * 场景已经是预览后的值，所以只入栈、不再执行。没有变化时返回 false。
+     */
+    commit_image_crop(): boolean;
+    /**
      * 把进行中的样式预览收成一条撤销记录。
      *
      * 场景已经是预览后的值，所以只入栈、不再执行。没有变化时返回 false。
@@ -340,6 +346,10 @@ export class InfiniteCanvas {
      * ```
      */
     copy_selection_json(): string;
+    /**
+     * 裁剪手柄是否打开。
+     */
+    crop_mode(): boolean;
     /**
      * 指针下的光标。选择工具命中缩放/旋转手柄时返回对应光标。
      *
@@ -545,6 +555,20 @@ export class InfiniteCanvas {
      * 获取帧计数
      */
     get_frame_count(): bigint;
+    /**
+     * 读取当前选择里图片的裁剪窗口。
+     *
+     * 没有未锁定的图片时 `supported` 为 false。多选某一边不一致时对应的 `*Mixed` 为 true，
+     * 数值为 null。`x` / `y` / `width` / `height` 都是 0–1，整张图是 `0,0,1,1`。
+     * 组会展开到里面的图片。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const crop = canvas.get_image_crop();
+     * if (crop.supported && !crop.widthMixed) widthInput.value = crop.width;
+     * ```
+     */
+    get_image_crop(): any;
     /**
      * 获取上一帧绘制调用数
      */
@@ -903,6 +927,12 @@ export class InfiniteCanvas {
      */
     pop_temporary_tool(): void;
     /**
+     * 预览裁剪。第一次调用记下基线，之后每次都从基线重放。
+     *
+     * 不进入撤销栈。松手后调用 [`Self::commit_image_crop`]。
+     */
+    preview_image_crop(patch: any): boolean;
+    /**
      * 预览样式。第一次调用记下基线，之后每次都从基线重放。
      *
      * 不进入撤销栈。松手后调用 [`Self::commit_style_preview`]。
@@ -1066,6 +1096,13 @@ export class InfiniteCanvas {
      */
     set_camera_center(x: number, y: number): void;
     /**
+     * 打开或关闭裁剪手柄。
+     *
+     * 只在选中单张未锁定的可见图片时，缩放手柄改裁剪而不是世界变换。
+     * 没有新的快捷键。关闭时先提交未结束的手柄拖动。
+     */
+    set_crop_mode(enabled: boolean): void;
+    /**
      * 设置元素锁定，并记入一条撤销记录。
      *
      * 与图层面板的锁按钮、[`Self::toggle_selection_locked`] 共用 [`infinitecanvas_engine::SetLockedCommand`]。
@@ -1118,6 +1155,13 @@ export class InfiniteCanvas {
      * 是否成功设置
      */
     set_image_alpha(image_id: bigint, alpha: number): boolean;
+    /**
+     * 把裁剪补丁写进当前选择并记一条撤销记录。
+     *
+     * 对象里出现的 `x` / `y` / `width` / `height` 才会修改。空选、锁定或没有变化时
+     * 返回 false，也不入栈。不改世界变换。
+     */
+    set_image_crop(patch: any): boolean;
     /**
      * 显示或隐藏标尺和手动参考线。
      *
@@ -1384,10 +1428,12 @@ export interface InitOutput {
     readonly infinitecanvas_clear: (a: number) => void;
     readonly infinitecanvas_clear_scene: (a: number) => void;
     readonly infinitecanvas_clear_selection: (a: number) => void;
+    readonly infinitecanvas_commit_image_crop: (a: number) => number;
     readonly infinitecanvas_commit_style_preview: (a: number) => number;
     readonly infinitecanvas_commit_text_content: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_commit_text_raster: (a: number, b: bigint, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly infinitecanvas_copy_selection_json: (a: number) => [number, number, number, number];
+    readonly infinitecanvas_crop_mode: (a: number) => number;
     readonly infinitecanvas_cursor_at: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
@@ -1412,6 +1458,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_element_info: (a: number, b: bigint) => any;
     readonly infinitecanvas_get_flags_epoch: (a: number) => bigint;
     readonly infinitecanvas_get_frame_count: (a: number) => bigint;
+    readonly infinitecanvas_get_image_crop: (a: number) => any;
     readonly infinitecanvas_get_last_draw_calls: (a: number) => number;
     readonly infinitecanvas_get_last_vertex_count: (a: number) => number;
     readonly infinitecanvas_get_manual_guides: (a: number) => any;
@@ -1460,6 +1507,7 @@ export interface InitOutput {
     readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_paste_elements: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly infinitecanvas_pop_temporary_tool: (a: number) => void;
+    readonly infinitecanvas_preview_image_crop: (a: number, b: any) => number;
     readonly infinitecanvas_preview_selection_style: (a: number, b: any) => number;
     readonly infinitecanvas_push_hand_tool: (a: number) => void;
     readonly infinitecanvas_redo: (a: number) => number;
@@ -1477,10 +1525,12 @@ export interface InitOutput {
     readonly infinitecanvas_select_all: (a: number) => number;
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_camera_center: (a: number, b: number, c: number) => void;
+    readonly infinitecanvas_set_crop_mode: (a: number, b: number) => void;
     readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_element_visible: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_grid_visible: (a: number, b: number) => void;
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
+    readonly infinitecanvas_set_image_crop: (a: number, b: any) => number;
     readonly infinitecanvas_set_rulers_visible: (a: number, b: number) => void;
     readonly infinitecanvas_set_selection_style: (a: number, b: any) => number;
     readonly infinitecanvas_set_snap_enabled: (a: number, b: number) => void;

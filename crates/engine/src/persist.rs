@@ -1654,6 +1654,60 @@ mod tests {
     }
 
     #[test]
+    fn image_crop_defaults_to_full_and_png_samples_only_the_window() {
+        let size = serde_json::to_value(Vec2::new(4.0, 1.0)).unwrap();
+        let legacy = json!({
+            "version": 1,
+            "elements": [{
+                "type": "image",
+                "data": {
+                    "props": { "id": 1 },
+                    "size": size,
+                    "texture_id": "old"
+                }
+            }]
+        });
+        let old = Scene::from_json(&legacy.to_string()).unwrap();
+        match old.get(1).unwrap() {
+            AnyElement::Image(image) => {
+                assert!(image.crop_is_full());
+                assert!(image.contains_point(Vec2::new(3.5, 0.5)));
+            }
+            other => panic!("expected image, got {other:?}"),
+        }
+        assert!(!old.to_json().unwrap().contains("\"crop\""));
+
+        let mut pixels = vec![0u8; 4 * 4];
+        pixels[0..4].copy_from_slice(&[255, 0, 0, 255]);
+        pixels[4..8].copy_from_slice(&[0, 255, 0, 255]);
+        pixels[8..12].copy_from_slice(&[0, 0, 255, 255]);
+        pixels[12..16].copy_from_slice(&[255, 255, 0, 255]);
+        let encoded = crate::asset::encode_png_rgba(4, 1, &pixels).unwrap();
+        let mut scene = Scene::new();
+        let asset_id = scene.insert_image_bytes(&encoded, "image/png").unwrap();
+        let mut image = Image::from_asset(1, Vec2::ZERO, &asset_id, 4, 1);
+        let transform = image.props.transform;
+        image.set_crop(Rect::new(0.5, 0.0, 0.5, 1.0));
+        scene.add_image(image);
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"crop\""));
+        let restored = Scene::from_json(&json).unwrap();
+        match restored.get(1).unwrap() {
+            AnyElement::Image(image) => {
+                assert_eq!(image.props.transform, transform);
+                assert_eq!(image.normalized_crop(), Rect::new(0.5, 0.0, 0.5, 1.0));
+            }
+            other => panic!("expected image, got {other:?}"),
+        }
+        assert_pixel(sample_pixel(&restored, Vec2::new(0.5, 0.5)), [0, 0, 0, 0]);
+        assert_pixel(
+            sample_pixel(&restored, Vec2::new(2.5, 0.5)),
+            [0, 0, 255, 255],
+        );
+    }
+
+    #[test]
     fn png_draws_text_glyphs_with_rotation_and_scale() {
         let plain = Text::new(1, Vec2::new(30.0, 40.0), "H")
             .with_font_size(64.0)

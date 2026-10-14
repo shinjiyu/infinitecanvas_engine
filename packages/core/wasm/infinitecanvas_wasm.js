@@ -497,6 +497,16 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_clear_selection(this.__wbg_ptr);
     }
     /**
+     * 把进行中的裁剪预览收成一条撤销记录。
+     *
+     * 场景已经是预览后的值，所以只入栈、不再执行。没有变化时返回 false。
+     * @returns {boolean}
+     */
+    commit_image_crop() {
+        const ret = wasm.infinitecanvas_commit_image_crop(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 把进行中的样式预览收成一条撤销记录。
      *
      * 场景已经是预览后的值，所以只入栈、不再执行。没有变化时返回 false。
@@ -576,6 +586,14 @@ export class InfiniteCanvas {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
+    }
+    /**
+     * 裁剪手柄是否打开。
+     * @returns {boolean}
+     */
+    crop_mode() {
+        const ret = wasm.infinitecanvas_crop_mode(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * 指针下的光标。选择工具命中缩放/旋转手柄时返回对应光标。
@@ -967,6 +985,24 @@ export class InfiniteCanvas {
     get_frame_count() {
         const ret = wasm.infinitecanvas_get_frame_count(this.__wbg_ptr);
         return BigInt.asUintN(64, ret);
+    }
+    /**
+     * 读取当前选择里图片的裁剪窗口。
+     *
+     * 没有未锁定的图片时 `supported` 为 false。多选某一边不一致时对应的 `*Mixed` 为 true，
+     * 数值为 null。`x` / `y` / `width` / `height` 都是 0–1，整张图是 `0,0,1,1`。
+     * 组会展开到里面的图片。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const crop = canvas.get_image_crop();
+     * if (crop.supported && !crop.widthMixed) widthInput.value = crop.width;
+     * ```
+     * @returns {any}
+     */
+    get_image_crop() {
+        const ret = wasm.infinitecanvas_get_image_crop(this.__wbg_ptr);
+        return ret;
     }
     /**
      * 获取上一帧绘制调用数
@@ -1620,6 +1656,17 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_pop_temporary_tool(this.__wbg_ptr);
     }
     /**
+     * 预览裁剪。第一次调用记下基线，之后每次都从基线重放。
+     *
+     * 不进入撤销栈。松手后调用 [`Self::commit_image_crop`]。
+     * @param {any} patch
+     * @returns {boolean}
+     */
+    preview_image_crop(patch) {
+        const ret = wasm.infinitecanvas_preview_image_crop(this.__wbg_ptr, patch);
+        return ret !== 0;
+    }
+    /**
      * 预览样式。第一次调用记下基线，之后每次都从基线重放。
      *
      * 不进入撤销栈。松手后调用 [`Self::commit_style_preview`]。
@@ -1878,6 +1925,16 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_set_camera_center(this.__wbg_ptr, x, y);
     }
     /**
+     * 打开或关闭裁剪手柄。
+     *
+     * 只在选中单张未锁定的可见图片时，缩放手柄改裁剪而不是世界变换。
+     * 没有新的快捷键。关闭时先提交未结束的手柄拖动。
+     * @param {boolean} enabled
+     */
+    set_crop_mode(enabled) {
+        wasm.infinitecanvas_set_crop_mode(this.__wbg_ptr, enabled);
+    }
+    /**
      * 设置元素锁定，并记入一条撤销记录。
      *
      * 与图层面板的锁按钮、[`Self::toggle_selection_locked`] 共用 [`infinitecanvas_engine::SetLockedCommand`]。
@@ -1949,6 +2006,18 @@ export class InfiniteCanvas {
      */
     set_image_alpha(image_id, alpha) {
         const ret = wasm.infinitecanvas_set_image_alpha(this.__wbg_ptr, image_id, alpha);
+        return ret !== 0;
+    }
+    /**
+     * 把裁剪补丁写进当前选择并记一条撤销记录。
+     *
+     * 对象里出现的 `x` / `y` / `width` / `height` 才会修改。空选、锁定或没有变化时
+     * 返回 false，也不入栈。不改世界变换。
+     * @param {any} patch
+     * @returns {boolean}
+     */
+    set_image_crop(patch) {
+        const ret = wasm.infinitecanvas_set_image_crop(this.__wbg_ptr, patch);
         return ret !== 0;
     }
     /**
@@ -4056,12 +4125,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2892, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2904, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 492, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 502, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

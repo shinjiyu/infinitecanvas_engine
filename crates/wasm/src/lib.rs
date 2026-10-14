@@ -21,6 +21,7 @@
 )]
 
 mod canvas;
+mod crop_api;
 mod input;
 mod renderer;
 mod style_api;
@@ -204,6 +205,12 @@ pub struct InfiniteCanvas {
     selected_guide: Option<u64>,
     /// 属性面板拖动中的样式基线。松手后收成一条撤销记录。
     style_preview: Option<style_api::StylePreview>,
+    /// 裁剪手柄模式。只改选中图片的裁剪窗口。
+    crop_mode: bool,
+    /// 裁剪手柄拖动。和变换手柄互斥。
+    crop_drag: Option<crop_api::CropDrag>,
+    /// 属性面板拖动中的裁剪基线。
+    crop_preview: Option<crop_api::CropPreview>,
     /// 小地图缩略图。几何版本或尺寸变了才重算，平移缩放不扫描元素。
     minimap_cache: Option<MinimapCache>,
     /// 已经上传到 GPU 的图片资源 id。和场景引用比较，多退少补。
@@ -270,6 +277,9 @@ impl InfiniteCanvas {
             guide_gesture: None,
             selected_guide: None,
             style_preview: None,
+            crop_mode: false,
+            crop_drag: None,
+            crop_preview: None,
             minimap_cache: None,
             gpu_image_assets: HashSet::new(),
             eyedropper_gesture: None,
@@ -358,6 +368,7 @@ impl InfiniteCanvas {
         self.sync_image_textures();
         let selection_box = self.selection_box.bounds();
         let transform_frame = self.display_selection_frame();
+        let crop_chrome = self.crop_overlay();
         if let Some(renderer) = &mut self.webgpu_renderer {
             let started = js_sys::Date::now();
             renderer.render(
@@ -366,6 +377,7 @@ impl InfiniteCanvas {
                 selection_box,
                 transform_frame,
                 self.grid_visible,
+                crop_chrome,
             )?;
             let stats = renderer.last_stats();
 
@@ -3268,6 +3280,9 @@ impl InfiniteCanvas {
         if self.tool_manager.current() != Tool::Select {
             return self.tool_manager.current().cursor().to_string();
         }
+        if let Some(drag) = &self.crop_drag {
+            return cursor_for(HandleKind::Resize(drag.handle), drag.rotation).to_string();
+        }
         if let Some(drag) = &self.handle_drag {
             return cursor_for(drag.gesture.kind(), drag.live_frame.rotation).to_string();
         }
@@ -3275,6 +3290,9 @@ impl InfiniteCanvas {
         if let Some(frame) = self.compute_selection_frame() {
             let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
             if let Some(kind) = frame.hit_test(world, metrics.hit_radius, metrics.rotate_gap) {
+                if self.crop_handles_active() && matches!(kind, HandleKind::Rotate) {
+                    return self.tool_manager.current().cursor().to_string();
+                }
                 return cursor_for(kind, frame.rotation).to_string();
             }
         }
@@ -4127,7 +4145,7 @@ impl InfiniteCanvas {
 
     /// 指针落在手柄上时开始缩放或旋转，不改选择集。
     fn try_begin_handle_gesture(&mut self, event: &PointerEvent) -> bool {
-        if self.handle_drag.is_some() {
+        if self.handle_drag.is_some() || self.crop_drag.is_some() {
             self.commit_handle_gesture();
         }
         let Some(frame) = self.compute_selection_frame() else {
@@ -4139,6 +4157,12 @@ impl InfiniteCanvas {
         else {
             return false;
         };
+        if self.crop_handles_active() {
+            return match kind {
+                HandleKind::Rotate => true,
+                HandleKind::Resize(handle) => self.begin_crop_drag(event, handle),
+            };
+        }
         let originals = self.selected_transforms();
         if originals.is_empty() {
             return false;
@@ -4155,6 +4179,9 @@ impl InfiniteCanvas {
     }
 
     fn update_handle_gesture(&mut self, event: &PointerEvent) -> bool {
+        if self.update_crop_drag(event) {
+            return true;
+        }
         let lock_aspect = self.image_selection_locks_aspect();
         let pointer = self.snapped_resize_pointer(event, lock_aspect);
         let preview = {
@@ -4181,6 +4208,9 @@ impl InfiniteCanvas {
     }
 
     fn finish_handle_gesture(&mut self, pointer_id: i32) -> bool {
+        if self.finish_crop_drag(pointer_id) {
+            return true;
+        }
         let matches = self
             .handle_drag
             .as_ref()
@@ -4193,6 +4223,7 @@ impl InfiniteCanvas {
 
     /// 把手势写入撤销栈。场景里已经是最新变换，所以不再 execute。
     fn commit_handle_gesture(&mut self) {
+        self.commit_crop_gesture();
         let Some(drag) = self.handle_drag.take() else {
             return;
         };
@@ -4205,6 +4236,7 @@ impl InfiniteCanvas {
 
     /// 丢掉未提交的手柄拖动，元素回到按下时的变换。
     fn cancel_handle_gesture(&mut self) {
+        self.cancel_crop_gesture();
         if let Some(drag) = self.handle_drag.take() {
             let originals = drag.gesture.originals().to_vec();
             self.apply_transform_list(&originals);
@@ -4801,11 +4833,57 @@ mod tests {
             guide_gesture: None,
             selected_guide: None,
             style_preview: None,
+            crop_mode: false,
+            crop_drag: None,
+            crop_preview: None,
             minimap_cache: None,
             gpu_image_assets: HashSet::new(),
             eyedropper_gesture: None,
             eyedropper_notice: None,
         }
+    }
+
+    #[test]
+    fn crop_handles_trim_the_image_and_undo_restores_the_full_frame() {
+        let mut canvas = blank_canvas();
+        canvas.scene.add_image(Image::new(
+            1,
+            Vec2::ZERO,
+            Vec2::new(100.0, 80.0),
+            "photo".into(),
+        ));
+        canvas.selection.select_element(&mut canvas.scene, 1, false);
+        canvas.set_crop_mode(true);
+        let down = pointer_at(
+            &canvas,
+            canvas.viewport.world_to_screen(Vec2::new(0.0, 40.0)),
+        );
+        assert!(canvas.try_begin_handle_gesture(&down));
+        let moved = pointer_at(
+            &canvas,
+            canvas.viewport.world_to_screen(Vec2::new(25.0, 40.0)),
+        );
+        assert!(canvas.update_handle_gesture(&moved));
+        assert!(canvas.finish_handle_gesture(moved.pointer_id));
+        match canvas.scene.get(1).unwrap() {
+            AnyElement::Image(image) => {
+                assert!((image.normalized_crop().x - 0.25).abs() < 1e-3);
+                assert!((image.normalized_crop().width - 0.75).abs() < 1e-3);
+                assert_eq!(image.props.transform.translation, Vec2::ZERO);
+            }
+            other => panic!("expected image, got {other:?}"),
+        }
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.undo());
+        match canvas.scene.get(1).unwrap() {
+            AnyElement::Image(image) => assert!(image.crop_is_full()),
+            other => panic!("expected image, got {other:?}"),
+        }
+
+        canvas.scene.set_locked(1, true);
+        canvas.set_crop_mode(true);
+        assert!(!canvas.try_begin_handle_gesture(&down));
+        assert_eq!(canvas.get_undo_count(), 0);
     }
 
     /// 背景网格默认可见，切换不进撤销栈。
