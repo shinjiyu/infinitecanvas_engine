@@ -27,9 +27,12 @@
 Demo 工具栏有「适应全部」和「缩放到选中」。`Shift+1` 与 `Shift+2` 登记在 `www/shortcuts.js` 的 `SHORTCUTS`，`?` 帮助面板从这张表生成：
 
 ```text
-Shift+1  zoomFit       ──► zoom_to_fit / fit_scene
-Shift+2  zoomSelection ──► zoom_to_selection
-Shift+0  zoom100       ──► set_zoom(1)
+Shift+1           zoomFit       ──► zoom_to_fit / fit_scene
+Shift+2           zoomSelection ──► zoom_to_selection
+Shift+0 / Ctrl+0  zoom100       ──► set_zoom(1)
+Ctrl+= / Ctrl+-   zoomIn/Out    ──► zoom_by(zoom_step)
 ```
+
+键盘步进不另写一套上下限。`ZOOM_STEP`（1.1）与滚轮相同；`zoom_by` 把锚点放在画布中心后调用 `zoom_at`，所以钳制仍是视口的 `min_zoom` / `max_zoom`（0.1×–10×），和 `camera_for_bounds` 一样。滚轮锚点是指针，键盘锚点是视口中心。页脚用百分比显示 `get_zoom()`。
 
 `Shift+H` / `Shift+V` / `Shift+R` / `Shift+Alt+R` 仍是翻转和 90° 旋转。页面里没有第二套 Digit1 / Digit2 处理。

@@ -24,7 +24,9 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 锁定和隐藏（#57）也在这张表里：`Ctrl/Cmd+L` 切换锁定，`Ctrl/Cmd+Shift+H` 切换隐藏。按住不重复。图层面板的眼睛和锁调用 `set_element_visible` / `set_element_locked`，和这两条快捷键共用 `SetVisibilityCommand` / `SetLockedCommand`。空选不入栈。隐藏后不参与命中和框选。锁定后不能平移或变换，图层面板仍可选中，快捷键切换时选择保留。Mac 上显示为 ⌘L、⌘⇧H。
 
-视图缩放也在这张表里：`Shift+1`（`zoomFit`）调用 `zoom_to_fit`，`fit_scene` 是同一个命令；`Shift+2`（`zoomSelection`）调用 `zoom_to_selection`；`Shift+0`（`zoom100`）调用 `set_zoom(1)`。`?` 帮助面板从同一张表列出这三行。工具栏的「适应全部」和「缩放到选中」走同样的两个函数。详见 [camera-fit.md](./camera-fit.md)。
+视图缩放也在这张表里：`Shift+1`（`zoomFit`）调用 `zoom_to_fit`，`fit_scene` 是同一个命令；`Shift+2`（`zoomSelection`）调用 `zoom_to_selection`；`Shift+0` 和 `Ctrl/Cmd+0`（`zoom100`）调用 `set_zoom(1)`。`Ctrl/Cmd+=` 或 `Ctrl/Cmd++`（`zoomIn`）以及 `Ctrl/Cmd+-`（`zoomOut`）按 `zoom_step`（`ZOOM_STEP`，1.1）绕视口中心步进，钳制走 `zoom_at`，与滚轮、适应全部同一组 0.1×–10×。滚轮仍把指针交给 `zoom_at`，倍数同样读 `zoom_step`。页脚把 `get_zoom()` 显示成百分比，键盘和滚轮都会刷新。`?` 帮助面板从同一张表列出这些行。工具栏的「适应全部」和「缩放到选中」走同样的两个函数。详见 [camera-fit.md](./camera-fit.md)。
+
+`Ctrl/Cmd` 的放大、缩小和 100% 会挡住浏览器缩放，所以只在焦点位于画布、舞台，或还没有落到具体控件（`body`）时 `preventDefault`。输入框、下拉框和按钮不接管。`Shift+0` 不跟浏览器抢键，仍按原来的范围生效。
 
 标尺和手动参考线（#56）也在这张表里：不带修饰键的 `G` 显示或隐藏标尺和参考线，按住不重复。`Ctrl/Cmd+G` 仍是成组，`Ctrl/Cmd+Shift+G` 仍是取消分组。吸附一组里的按钮调用同一个 `set_rulers_visible`。选中参考线时，键盘 Delete / Backspace 先删参考线，否则仍删除选中元素。右键菜单里的「删除」只删元素。
 
@@ -38,6 +40,8 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 | `select_all` | 选中顶层可见元素。组只选中组本身。锁定元素（含被锁定的组）不选 |
 | `zoom_to_selection` | 可见且未锁定的选中目标。组用组根包围盒。每边留视口的 10%。空选不改相机 |
 | `zoom_to_fit` / `fit_scene` | 与小地图相同的可见叶子。每边留视口的 10%。没有可见叶子时回到原点、缩放 1 |
+| `zoom_by` | 绕视口中心乘上倍数，中心不动。钳制交给 `zoom_at` |
+| `zoom_step` | 返回 `ZOOM_STEP`（1.1）。滚轮和键盘共用 |
 | `set_zoom` | 设置缩放倍数，视口中心不变。`1` 即 100% |
 
 文本（#4）已经进 master：`T` 切换文本工具；编辑框聚焦时 `Enter` 确认、`Esc` 取消，这两条的 `scope` 是 `text-editor`，不会在画布上触发。分组（#13）已进 master：`Ctrl+G` 调用 `group_elements`，`Ctrl+Shift+G` 调用 `ungroup`。成组后改选新组；取消分组后改选原来的直接子元素。
