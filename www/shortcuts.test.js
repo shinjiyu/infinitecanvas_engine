@@ -110,7 +110,12 @@ test('delete, select all, escape, zoom, and help', () => {
     matchShortcut(SHORTCUTS, keyEvent({ key: 'g', ctrlKey: true, shiftKey: true }), 'down')?.handler,
     'ungroup',
   );
-  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'g' }), 'down'), null);
+  const rulers = assertHandler('toggleRulers', { key: 'g' });
+  assert.equal(rulers.id, 'rulers');
+  assert.equal(rulers.allowRepeat, false);
+  assert.equal(assertHandler('toggleRulers', { key: 'G' }).id, 'rulers');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'g', ctrlKey: true, altKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'g', shiftKey: true }), 'down'), null);
   assert.equal(assertHandler('escape', { key: 'Escape' }).id, 'escape');
   assert.equal(assertHandler('zoomFit', { key: '!', code: 'Digit1', shiftKey: true }).id, 'zoom-fit');
   assert.equal(assertHandler('zoomFit', { key: '1', code: 'Digit1', shiftKey: true }).id, 'zoom-fit');
@@ -275,6 +280,9 @@ test('help rows are generated from the table and show both chords', () => {
   assert.equal(mac.find((row) => row.id === 'zoom-100')?.chords[0], '⇧0');
   assert.equal(other.find((row) => row.id === 'undo')?.chords[0], 'Ctrl+Z');
   assert.equal(mac.find((row) => row.id === 'select-all')?.chords[0], '⌘A');
+  assert.equal(other.find((row) => row.id === 'rulers')?.chords[0], 'G');
+  assert.equal(other.find((row) => row.id === 'rulers')?.action, '显示或隐藏标尺和参考线');
+  assert.equal(other.find((row) => row.id === 'rulers')?.toolLabel, '画布');
   assert.equal(other.find((row) => row.id === 'group')?.chords[0], 'Ctrl+G');
   assert.equal(mac.find((row) => row.id === 'group')?.chords[0], '⌘G');
   assert.equal(other.find((row) => row.id === 'ungroup')?.chords[0], 'Ctrl+Shift+G');

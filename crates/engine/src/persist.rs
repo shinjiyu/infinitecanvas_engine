@@ -3,7 +3,7 @@
 //! 把场景写成带 `version` 的 JSON，并可以把视口或选中区域栅格化成 PNG。
 //!
 //! ```text
-//! Scene ── to_json ──▶ { version, next_id, assets[], elements[] }
+//! Scene ── to_json ──▶ { version, next_id, assets[], elements[], guides[] }
 //!                          │  type + data          │ data URL，同一张图只写一次
 //!                          ▼                       ▼
 //!                     rectangle / circle / image / line / path / text / group
@@ -15,7 +15,9 @@
 
 use crate::asset::{AssetError, AssetRecord, AssetTable};
 use crate::element::{Circle, Element, Image, Rectangle, Text};
+use crate::guides::{GuideStore, ManualGuide};
 use crate::scene::{AnyElement, Scene};
+use crate::snap::GuideAxis;
 use crate::{ElementId, Viewport};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};
 use serde::Deserialize;
@@ -54,6 +56,9 @@ pub struct SceneFile {
     pub assets: Vec<AssetRecord>,
     /// 场景元素
     pub elements: Vec<AnyElement>,
+    /// 手动参考线。没有参考线时不写入文件。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub guides: Vec<ManualGuide>,
 }
 
 /// 导入或导出失败的原因
@@ -117,6 +122,8 @@ struct RawSceneFile {
     assets: Vec<AssetRecord>,
     #[serde(default)]
     elements: Vec<Value>,
+    #[serde(default)]
+    guides: Vec<ManualGuide>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -219,7 +226,10 @@ impl Scene {
             })
             .collect();
         assets.assign_references(asset_ids);
-        Ok(Scene::from_parts(elements, next_id, assets))
+        let guides = GuideStore::from_records(raw.guides).map_err(PersistError::Json)?;
+        let mut scene = Scene::from_parts(elements, next_id, assets);
+        scene.set_guide_store(guides);
+        Ok(scene)
     }
 
     /// 场景的内存文档，元素按 id 排序
@@ -231,6 +241,7 @@ impl Scene {
             next_id: self.peek_next_id(),
             assets: self.image_asset_records(),
             elements,
+            guides: self.guides().records(),
         }
     }
 }
@@ -306,7 +317,18 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
 /// assert!(png.starts_with(b"\x89PNG"));
 /// ```
 pub fn export_viewport_png(scene: &Scene, viewport: &Viewport) -> Result<Vec<u8>, PersistError> {
-    export_region_png(scene, viewport.bounds(), viewport.zoom())
+    export_viewport_png_with_guides(scene, viewport, false)
+}
+
+/// 同 [`export_viewport_png`]。`include_guides` 为 true 时用一条青色像素画出参考线。
+///
+/// 默认导出不画参考线。标尺是屏幕装饰，两种导出都不画标尺。
+pub fn export_viewport_png_with_guides(
+    scene: &Scene,
+    viewport: &Viewport,
+    include_guides: bool,
+) -> Result<Vec<u8>, PersistError> {
+    export_region_png(scene, viewport.bounds(), viewport.zoom(), include_guides)
 }
 
 /// 把选中元素的包围盒栅格化成 RGBA PNG
@@ -324,7 +346,12 @@ pub fn export_selection_png(scene: &Scene, pixels_per_unit: f32) -> Result<Vec<u
         return Err(PersistError::InvalidScale);
     }
     let bounds = selected_bounds(scene).ok_or(PersistError::NothingSelected)?;
-    export_region_png(scene, bounds.inflate(SELECTION_PADDING), pixels_per_unit)
+    export_region_png(
+        scene,
+        bounds.inflate(SELECTION_PADDING),
+        pixels_per_unit,
+        false,
+    )
 }
 
 /// 按绘制顺序返回元素。
@@ -359,6 +386,7 @@ fn export_region_png(
     scene: &Scene,
     region: Rect,
     pixels_per_unit: f32,
+    include_guides: bool,
 ) -> Result<Vec<u8>, PersistError> {
     let (width, height) = raster_size(region, pixels_per_unit)?;
     let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
@@ -383,7 +411,47 @@ fn export_region_png(
             }
         }
     }
+    if include_guides {
+        paint_guides(&mut pixels, scene, region, width, height);
+    }
     encode_rgba(width, height, &pixels)
+}
+
+/// 参考线在 PNG 里的颜色。只在显式打开 `include_guides` 时使用。
+const GUIDE_PNG: [u8; 4] = [61, 183, 255, 255];
+
+fn paint_guides(pixels: &mut [u8], scene: &Scene, region: Rect, width: u32, height: u32) {
+    for guide in scene.guides().iter() {
+        match guide.axis {
+            GuideAxis::Vertical => {
+                let x = ((guide.position - region.x) / region.width * width as f32).floor();
+                if x < 0.0 || x >= width as f32 {
+                    continue;
+                }
+                let x = x as u32;
+                for y in 0..height {
+                    put_pixel(pixels, width, x, y, GUIDE_PNG);
+                }
+            }
+            GuideAxis::Horizontal => {
+                let y = ((guide.position - region.y) / region.height * height as f32).floor();
+                if y < 0.0 || y >= height as f32 {
+                    continue;
+                }
+                let y = y as u32;
+                for x in 0..width {
+                    put_pixel(pixels, width, x, y, GUIDE_PNG);
+                }
+            }
+        }
+    }
+}
+
+fn put_pixel(pixels: &mut [u8], width: u32, x: u32, y: u32, color: [u8; 4]) {
+    let index = ((y as usize) * (width as usize) + (x as usize)) * 4;
+    if index + 3 < pixels.len() {
+        pixels[index..index + 4].copy_from_slice(&color);
+    }
 }
 
 fn raster_size(region: Rect, pixels_per_unit: f32) -> Result<(u32, u32), PersistError> {
@@ -643,12 +711,13 @@ fn encode_rgba(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, Persis
 #[cfg(test)]
 mod tests {
     use super::{
-        channel, export_selection_png, export_viewport_png, PersistError, IMAGE_PNG_PLACEHOLDER,
-        MAX_PNG_DIMENSION, SCENE_FORMAT_VERSION,
+        channel, export_selection_png, export_viewport_png, export_viewport_png_with_guides,
+        PersistError, IMAGE_PNG_PLACEHOLDER, MAX_PNG_DIMENSION, SCENE_FORMAT_VERSION,
     };
     use crate::element::{
         Circle, Element, ElementStyle, Image, Line, Path, Rectangle, Text, TextAlign,
     };
+    use crate::snap::GuideAxis;
     use crate::{AnyElement, Scene, Viewport};
     use infinitecanvas_math::{Color, Rect, Transform, Vec2};
     use serde_json::{json, Value};
@@ -1326,5 +1395,42 @@ mod tests {
         let (width, height, _) = decode_png(&png);
         assert_eq!(width, MAX_PNG_DIMENSION);
         assert_eq!(height, 4);
+    }
+
+    #[test]
+    fn guides_round_trip_and_old_documents_still_load() {
+        let legacy = Scene::from_json(r#"{"version":1,"elements":[]}"#).unwrap();
+        assert!(legacy.guides().is_empty());
+
+        let mut scene = Scene::new();
+        scene.add_guide(GuideAxis::Horizontal, 12.5).unwrap();
+        scene.add_guide(GuideAxis::Vertical, -4.0).unwrap();
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"guides\""));
+        assert!(json.contains("\"horizontal\""));
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(restored, scene);
+        assert_eq!(restored.to_json().unwrap(), json);
+
+        let duplicate = r#"{"version":1,"elements":[],"guides":[{"id":1,"axis":"vertical","position":0},{"id":1,"axis":"horizontal","position":1}]}"#;
+        assert!(Scene::from_json(duplicate).is_err());
+    }
+
+    #[test]
+    fn png_export_skips_guides_unless_asked() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0)));
+        let viewport = Viewport::new(Vec2::new(32.0, 32.0));
+        let plain = export_viewport_png(&scene, &viewport).unwrap();
+        scene.add_guide(GuideAxis::Vertical, 0.0).unwrap();
+        assert_eq!(export_viewport_png(&scene, &viewport).unwrap(), plain);
+        assert_eq!(
+            export_viewport_png_with_guides(&scene, &viewport, false).unwrap(),
+            plain
+        );
+        assert_ne!(
+            export_viewport_png_with_guides(&scene, &viewport, true).unwrap(),
+            plain
+        );
     }
 }

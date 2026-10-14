@@ -283,6 +283,14 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 标尺和手动参考线是否显示。
+     * @returns {boolean}
+     */
+    are_rulers_visible() {
+        const ret = wasm.infinitecanvas_are_rulers_visible(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
      *
      * # 参数
@@ -442,6 +450,34 @@ export class InfiniteCanvas {
     debug_pending_event_count() {
         const ret = wasm.infinitecanvas_debug_pending_event_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * 双击命中参考线时删除它。
+     *
+     * # 参数
+     * - `x`: 画布像素 x
+     * - `y`: 画布像素 y
+     *
+     * # 返回
+     * 命中并删除时为 `true`。标尺隐藏时为 `false`。
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    delete_guide_at(x, y) {
+        const ret = wasm.infinitecanvas_delete_guide_at(this.__wbg_ptr, x, y);
+        return ret !== 0;
+    }
+    /**
+     * 删除当前选中的参考线，并记入撤销栈。
+     *
+     * # 返回
+     * 确实删掉了一条参考线时为 `true`。
+     * @returns {boolean}
+     */
+    delete_selected_guide() {
+        const ret = wasm.infinitecanvas_delete_selected_guide(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * 删除当前选中的元素。
@@ -739,6 +775,17 @@ export class InfiniteCanvas {
         return ret >>> 0;
     }
     /**
+     * 场景里的手动参考线。
+     *
+     * 每条记录含 `id`、`axis`（`"horizontal"` / `"vertical"`）、`position`（世界坐标）
+     * 和 `selected`。隐藏标尺时仍返回数据，绘制由调用方决定。
+     * @returns {Array<any>}
+     */
+    get_manual_guides() {
+        const ret = wasm.infinitecanvas_get_manual_guides(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 获取性能统计信息
      *
      * # 返回
@@ -764,6 +811,39 @@ export class InfiniteCanvas {
     get_redo_count() {
         const ret = wasm.infinitecanvas_get_redo_count(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * 主刻度的世界步长。缩放越大，步长越小。
+     * @returns {number}
+     */
+    get_ruler_major_step() {
+        const ret = wasm.infinitecanvas_get_ruler_major_step(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * 标尺厚度（屏幕像素）。
+     * @returns {number}
+     */
+    get_ruler_thickness() {
+        const ret = wasm.infinitecanvas_get_ruler_thickness(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * 一条标尺上的刻度。
+     *
+     * `axis` 为 `"horizontal"`（顶边，世界 x）或 `"vertical"`（左边，世界 y）。
+     * 每条记录含 `world`、`screen` 和 `major`。
+     *
+     * # 参数
+     * - `axis`: `"horizontal"` 或 `"vertical"`
+     * @param {string} axis
+     * @returns {Array<any>}
+     */
+    get_ruler_ticks(axis) {
+        const ptr0 = passStringToWasm0(axis, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_get_ruler_ticks(this.__wbg_ptr, ptr0, len0);
+        return ret;
     }
     /**
      * 场景树。`roots` 里每个节点含 `id`、`elementType`、`parentId`、`visible`、`locked`、`zIndex`、`children`。
@@ -1534,6 +1614,19 @@ export class InfiniteCanvas {
     set_image_alpha(image_id, alpha) {
         const ret = wasm.infinitecanvas_set_image_alpha(this.__wbg_ptr, image_id, alpha);
         return ret !== 0;
+    }
+    /**
+     * 显示或隐藏标尺和手动参考线。
+     *
+     * 隐藏后参考线仍留在场景 JSON 里，但不再命中、不再吸附。
+     * 正在拖的参考线会取消，场景回到按下前的参考线。
+     *
+     * # 参数
+     * - `visible`: `true` 显示
+     * @param {boolean} visible
+     */
+    set_rulers_visible(visible) {
+        wasm.infinitecanvas_set_rulers_visible(this.__wbg_ptr, visible);
     }
     /**
      * 把补丁写进当前选择并记一条撤销记录。
@@ -3573,12 +3666,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2718, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2733, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 450, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 462, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

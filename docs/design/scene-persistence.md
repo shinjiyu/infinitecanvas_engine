@@ -24,6 +24,7 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 | `next_id` | 可省略。小于等于已有最大 ID 时抬到 `max_id + 1` |
 | `assets[]` | 可省略。图片资源 `{ id, mime, width, height, data }`。`data` 是 data URL，同一张图只写一次 |
 | `elements[]` | `{ "type", "data" }`。`type` 为 `rectangle`、`circle`、`image`、`line`、`path`、`text`、`group` |
+| `guides[]` | 可省略。手动参考线 `{ id, axis, position }`。`axis` 为 `horizontal`（世界 y）或 `vertical`（世界 x）。没有参考线时不写这个字段 |
 
 `data.props.transform` 含 `translation`、`rotation`（弧度，即 `ElementProps::rotation`）、`scale`。直线的 `arrow` 缺省为 `false`。路径的 `points` 缺省为空。文本的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 可省略；对齐缺省为 `left`，字号缺省为 32，尺寸缺省时按内容估算。`texture_id`、LOD、`revision`、`editing` 用 `#[serde(skip)]`，不进文件。PNG 采样先把世界点逆变换回局部空间，所以旋转和非均匀缩放与命中测试一致。
 
@@ -31,11 +32,11 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 
 ## PNG
 
-视口导出使用视口的世界包围盒和当前缩放。选区导出使用选中元素包围盒并外扩 1 个世界单位。直线、箭头和路径按半线宽上色，不含点选余量。文本用 `font8x8` 点阵画该字体覆盖的字符；没有点阵的字符（包括中文）画成方框，因为屏幕上的 Canvas2D 纹理不在场景文件里。图片若在资源表里有像素，PNG 按显示矩形采样这些像素；只有 GPU 纹理 id、没有字节的图片仍用纯色占位。
+视口导出使用视口的世界包围盒和当前缩放。选区导出使用选中元素包围盒并外扩 1 个世界单位。手动参考线默认不画。`export_viewport_png_with_guides` 把 `include_guides` 设为 true 时，参考线盖一层青色像素。标尺不进 PNG。直线、箭头和路径按半线宽上色，不含点选余量。文本用 `font8x8` 点阵画该字体覆盖的字符；没有点阵的字符（包括中文）画成方框，因为屏幕上的 Canvas2D 纹理不在场景文件里。图片若在资源表里有像素，PNG 按显示矩形采样这些像素；只有 GPU 纹理 id、没有字节的图片仍用纯色占位。
 
 ## SVG
 
-`export_svg(selected_only)` 走和 PNG 相同的 `elements_in_paint_order`。自己或祖先不可见（`Scene::is_effectively_visible`）的元素跳过，也不计入 viewBox。`selected_only` 为 false 时 viewBox 是全部导出叶子的世界包围盒（再外扩 2 个世界单位）；为 true 时包含自身 `selected` 的叶子，以及选中组下的全部可见子孙叶子。没有叶子时 viewBox 是 `0 0 1 1`。
+`export_svg(selected_only)` 走和 PNG 相同的 `elements_in_paint_order`，默认不画参考线。`export_svg_with_guides(..., true)` 在现有 viewBox 里追加 `#3db7ff` 的 `<line>`，不改变 viewBox。标尺不进 SVG。自己或祖先不可见（`Scene::is_effectively_visible`）的元素跳过，也不计入 viewBox。`selected_only` 为 false 时 viewBox 是全部导出叶子的世界包围盒（再外扩 2 个世界单位）；为 true 时包含自身 `selected` 的叶子，以及选中组下的全部可见子孙叶子。没有叶子时 viewBox 是 `0 0 1 1`。
 
 | 元素 | SVG |
 | --- | --- |

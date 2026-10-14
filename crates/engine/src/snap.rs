@@ -58,7 +58,10 @@ const TIE_EPSILON: f32 = 1e-4;
 ///
 /// 垂直线固定世界坐标 x，表示左右边缘或水平中心对齐。
 /// 水平线固定世界坐标 y，表示上下边缘或垂直中心对齐。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum GuideAxis {
     /// 水平线，[`AlignmentGuide::position`] 是世界坐标 y。
     Horizontal,
@@ -89,6 +92,18 @@ pub struct AlignmentGuide {
     pub axis: GuideAxis,
     /// 参考线所在的世界坐标。
     pub position: f32,
+}
+
+/// 手动参考线在两条轴上的世界坐标。
+///
+/// 垂直参考线放在 [`GuideLines::vertical`]（世界 x），水平参考线放在
+/// [`GuideLines::horizontal`]（世界 y）。拖拽时它们和元素边缘、中心一起比距离。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GuideLines {
+    /// 水平参考线的世界 y。
+    pub horizontal: Vec<f32>,
+    /// 垂直参考线的世界 x。
+    pub vertical: Vec<f32>,
 }
 
 /// [`snap_bounds`] 的结果。
@@ -217,33 +232,63 @@ pub fn bounds_union(rects: impl IntoIterator<Item = Rect>) -> Option<Rect> {
 /// # 返回
 /// 修正量和当前参考线。没有命中时修正为 0、参考线为空。
 pub fn snap_bounds(moving: Rect, targets: &[Rect], threshold: f32) -> SnapResult {
+    snap_bounds_with_guides(moving, targets, &GuideLines::default(), threshold)
+}
+
+/// 同 [`snap_bounds`]，另外把手动参考线当作只有一个锚点的目标。
+///
+/// 每一轴仍只取最近的一次修正。参考线比元素边缘更近时吸参考线，反之亦然。
+///
+/// # 参数
+/// - `moving`: 未吸附的移动包围盒
+/// - `targets`: 其他元素的世界包围盒
+/// - `guides`: 手动参考线。空的时候结果与 [`snap_bounds`] 相同
+/// - `threshold`: 世界坐标阈值
+pub fn snap_bounds_with_guides(
+    moving: Rect,
+    targets: &[Rect],
+    guides: &GuideLines,
+    threshold: f32,
+) -> SnapResult {
     if !threshold.is_finite() || threshold < 0.0 || !rect_is_finite(moving) {
         return SnapResult::none();
     }
 
-    let mut guides = Vec::new();
+    let mut alignment = Vec::new();
     let mut delta = Vec2::ZERO;
 
-    if let Some(axis) = snap_axis(anchors(moving, true), targets, threshold, true) {
+    if let Some(axis) = snap_axis(
+        anchors(moving, true),
+        targets,
+        &guides.vertical,
+        threshold,
+        true,
+    ) {
         delta.x = axis.delta;
         for position in axis.positions {
-            guides.push(AlignmentGuide {
+            alignment.push(AlignmentGuide {
                 axis: GuideAxis::Vertical,
                 position,
             });
         }
     }
-    if let Some(axis) = snap_axis(anchors(moving, false), targets, threshold, false) {
+    if let Some(axis) = snap_axis(
+        anchors(moving, false),
+        targets,
+        &guides.horizontal,
+        threshold,
+        false,
+    ) {
         delta.y = axis.delta;
         for position in axis.positions {
-            guides.push(AlignmentGuide {
+            alignment.push(AlignmentGuide {
                 axis: GuideAxis::Horizontal,
                 position,
             });
         }
     }
 
-    guides.sort_by(|left, right| {
+    alignment.sort_by(|left, right| {
         left.axis.cmp(&right.axis).then_with(|| {
             left.position
                 .partial_cmp(&right.position)
@@ -251,7 +296,10 @@ pub fn snap_bounds(moving: Rect, targets: &[Rect], threshold: f32) -> SnapResult
         })
     });
 
-    SnapResult { delta, guides }
+    SnapResult {
+        delta,
+        guides: alignment,
+    }
 }
 
 /// 把指针位移吸附到周围元素上。
@@ -274,6 +322,28 @@ pub fn snap_drag(
     settings: &SnapSettings,
     zoom: f32,
 ) -> DragSnap {
+    snap_drag_with_guides(
+        origin,
+        raw_delta,
+        targets,
+        &GuideLines::default(),
+        settings,
+        zoom,
+    )
+}
+
+/// 同 [`snap_drag`]，并吸附到手动参考线。
+///
+/// 关闭吸附时 `translation == raw_delta`，元素参考线和手动参考线都不生效。
+/// 阈值仍是 [`SnapSettings`] 的屏幕像素。
+pub fn snap_drag_with_guides(
+    origin: Rect,
+    raw_delta: Vec2,
+    targets: &[Rect],
+    guides: &GuideLines,
+    settings: &SnapSettings,
+    zoom: f32,
+) -> DragSnap {
     if !settings.enabled {
         return DragSnap {
             translation: raw_delta,
@@ -281,7 +351,8 @@ pub fn snap_drag(
         };
     }
     let proposed = translate_rect(origin, raw_delta);
-    let snapped = snap_bounds(proposed, targets, settings.world_threshold(zoom));
+    let snapped =
+        snap_bounds_with_guides(proposed, targets, guides, settings.world_threshold(zoom));
     DragSnap {
         translation: raw_delta + snapped.delta,
         guides: snapped.guides,
@@ -313,10 +384,11 @@ fn anchors(rect: Rect, along_x: bool) -> [f32; 3] {
 fn snap_axis(
     moving: [f32; 3],
     targets: &[Rect],
+    extra: &[f32],
     threshold: f32,
     along_x: bool,
 ) -> Option<AxisSnap> {
-    let best = best_delta(moving, targets, threshold, along_x)?;
+    let best = best_delta(moving, targets, extra, threshold, along_x)?;
     let mut positions = Vec::new();
     for target in targets {
         if !rect_is_finite(*target) {
@@ -331,6 +403,17 @@ fn snap_axis(
             }
         }
     }
+    for &anchor in extra {
+        if !anchor.is_finite() {
+            continue;
+        }
+        for moving_anchor in moving {
+            let delta = anchor - moving_anchor;
+            if (delta - best).abs() <= DELTA_MATCH_EPSILON {
+                push_unique(&mut positions, anchor);
+            }
+        }
+    }
     positions.sort_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
     Some(AxisSnap {
         delta: best,
@@ -338,28 +421,43 @@ fn snap_axis(
     })
 }
 
-fn best_delta(moving: [f32; 3], targets: &[Rect], threshold: f32, along_x: bool) -> Option<f32> {
+fn best_delta(
+    moving: [f32; 3],
+    targets: &[Rect],
+    extra: &[f32],
+    threshold: f32,
+    along_x: bool,
+) -> Option<f32> {
     let mut best: Option<f32> = None;
     for target in targets {
         if !rect_is_finite(*target) {
             continue;
         }
         for target_anchor in anchors(*target, along_x) {
-            for moving_anchor in moving {
-                let delta = target_anchor - moving_anchor;
-                if !delta.is_finite() || delta.abs() > threshold {
-                    continue;
-                }
-                if best
-                    .map(|current| is_better_delta(delta, current))
-                    .unwrap_or(true)
-                {
-                    best = Some(delta);
-                }
-            }
+            consider_delta(target_anchor, moving, threshold, &mut best);
+        }
+    }
+    for &anchor in extra {
+        if anchor.is_finite() {
+            consider_delta(anchor, moving, threshold, &mut best);
         }
     }
     best
+}
+
+fn consider_delta(target_anchor: f32, moving: [f32; 3], threshold: f32, best: &mut Option<f32>) {
+    for moving_anchor in moving {
+        let delta = target_anchor - moving_anchor;
+        if !delta.is_finite() || delta.abs() > threshold {
+            continue;
+        }
+        if best
+            .map(|current| is_better_delta(delta, current))
+            .unwrap_or(true)
+        {
+            *best = Some(delta);
+        }
+    }
 }
 
 /// 更小的绝对距离优先；距离相同则取更小（更靠左 / 更靠上）的修正。
@@ -618,5 +716,53 @@ mod tests {
     #[test]
     fn bounds_union_skips_empty_input() {
         assert_eq!(bounds_union([]), None);
+    }
+
+    #[test]
+    fn manual_guide_wins_when_it_is_closer_than_an_element() {
+        let moving = Rect::new(0.0, 0.0, 40.0, 10.0);
+        let target = Rect::new(48.0, 400.0, 10.0, 10.0);
+        let guides = GuideLines {
+            vertical: vec![42.0],
+            horizontal: Vec::new(),
+        };
+        let result = snap_bounds_with_guides(moving, &[target], &guides, 10.0);
+        assert_eq!(result.delta, Vec2::new(2.0, 0.0));
+        assert_eq!(result.guides, vec![guide(GuideAxis::Vertical, 42.0)]);
+    }
+
+    #[test]
+    fn element_edge_wins_when_it_is_closer_than_a_guide() {
+        let moving = Rect::new(0.0, 0.0, 40.0, 10.0);
+        let target = Rect::new(44.0, 400.0, 10.0, 10.0);
+        let guides = GuideLines {
+            vertical: vec![55.0],
+            horizontal: Vec::new(),
+        };
+        let result = snap_bounds_with_guides(moving, &[target], &guides, 10.0);
+        assert_eq!(result.delta, Vec2::new(4.0, 0.0));
+        assert_eq!(result.guides, vec![guide(GuideAxis::Vertical, 44.0)]);
+    }
+
+    #[test]
+    fn drag_snaps_center_to_a_horizontal_guide() {
+        let origin = Rect::new(0.0, 0.0, 20.0, 10.0);
+        let guides = GuideLines {
+            horizontal: vec![40.0],
+            vertical: Vec::new(),
+        };
+        let settings = SnapSettings::default();
+        let result =
+            snap_drag_with_guides(origin, Vec2::new(0.0, 33.0), &[], &guides, &settings, 1.0);
+        assert_eq!(result.translation, Vec2::new(0.0, 35.0));
+        assert_eq!(result.guides, vec![guide(GuideAxis::Horizontal, 40.0)]);
+
+        let off = SnapSettings {
+            enabled: false,
+            threshold_px: 6.0,
+        };
+        let ignored = snap_drag_with_guides(origin, Vec2::new(0.0, 33.0), &[], &guides, &off, 1.0);
+        assert_eq!(ignored.translation, Vec2::new(0.0, 33.0));
+        assert!(ignored.guides.is_empty());
     }
 }

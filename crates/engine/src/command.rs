@@ -1562,6 +1562,34 @@ impl Command for SetStyleCommand {
     }
 }
 
+/// 改手动参考线。场景里已经是 `after` 时用 [`CommandHistory::push_executed`]。
+#[derive(Debug)]
+pub struct EditGuidesCommand {
+    before: crate::guides::GuideSnapshot,
+    after: crate::guides::GuideSnapshot,
+}
+
+impl EditGuidesCommand {
+    /// 记录参考线从 `before` 变成 `after`。
+    pub fn new(before: crate::guides::GuideSnapshot, after: crate::guides::GuideSnapshot) -> Self {
+        Self { before, after }
+    }
+}
+
+impl Command for EditGuidesCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        scene.restore_guides(&self.after);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        scene.restore_guides(&self.before);
+    }
+
+    fn name(&self) -> &'static str {
+        "EditGuides"
+    }
+}
+
 /// 命令历史（撤销/重做栈）
 #[derive(Default)]
 pub struct CommandHistory {

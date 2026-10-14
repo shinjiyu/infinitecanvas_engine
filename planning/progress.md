@@ -2,6 +2,25 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #56: 标尺与手动参考线
+
+- [x] 顶边 / 左边标尺，刻度随平移和缩放更新（世界单位，1/2/5 步长）
+- [x] 从标尺拖出水平 / 垂直参考线；拖动改位置；拖回标尺、双击或 Delete 删除
+- [x] 参考线进场景 JSON（`guides[]`，空则省略）；旧文档仍能打开
+- [x] 拖拽和缩放吸附到最近参考线，阈值沿用 #14 的屏幕像素
+- [x] PNG / SVG 默认不画参考线，`include_guides` 才画
+- [x] Demo：标尺参考线按钮。`G` 登记在 `www/shortcuts.js`，帮助面板列出「显示或隐藏标尺和参考线」。`Ctrl+G` 仍是成组
+
+```text
+顶标尺 / 左标尺
+    │ 拖出
+    ▼
+Scene.guides ── JSON guides[]
+    │
+    ├─ 拖拽：snap_drag_with_guides（和元素边缘比一次最近距离）
+    └─ 缩放：移动中的元素边，斜率修正指针
+```
+
 ## Issue #57: 锁定/隐藏快捷键
 
 - [x] `SetLockedCommand` / `SetVisibilityCommand`：当前选择或指定 id，一条历史

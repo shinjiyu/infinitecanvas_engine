@@ -171,6 +171,10 @@ export class InfiniteCanvas {
      */
     align_selection(mode: string): boolean;
     /**
+     * 标尺和手动参考线是否显示。
+     */
+    are_rulers_visible(): boolean;
+    /**
      * 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
      *
      * # 参数
@@ -247,6 +251,24 @@ export class InfiniteCanvas {
     cursor_at(x: number, y: number): string;
     debug_clear_events(): void;
     debug_pending_event_count(): number;
+    /**
+     * 双击命中参考线时删除它。
+     *
+     * # 参数
+     * - `x`: 画布像素 x
+     * - `y`: 画布像素 y
+     *
+     * # 返回
+     * 命中并删除时为 `true`。标尺隐藏时为 `false`。
+     */
+    delete_guide_at(x: number, y: number): boolean;
+    /**
+     * 删除当前选中的参考线，并记入撤销栈。
+     *
+     * # 返回
+     * 确实删掉了一条参考线时为 `true`。
+     */
+    delete_selected_guide(): boolean;
     /**
      * 删除当前选中的元素。
      *
@@ -420,6 +442,13 @@ export class InfiniteCanvas {
      */
     get_last_vertex_count(): number;
     /**
+     * 场景里的手动参考线。
+     *
+     * 每条记录含 `id`、`axis`（`"horizontal"` / `"vertical"`）、`position`（世界坐标）
+     * 和 `selected`。隐藏标尺时仍返回数据，绘制由调用方决定。
+     */
+    get_manual_guides(): Array<any>;
+    /**
      * 获取性能统计信息
      *
      * # 返回
@@ -438,6 +467,24 @@ export class InfiniteCanvas {
      * 获取重做栈大小
      */
     get_redo_count(): number;
+    /**
+     * 主刻度的世界步长。缩放越大，步长越小。
+     */
+    get_ruler_major_step(): number;
+    /**
+     * 标尺厚度（屏幕像素）。
+     */
+    get_ruler_thickness(): number;
+    /**
+     * 一条标尺上的刻度。
+     *
+     * `axis` 为 `"horizontal"`（顶边，世界 x）或 `"vertical"`（左边，世界 y）。
+     * 每条记录含 `world`、`screen` 和 `major`。
+     *
+     * # 参数
+     * - `axis`: `"horizontal"` 或 `"vertical"`
+     */
+    get_ruler_ticks(axis: string): Array<any>;
     /**
      * 场景树。`roots` 里每个节点含 `id`、`elementType`、`parentId`、`visible`、`locked`、`zIndex`、`children`。
      */
@@ -878,6 +925,16 @@ export class InfiniteCanvas {
      */
     set_image_alpha(image_id: bigint, alpha: number): boolean;
     /**
+     * 显示或隐藏标尺和手动参考线。
+     *
+     * 隐藏后参考线仍留在场景 JSON 里，但不再命中、不再吸附。
+     * 正在拖的参考线会取消，场景回到按下前的参考线。
+     *
+     * # 参数
+     * - `visible`: `true` 显示
+     */
+    set_rulers_visible(visible: boolean): void;
+    /**
      * 把补丁写进当前选择并记一条撤销记录。
      *
      * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
@@ -1077,6 +1134,7 @@ export interface InitOutput {
     readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
     readonly infinitecanvas_add_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
     readonly infinitecanvas_align_selection: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_are_rulers_visible: (a: number) => number;
     readonly infinitecanvas_begin_text_edit_at: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_can_redo: (a: number) => number;
     readonly infinitecanvas_can_undo: (a: number) => number;
@@ -1090,6 +1148,8 @@ export interface InitOutput {
     readonly infinitecanvas_cursor_at: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
+    readonly infinitecanvas_delete_guide_at: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_delete_selected_guide: (a: number) => number;
     readonly infinitecanvas_delete_selection: (a: number) => number;
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_distribute_selection: (a: number, b: number, c: number) => number;
@@ -1108,8 +1168,12 @@ export interface InitOutput {
     readonly infinitecanvas_get_frame_count: (a: number) => bigint;
     readonly infinitecanvas_get_last_draw_calls: (a: number) => number;
     readonly infinitecanvas_get_last_vertex_count: (a: number) => number;
+    readonly infinitecanvas_get_manual_guides: (a: number) => any;
     readonly infinitecanvas_get_performance_stats: (a: number) => any;
     readonly infinitecanvas_get_redo_count: (a: number) => number;
+    readonly infinitecanvas_get_ruler_major_step: (a: number) => number;
+    readonly infinitecanvas_get_ruler_thickness: (a: number) => number;
+    readonly infinitecanvas_get_ruler_ticks: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_get_scene_tree: (a: number) => any;
     readonly infinitecanvas_get_selected_ids: (a: number) => any;
     readonly infinitecanvas_get_selection_bounds: (a: number) => any;
@@ -1164,6 +1228,7 @@ export interface InitOutput {
     readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_element_visible: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
+    readonly infinitecanvas_set_rulers_visible: (a: number, b: number) => void;
     readonly infinitecanvas_set_selection_style: (a: number, b: any) => number;
     readonly infinitecanvas_set_snap_enabled: (a: number, b: number) => void;
     readonly infinitecanvas_set_snap_threshold: (a: number, b: number) => void;

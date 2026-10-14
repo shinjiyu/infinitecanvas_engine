@@ -7,11 +7,12 @@
  * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。输入框、下拉框内不触发。
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
  * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，和工具栏、属性面板的按钮一样，进撤销栈。
+ * 顶边和左边标尺可拖出参考线。G 显示或隐藏标尺和参考线。参考线进场景 JSON，导出默认不画。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
  * Shift+1 适应全部，Shift+2 缩放到选中。两条都在 `SHORTCUTS` 里，只改相机，不进撤销栈。
- * 右键空白处可粘贴、全选、缩放到适合；右键元素可复制、粘贴、克隆、删除、成组和调整层级。菜单项调用 `dispatchShortcut`。
+ * 右键空白处可粘贴、全选、缩放到适合；右键元素可复制、粘贴、克隆、删除、成组和调整层级。菜单项调用 `dispatchShortcut`。菜单里的删除只删元素。
  * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
  * @example
@@ -718,6 +719,11 @@ function dispatchShortcut(shortcut, engine) {
     case 'toggleMinimap':
       setMinimapVisible(!minimapVisible);
       break;
+    case 'toggleRulers':
+      engine.set_rulers_visible(!engine.are_rulers_visible());
+      syncRulerControls(engine);
+      drawAlignmentGuides(engine);
+      break;
     case 'save':
       saveSceneFile(engine);
       break;
@@ -740,6 +746,11 @@ function dispatchShortcut(shortcut, engine) {
       setTool(shortcut.tool);
       break;
     case 'delete':
+      if (engine.delete_selected_guide()) {
+        scheduleAutosave(engine);
+        drawAlignmentGuides(engine);
+        break;
+      }
       if (engine.delete_selection() > 0) scheduleAutosave(engine);
       break;
     case 'selectAll':
@@ -1178,8 +1189,11 @@ function runContextAction(engine, action, pastePoint) {
     lastPointer = pastePoint;
     pointerInsideCanvas = true;
   }
-  if (shortcut.handler === 'delete' && textEditor) {
-    closeTextEditor(engine, false);
+  if (shortcut.handler === 'delete') {
+    if (textEditor) closeTextEditor(engine, false);
+    // 键盘 Delete 在参考线选中时先删参考线。菜单上的「删除」只删元素。
+    if (engine.delete_selection() > 0) scheduleAutosave(engine);
+    return;
   }
   dispatchShortcut(shortcut, engine);
 }
@@ -1838,6 +1852,10 @@ function bindInput(canvas, engine) {
 
   canvas.addEventListener('dblclick', (event) => {
     const point = canvasPoint(event, canvas);
+    if (engine.delete_guide_at(point.x, point.y)) {
+      scheduleAutosave(engine);
+      return;
+    }
     const info = engine.begin_text_edit_at(point.x, point.y);
     if (info) openTextEditor(engine, info);
   });
@@ -1940,6 +1958,12 @@ function bindInput(canvas, engine) {
   document.getElementById('snap-btn')?.addEventListener('click', () => {
     engine.set_snap_enabled(!engine.is_snap_enabled());
     syncSnapControls(engine);
+    drawAlignmentGuides(engine);
+  });
+
+  document.getElementById('rulers-btn')?.addEventListener('click', () => {
+    engine.set_rulers_visible(!engine.are_rulers_visible());
+    syncRulerControls(engine);
     drawAlignmentGuides(engine);
   });
   document.getElementById('snap-threshold')?.addEventListener('input', (event) => {
@@ -2072,6 +2096,7 @@ function updateHud(engine) {
   syncAlignControls(engine);
   syncOrientControls(engine);
   syncSnapControls(engine);
+  syncRulerControls(engine);
   drawAlignmentGuides(engine);
   layerPanel?.sync();
   paintMinimap(engine);
@@ -2094,7 +2119,103 @@ function syncSnapControls(engine) {
 }
 
 /**
- * 把当前对齐参考线画到 WebGPU 画布上方。坐标是世界坐标，按视口换到屏幕像素。
+ * 同步标尺开关。参考线跟着标尺一起显示或隐藏。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncRulerControls(engine) {
+  const visible = engine.are_rulers_visible();
+  document.getElementById('rulers-btn')?.classList.toggle('active', visible);
+}
+
+/**
+ * 把世界坐标换成画布像素。和视口中心、缩放同一套公式。
+ *
+ * @param {number} worldX
+ * @param {number} worldY
+ * @param {number} centerX
+ * @param {number} centerY
+ * @param {number} zoom
+ * @param {number} originX
+ * @param {number} originY
+ * @returns {{ x: number, y: number }}
+ */
+function worldToOverlay(worldX, worldY, centerX, centerY, zoom, originX, originY) {
+  return {
+    x: (worldX - centerX) * zoom + originX,
+    y: (worldY - centerY) * zoom + originY,
+  };
+}
+
+/**
+ * 主刻度上的数字。步长不小于 1 时取整，否则按步长保留小数。
+ *
+ * @param {number} world
+ * @param {number} step
+ * @returns {string}
+ */
+function formatRulerLabel(world, step) {
+  if (!Number.isFinite(world)) return '';
+  if (!Number.isFinite(step) || step >= 1) return String(Math.round(world));
+  const digits = Math.min(3, Math.max(1, Math.ceil(-Math.log10(step))));
+  return world.toFixed(digits);
+}
+
+/**
+ * 画一条标尺的刻度和数字。
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Array<{ world: number, screen: number, major: boolean }>} ticks
+ * @param {boolean} horizontal 顶边标尺为 true，刻度沿 x
+ * @param {number} thickness
+ * @param {number} step
+ */
+function drawRulerTicks(ctx, ticks, horizontal, thickness, step) {
+  const count = ticks.length ?? 0;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.fillStyle = 'rgba(232, 236, 243, 0.82)';
+  ctx.lineWidth = 1;
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let index = 0; index < count; index += 1) {
+    const tick = ticks[index];
+    const screen = tick.screen;
+    if (!Number.isFinite(screen)) continue;
+    const length = tick.major ? 10 : 5;
+    ctx.beginPath();
+    if (horizontal) {
+      if (screen < thickness) continue;
+      ctx.moveTo(screen, thickness);
+      ctx.lineTo(screen, thickness - length);
+    } else {
+      if (screen < thickness) continue;
+      ctx.moveTo(thickness, screen);
+      ctx.lineTo(thickness - length, screen);
+    }
+    ctx.stroke();
+    if (!tick.major) continue;
+    const label = formatRulerLabel(tick.world, step);
+    if (horizontal) {
+      if (screen < thickness + 16) continue;
+      ctx.fillText(label, screen, 10);
+    } else if (screen > thickness + 18) {
+      ctx.save();
+      ctx.translate(10, screen);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+
+/**
+ * 把当前对齐参考线、手动参考线和标尺画到 WebGPU 画布上方。
+ *
+ * 手动参考线是实线。拖拽时的对齐参考线仍是黄色虚线，画在最上面。
+ * 标尺盖住画布边缘，刻度随视口更新。
  *
  * @param {WasmCanvas} engine
  */
@@ -2109,15 +2230,56 @@ function drawAlignmentGuides(engine) {
   if (!ctx) return;
   ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-  const guides = engine.get_alignment_guides();
-  const count = guides.length ?? 0;
-  if (count === 0) return;
-
   const zoom = engine.get_zoom();
   const centerX = engine.get_viewport_center_x();
   const centerY = engine.get_viewport_center_y();
   const originX = overlay.width / 2;
   const originY = overlay.height / 2;
+  const showRulers = engine.are_rulers_visible();
+  const thickness = showRulers ? engine.get_ruler_thickness() : 0;
+
+  if (showRulers) {
+    const manual = engine.get_manual_guides();
+    const manualCount = manual.length ?? 0;
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
+    for (let index = 0; index < manualCount; index += 1) {
+      const guide = manual[index];
+      ctx.strokeStyle = guide.selected ? '#ffffff' : '#3db7ff';
+      ctx.lineWidth = guide.selected ? 1.5 : 1;
+      ctx.beginPath();
+      if (guide.axis === 'vertical') {
+        const x = worldToOverlay(guide.position, 0, centerX, centerY, zoom, originX, originY).x;
+        ctx.moveTo(x, thickness);
+        ctx.lineTo(x, overlay.height);
+      } else {
+        const y = worldToOverlay(0, guide.position, centerX, centerY, zoom, originX, originY).y;
+        ctx.moveTo(thickness, y);
+        ctx.lineTo(overlay.width, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(16, 18, 24, 0.94)';
+    ctx.fillRect(0, 0, overlay.width, thickness);
+    ctx.fillRect(0, 0, thickness, overlay.height);
+    const step = engine.get_ruler_major_step();
+    drawRulerTicks(ctx, engine.get_ruler_ticks('horizontal'), true, thickness, step);
+    drawRulerTicks(ctx, engine.get_ruler_ticks('vertical'), false, thickness, step);
+    ctx.fillStyle = 'rgba(22, 24, 31, 0.98)';
+    ctx.fillRect(0, 0, thickness, thickness);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
+    ctx.strokeRect(0.5, 0.5, overlay.width - 1, thickness - 0.5);
+    ctx.strokeRect(0.5, 0.5, thickness - 0.5, overlay.height - 1);
+    ctx.restore();
+  }
+
+  const guides = engine.get_alignment_guides();
+  const count = guides.length ?? 0;
+  if (count === 0) return;
 
   ctx.save();
   ctx.strokeStyle = '#f2c94c';
@@ -2127,12 +2289,12 @@ function drawAlignmentGuides(engine) {
     const guide = guides[index];
     ctx.beginPath();
     if (guide.axis === 'vertical') {
-      const x = (guide.position - centerX) * zoom + originX;
-      ctx.moveTo(x, 0);
+      const x = worldToOverlay(guide.position, 0, centerX, centerY, zoom, originX, originY).x;
+      ctx.moveTo(x, thickness);
       ctx.lineTo(x, overlay.height);
     } else {
-      const y = (guide.position - centerY) * zoom + originY;
-      ctx.moveTo(0, y);
+      const y = worldToOverlay(0, guide.position, centerX, centerY, zoom, originX, originY).y;
+      ctx.moveTo(thickness, y);
       ctx.lineTo(overlay.width, y);
     }
     ctx.stroke();

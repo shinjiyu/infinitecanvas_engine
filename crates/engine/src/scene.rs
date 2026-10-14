@@ -17,10 +17,13 @@
 //! 场景 JSON 用 `{"type":"group","data":{...}}` 和 `{"type":"text","data":{...}}`。
 //! `parent` / `locked` 在 `props` 里，缺省为根节点和未锁定。文本的光栅字段不进 JSON。
 //! 图片像素在 `assets` 里，元素只存 `asset_id`。
+//! 手动参考线在 `guides` 里，和元素一起进出 JSON，不参与绘制。
 //! 复制、粘贴和克隆在 [`self::clipboard`]：新 ID、子树重映射，图片引用一起带走，并走命令栈。
 use crate::asset::{AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
 use crate::element::{Circle, Element, ElementId, Group, Image, Line, Path, Rectangle, Text};
+use crate::guides::{GuideSnapshot, GuideStore, ManualGuide};
 use crate::scene_tree::{SceneTree, SceneTreeNode};
+use crate::snap::GuideAxis;
 use infinitecanvas_math::{Rect, Transform, Vec2};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -207,6 +210,8 @@ pub struct Scene {
     flags_epoch: u64,
     /// 图片像素。同一张图多次使用只存一份。
     assets: AssetTable,
+    /// 手动参考线。参与 [`PartialEq`] 和 JSON，不参与顶点缓存。
+    guides: GuideStore,
     /// [`Self::remove`] 把引用降到 0 的资源暂存在这里，等撤销栈取走。
     ///
     /// 不参与 [`PartialEq`]，也不写入 JSON。
@@ -244,6 +249,7 @@ impl PartialEq for Scene {
         self.next_id == other.next_id
             && self.elements == other.elements
             && self.assets == other.assets
+            && self.guides == other.guides
     }
 }
 
@@ -259,6 +265,7 @@ impl Scene {
             geometry_epoch: 0,
             flags_epoch: 0,
             assets: AssetTable::new(),
+            guides: GuideStore::default(),
             detached_assets: Vec::new(),
         }
     }
@@ -400,6 +407,7 @@ impl Scene {
             geometry_epoch: 0,
             flags_epoch: 0,
             assets,
+            guides: GuideStore::default(),
             detached_assets: Vec::new(),
         };
         scene.invalidate_geometry();
@@ -732,6 +740,53 @@ impl Scene {
         self.dirty_ids.clear();
         self.assets.clear();
         self.detached_assets.clear();
+        self.guides = GuideStore::default();
+    }
+
+    /// 手动参考线。空场景时也是空集合。
+    pub fn guides(&self) -> &GuideStore {
+        &self.guides
+    }
+
+    /// 新增一条参考线。坐标不是有限数时返回 `None`。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::snap::GuideAxis;
+    /// use infinitecanvas_engine::Scene;
+    ///
+    /// let mut scene = Scene::new();
+    /// let guide = scene.add_guide(GuideAxis::Horizontal, 12.0).unwrap();
+    /// assert_eq!(scene.guides().len(), 1);
+    /// assert_eq!(guide.position, 12.0);
+    /// ```
+    pub fn add_guide(&mut self, axis: GuideAxis, position: f32) -> Option<ManualGuide> {
+        self.guides.add(axis, position)
+    }
+
+    /// 删除一条参考线。
+    pub fn remove_guide(&mut self, id: u64) -> bool {
+        self.guides.remove(id)
+    }
+
+    /// 移动一条参考线。
+    pub fn move_guide(&mut self, id: u64, position: f32) -> bool {
+        self.guides.move_to(id, position)
+    }
+
+    /// 参考线快照，给撤销命令用。
+    pub fn guide_snapshot(&self) -> GuideSnapshot {
+        self.guides.snapshot()
+    }
+
+    /// 用快照替换全部参考线。
+    pub fn restore_guides(&mut self, snapshot: &GuideSnapshot) {
+        self.guides.restore(snapshot);
+    }
+
+    /// 导入 JSON 时写入已经校验过的参考线。
+    pub(crate) fn set_guide_store(&mut self, guides: GuideStore) {
+        self.guides = guides;
     }
 
     /// 获取元素数量
