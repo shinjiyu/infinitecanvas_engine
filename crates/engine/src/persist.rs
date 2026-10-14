@@ -6,7 +6,7 @@
 //! Scene ── to_json ──▶ { version, next_id, elements[] }
 //!                          │  type + data
 //!                          ▼
-//!                     rectangle / circle / image / line / path / text
+//!                     rectangle / circle / image / line / path / text / group
 //! Scene ◀─ from_json ── 缺省字段用 serde default，未知字段忽略
 //! ```
 //!
@@ -63,7 +63,7 @@ pub enum PersistError {
         /// 本引擎接受的版本
         supported: u32,
     },
-    /// 文件里出现了尚未实现的元素种类（例如 `group`）
+    /// 文件里出现了尚未实现的元素种类
     UnknownElementType(String),
     /// 两个元素使用了同一个 ID
     DuplicateId(ElementId),
@@ -246,6 +246,9 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
             text.finish_load();
             Ok(AnyElement::Text(text))
         }
+        "group" => serde_json::from_value(data)
+            .map(AnyElement::Group)
+            .map_err(|err| PersistError::Json(err.to_string())),
         other => Err(PersistError::UnknownElementType(other.to_string())),
     }
 }
@@ -327,7 +330,8 @@ fn export_region_png(
     ordered.sort_by_key(|element| (element.as_element().props().z_index, element.id()));
 
     for element in ordered {
-        if !element.as_element().props().visible {
+        // 组不绘制。隐藏的组会把它的子孙一并跳过。
+        if matches!(element, AnyElement::Group(_)) || !scene.is_effectively_visible(element.id()) {
             continue;
         }
         let Some((x0, y0, x1, y1)) = pixel_span(paint_bounds(element), region, width, height)
@@ -383,9 +387,11 @@ fn paint_bounds(element: &AnyElement) -> Rect {
         AnyElement::Circle(circle) => {
             circle.style.stroke_width.abs() * scale_extent(&circle.props.transform)
         }
-        AnyElement::Line(_) | AnyElement::Path(_) | AnyElement::Image(_) | AnyElement::Text(_) => {
-            0.0
-        }
+        AnyElement::Line(_)
+        | AnyElement::Path(_)
+        | AnyElement::Image(_)
+        | AnyElement::Text(_)
+        | AnyElement::Group(_) => 0.0,
     };
     base.inflate(extra.max(0.0))
 }
@@ -433,6 +439,7 @@ fn sample_element(element: &AnyElement, world: Vec2) -> Option<Color> {
         AnyElement::Line(line) => line.color_at(world),
         AnyElement::Path(path) => path.color_at(world),
         AnyElement::Text(text) => text.color_at(world),
+        AnyElement::Group(_) => None,
     }
 }
 
@@ -925,9 +932,9 @@ mod tests {
 
     #[test]
     fn unknown_element_type_is_rejected() {
-        let json = r#"{"version":1,"elements":[{"type":"group","data":{"props":{"id":1}}}]}"#;
+        let json = r#"{"version":1,"elements":[{"type":"widget","data":{"props":{"id":1}}}]}"#;
         match Scene::from_json(json).unwrap_err() {
-            PersistError::UnknownElementType(kind) => assert_eq!(kind, "group"),
+            PersistError::UnknownElementType(kind) => assert_eq!(kind, "widget"),
             other => panic!("expected unknown type, got {other:?}"),
         }
     }
@@ -1144,6 +1151,43 @@ mod tests {
         );
         viewport.resize(Vec2::new(4.0, 4.0));
         assert!(export_viewport_png(&scene, &viewport).is_ok());
+    }
+
+    #[test]
+    fn json_round_trip_keeps_group_children_parent_and_lock() {
+        let mut scene = Scene::new();
+        let left = scene.next_id();
+        scene.add_rect(Rectangle::new(left, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        let right = scene.next_id();
+        scene.add_rect(Rectangle::new(
+            right,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[left, right]).unwrap();
+        scene
+            .translate_element(group_id, Vec2::new(2.0, -1.0))
+            .unwrap();
+        scene.set_locked(group_id, true);
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"type\":\"group\""));
+        assert!(json.contains("\"children\""));
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(restored, scene);
+        assert_eq!(restored.children_of(group_id), vec![left, right]);
+        assert_eq!(restored.parent_of(right), Some(group_id));
+        assert!(restored.get(group_id).unwrap().as_element().props().locked);
+        assert_eq!(
+            restored
+                .get(left)
+                .unwrap()
+                .as_element()
+                .props()
+                .transform
+                .translation,
+            Vec2::new(2.0, -1.0)
+        );
     }
 
     #[test]

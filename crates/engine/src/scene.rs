@@ -1,14 +1,65 @@
 //! 场景容器
 //!
-//! 管理无限画布上的所有元素
-use crate::element::{Circle, Element, ElementId, Image, Line, Path, Rectangle, Text};
+//! 管理无限画布上的所有元素，以及组的父子关系。
+//!
+//! ```text
+//! Scene
+//!   ├─ roots（parent = None，按 z_index 排序）
+//!   └─ Group
+//!        ├─ leaf（世界变换，含矩形和文本）
+//!        └─ Group
+//!             └─ leaf
+//! ```
+//!
+//! 叶子和组的 `transform` 都是世界变换。移动、旋转或缩放组时，增量写到每个后代上
+//! （文本和矩形同一条路径），并把子树标脏，顶点缓存重写文本纹理四边形。
+//! 场景 JSON 用 `{"type":"group","data":{...}}` 和 `{"type":"text","data":{...}}`。
+//! `parent` / `locked` 在 `props` 里，缺省为根节点和未锁定。文本的光栅字段不进 JSON。
+use crate::element::{Circle, Element, ElementId, Group, Image, Line, Path, Rectangle, Text};
+use crate::scene_tree::{SceneTree, SceneTreeNode};
+use infinitecanvas_math::{Transform, Vec2};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
+/// 成组、解散、进组、出组失败的原因。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupError {
+    /// 至少需要两个元素
+    NeedAtLeastTwo,
+    /// 场景里没有这个元素
+    UnknownElement(ElementId),
+    /// 期望一个组
+    NotAGroup(ElementId),
+    /// 元素不在任何组里
+    NotInGroup(ElementId),
+    /// 选中的元素不在同一个父节点下
+    DifferentParents,
+    /// 会把祖先放进自己的子孙里
+    WouldCycle,
+    /// 元素或它的祖先被锁定
+    Locked(ElementId),
+}
+
+impl std::fmt::Display for GroupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NeedAtLeastTwo => write!(f, "成组至少需要两个元素"),
+            Self::UnknownElement(id) => write!(f, "元素 {id} 不存在"),
+            Self::NotAGroup(id) => write!(f, "元素 {id} 不是组"),
+            Self::NotInGroup(id) => write!(f, "元素 {id} 不在组内"),
+            Self::DifferentParents => write!(f, "元素不在同一个父节点下"),
+            Self::WouldCycle => write!(f, "操作会形成环"),
+            Self::Locked(id) => write!(f, "元素 {id} 已锁定"),
+        }
+    }
+}
+
+impl std::error::Error for GroupError {}
+
 /// 元素枚举（支持不同类型元素）
 ///
-/// JSON 使用 `{"type":"line","data":{...}}` 这种相邻标签。
-/// `type` 为小写的 `rectangle`、`circle`、`image`、`line`、`path`、`text`。
+/// JSON 使用 `{"type":"text","data":{...}}` 这种相邻标签。
+/// `type` 为小写的 `rectangle`、`circle`、`image`、`line`、`path`、`text`、`group`。
 /// 反序列化时未知字段会被忽略；缺省的可选字段使用各结构体的 serde 默认值。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "lowercase")]
@@ -19,6 +70,7 @@ pub enum AnyElement {
     Line(Line),
     Path(Path),
     Text(Text),
+    Group(Group),
 }
 
 impl AnyElement {
@@ -30,7 +82,24 @@ impl AnyElement {
             AnyElement::Image(i) => i.props().id,
             AnyElement::Line(line) => line.props().id,
             AnyElement::Path(path) => path.props().id,
-            AnyElement::Text(t) => t.props().id,
+            AnyElement::Text(text) => text.props().id,
+            AnyElement::Group(group) => group.props().id,
+        }
+    }
+
+    /// 如果这是一个组，返回组数据。
+    pub fn as_group(&self) -> Option<&Group> {
+        match self {
+            AnyElement::Group(group) => Some(group),
+            _ => None,
+        }
+    }
+
+    /// 如果这是一个组，返回可变组数据。
+    pub fn as_group_mut(&mut self) -> Option<&mut Group> {
+        match self {
+            AnyElement::Group(group) => Some(group),
+            _ => None,
         }
     }
 
@@ -42,7 +111,8 @@ impl AnyElement {
             AnyElement::Image(i) => i,
             AnyElement::Line(line) => line,
             AnyElement::Path(path) => path,
-            AnyElement::Text(t) => t,
+            AnyElement::Text(text) => text,
+            AnyElement::Group(group) => group,
         }
     }
 
@@ -54,7 +124,8 @@ impl AnyElement {
             AnyElement::Image(i) => i,
             AnyElement::Line(line) => line,
             AnyElement::Path(path) => path,
-            AnyElement::Text(t) => t,
+            AnyElement::Text(text) => text,
+            AnyElement::Group(group) => group,
         }
     }
 }
@@ -277,13 +348,33 @@ impl Scene {
         self.insert_element(element)
     }
 
-    /// 移除元素
+    /// 移除元素。如果它是组，连同整棵子树一起删除。
+    ///
+    /// 只想去掉组、留下子元素时用 [`Scene::ungroup`]。
+    /// 返回被删除的根元素；子孙从场景中丢弃。
     pub fn remove(&mut self, id: ElementId) -> Option<AnyElement> {
-        let removed = self.elements.remove(&id);
-        if removed.is_some() {
+        if !self.elements.contains_key(&id) {
+            return None;
+        }
+        let parent = self.parent_id(id);
+        let ids = self.subtree_ids(id);
+        self.detach_from_parent(id);
+        let mut root = None;
+        for (index, element_id) in ids.into_iter().enumerate() {
+            self.dirty_ids.remove(&element_id);
+            if let Some(element) = self.elements.remove(&element_id) {
+                if index == 0 {
+                    root = Some(element);
+                }
+            }
+        }
+        if root.is_some() {
             self.structure_epoch = self.structure_epoch.wrapping_add(1);
         }
-        removed
+        if let Some(parent_id) = parent {
+            self.recompute_group_bounds(parent_id);
+        }
+        root
     }
 
     /// 获取元素
@@ -333,17 +424,729 @@ impl Scene {
     }
 
     /// 查找指定位置的元素（从上到下）
-    pub fn find_at(&self, point: infinitecanvas_math::Vec2) -> Option<ElementId> {
+    ///
+    /// 组本身不接点击。祖先被隐藏的元素也不会被点中。
+    pub fn find_at(&self, point: Vec2) -> Option<ElementId> {
         let mut elements = self.elements_sorted();
         elements.reverse(); // 从顶层开始查找
 
         for element in elements {
+            if !self.is_effectively_visible(element.id()) {
+                continue;
+            }
             if element.as_element().contains_point(point) {
                 return Some(element.id());
             }
         }
 
         None
+    }
+
+    /// 把至少两个同一父节点下的元素收成一个组。
+    ///
+    /// 子元素留在场景里，世界坐标不变。组的平移放在子内容包围盒中心。
+    ///
+    /// # 参数
+    /// - `ids`: 要成组的元素，顺序会变成组内顺序
+    ///
+    /// # 返回
+    /// 新组的 ID
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene};
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0)));
+    /// scene.add_rect(Rectangle::new(2, Vec2::new(40.0, 0.0), Vec2::new(10.0, 10.0)));
+    /// let group_id = scene.group(&[1, 2]).unwrap();
+    /// scene.translate_element(group_id, Vec2::new(5.0, 0.0)).unwrap();
+    /// let moved = scene.get(1).unwrap().as_element().props().transform.translation;
+    /// assert_eq!(moved, Vec2::new(5.0, 0.0));
+    /// let children = scene.ungroup(group_id).unwrap();
+    /// assert_eq!(children, vec![1, 2]);
+    /// assert!(scene.contains(1) && scene.contains(2));
+    /// assert!(!scene.contains(group_id));
+    /// ```
+    pub fn group(&mut self, ids: &[ElementId]) -> Result<ElementId, GroupError> {
+        let members = self.normalize_members(ids)?;
+        let parent = self.parent_id(members[0]);
+        for id in &members[1..] {
+            if self.parent_id(*id) != parent {
+                return Err(GroupError::DifferentParents);
+            }
+        }
+        for id in &members {
+            if self.member_contains_another(*id, &members) {
+                return Err(GroupError::WouldCycle);
+            }
+        }
+
+        let insert_at = parent
+            .and_then(|parent_id| self.child_index(parent_id, &members))
+            .unwrap_or(0);
+        let z_index = members
+            .iter()
+            .filter_map(|id| {
+                self.elements
+                    .get(id)
+                    .map(|element| element.as_element().props().z_index)
+            })
+            .max()
+            .unwrap_or(0);
+
+        for id in &members {
+            self.detach_from_parent(*id);
+        }
+
+        let group_id = self.alloc_id();
+        let mut group = Group::new(group_id);
+        group.props.z_index = z_index;
+        group.props.parent = parent;
+        group.children = members.clone();
+        self.elements.insert(group_id, AnyElement::Group(group));
+        for id in &members {
+            self.set_parent(*id, Some(group_id));
+        }
+        if let Some(parent_id) = parent {
+            self.insert_child(parent_id, group_id, insert_at);
+        }
+        self.place_new_group_frame(group_id);
+        self.refresh_bounds_upwards(group_id);
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        Ok(group_id)
+    }
+
+    /// 解散组。组节点被删除，子元素留在场景中，世界坐标不变，并提升到组原来的父节点。
+    ///
+    /// # 返回
+    /// 原来的直接子元素 ID，顺序与组内一致。
+    pub fn ungroup(&mut self, group_id: ElementId) -> Result<Vec<ElementId>, GroupError> {
+        self.ensure_editable(group_id)?;
+        let children = self.group_children(group_id)?;
+        let parent = self.parent_id(group_id);
+        let index = parent
+            .and_then(|parent_id| {
+                self.group_child_ids(parent_id)
+                    .iter()
+                    .position(|id| *id == group_id)
+            })
+            .unwrap_or(0);
+
+        self.detach_from_parent(group_id);
+        self.elements.remove(&group_id);
+        self.dirty_ids.remove(&group_id);
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        for (offset, child_id) in children.iter().enumerate() {
+            if !self.elements.contains_key(child_id) {
+                continue;
+            }
+            self.set_parent(*child_id, parent);
+            if let Some(parent_id) = parent {
+                self.insert_child(parent_id, *child_id, index + offset);
+            }
+        }
+        if let Some(parent_id) = parent {
+            self.refresh_bounds_upwards(parent_id);
+        }
+        Ok(children)
+    }
+
+    /// 把元素放进组。世界坐标保持不变。
+    ///
+    /// # 参数
+    /// - `element_id`: 要移入的元素，可以是叶子或另一个组
+    /// - `group_id`: 目标组
+    pub fn enter_group(
+        &mut self,
+        element_id: ElementId,
+        group_id: ElementId,
+    ) -> Result<(), GroupError> {
+        self.ensure_known(element_id)?;
+        self.group_children(group_id)?;
+        if element_id == group_id || self.is_ancestor(element_id, group_id) {
+            return Err(GroupError::WouldCycle);
+        }
+        self.ensure_editable(element_id)?;
+        self.ensure_editable(group_id)?;
+        if self.parent_id(element_id) == Some(group_id) {
+            return Ok(());
+        }
+        let old_parent = self.parent_id(element_id);
+        self.detach_from_parent(element_id);
+        self.set_parent(element_id, Some(group_id));
+        self.insert_child(group_id, element_id, usize::MAX);
+        if let Some(old_parent) = old_parent {
+            self.recompute_group_bounds(old_parent);
+        }
+        self.refresh_bounds_upwards(group_id);
+        Ok(())
+    }
+
+    /// 把元素移出它所在的组，挂到组的父节点（没有则回到根）。世界坐标不变。
+    pub fn leave_group(&mut self, element_id: ElementId) -> Result<(), GroupError> {
+        self.ensure_known(element_id)?;
+        let parent = self
+            .parent_id(element_id)
+            .ok_or(GroupError::NotInGroup(element_id))?;
+        self.group_children(parent)?;
+        self.ensure_editable(element_id)?;
+        let grandparent = self.parent_id(parent);
+        let insert_at = grandparent
+            .and_then(|grandparent_id| {
+                self.group_child_ids(grandparent_id)
+                    .iter()
+                    .position(|id| *id == parent)
+                    .map(|index| index + 1)
+            })
+            .unwrap_or(0);
+        self.detach_from_parent(element_id);
+        self.set_parent(element_id, grandparent);
+        if let Some(grandparent_id) = grandparent {
+            self.insert_child(grandparent_id, element_id, insert_at);
+        }
+        self.recompute_group_bounds(parent);
+        if let Some(grandparent_id) = grandparent {
+            self.refresh_bounds_upwards(grandparent_id);
+        }
+        Ok(())
+    }
+
+    /// 平移元素。目标是组时，所有后代的世界平移加上同一个 `delta`。
+    ///
+    /// 子树上每个元素都会 [`Scene::mark_dirty`]，顶点缓存只重写这些元素。
+    pub fn translate_element(&mut self, id: ElementId, delta: Vec2) -> Result<(), GroupError> {
+        self.ensure_editable(id)?;
+        if delta == Vec2::ZERO {
+            return Ok(());
+        }
+        for element_id in self.subtree_ids(id) {
+            if let Some(element) = self.elements.get_mut(&element_id) {
+                element
+                    .as_element_mut()
+                    .props_mut()
+                    .transform
+                    .translate(delta);
+            }
+        }
+        self.refresh_bounds_upwards(id);
+        self.mark_subtree_dirty(id);
+        Ok(())
+    }
+
+    /// 平移一批元素。列表里如果同时有组和它的子孙，子孙只跟着组走一次。
+    pub fn translate_ids(&mut self, ids: &[ElementId], delta: Vec2) {
+        if delta == Vec2::ZERO {
+            return;
+        }
+        let selected: HashSet<ElementId> = ids
+            .iter()
+            .copied()
+            .filter(|id| self.elements.contains_key(id))
+            .collect();
+        for id in ids {
+            if !selected.contains(id) || self.has_ancestor_in(*id, &selected) {
+                continue;
+            }
+            let _ = self.translate_element(*id, delta);
+        }
+    }
+
+    /// 设置元素的世界变换。目标是组时，后代按 `new = to * inverse(from) * child` 跟着变。
+    ///
+    /// 与 #7 的缩放 / 旋转手柄共用这一条：手柄算出组的新变换后写回来，子元素世界坐标保持相对关系。
+    /// 子树会被标脏，顶点缓存按元素重生成。
+    pub fn set_world_transform(
+        &mut self,
+        id: ElementId,
+        new_transform: Transform,
+    ) -> Result<(), GroupError> {
+        self.ensure_editable(id)?;
+        let old = self
+            .elements
+            .get(&id)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform;
+        if old == new_transform {
+            return Ok(());
+        }
+        let descendants = self.descendant_ids(id);
+        let mut updates = Vec::with_capacity(descendants.len());
+        for descendant_id in descendants {
+            let current = self
+                .elements
+                .get(&descendant_id)
+                .unwrap()
+                .as_element()
+                .props()
+                .transform;
+            updates.push((descendant_id, current.rebase_between(old, new_transform)));
+        }
+        for (descendant_id, transform) in updates {
+            if let Some(element) = self.elements.get_mut(&descendant_id) {
+                element.as_element_mut().props_mut().transform = transform;
+            }
+        }
+        if let Some(element) = self.elements.get_mut(&id) {
+            element.as_element_mut().props_mut().transform = new_transform;
+        }
+        self.refresh_bounds_upwards(id);
+        self.mark_subtree_dirty(id);
+        Ok(())
+    }
+
+    /// 写入一批世界变换。某个元素的子孙也在列表里时，不再把组的增量重复套到这些子孙上
+    /// （#7 多选时已经为每个元素算好了绝对变换）。
+    pub fn apply_world_transforms(&mut self, states: &[(ElementId, Transform)]) {
+        let selected: HashSet<ElementId> = states
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| self.elements.contains_key(id))
+            .collect();
+        for (id, transform) in states {
+            if !selected.contains(id) || self.lock_blocker(*id).is_some() {
+                continue;
+            }
+            if self.has_selected_descendant(*id, &selected) {
+                self.write_transform(*id, *transform);
+                self.refresh_bounds_upwards(*id);
+                self.mark_dirty(*id);
+            } else {
+                let _ = self.set_world_transform(*id, *transform);
+            }
+        }
+    }
+
+    /// 父元素。不在场景里或挂在根上时返回 `None`。
+    pub fn parent_of(&self, id: ElementId) -> Option<ElementId> {
+        self.parent_id(id)
+    }
+
+    /// 直接子元素。不是组时返回空列表。
+    pub fn children_of(&self, id: ElementId) -> Vec<ElementId> {
+        self.group_child_ids(id)
+    }
+
+    /// 元素自己加上全部后代，前序。
+    pub fn subtree_ids(&self, id: ElementId) -> Vec<ElementId> {
+        let mut ids = Vec::new();
+        self.collect_subtree(id, &mut ids);
+        ids
+    }
+
+    /// 自己和祖先都可见时返回 true。
+    pub fn is_effectively_visible(&self, id: ElementId) -> bool {
+        let mut current = Some(id);
+        while let Some(element_id) = current {
+            let Some(element) = self.elements.get(&element_id) else {
+                return false;
+            };
+            if !element.as_element().props().visible {
+                return false;
+            }
+            current = element.as_element().props().parent;
+        }
+        true
+    }
+
+    /// 设置可见性。隐藏组不会改子元素自己的标志，但命中和绘制会把子孙一并跳过。
+    ///
+    /// 子树会被标脏，这样隐藏或重新显示后顶点缓存会丢掉或写回子孙的三角形。
+    pub fn set_visible(&mut self, id: ElementId, visible: bool) -> bool {
+        if !self.elements.contains_key(&id) {
+            return false;
+        }
+        if let Some(element) = self.elements.get_mut(&id) {
+            element.as_element_mut().props_mut().visible = visible;
+        }
+        self.mark_subtree_dirty(id);
+        true
+    }
+
+    /// 设置锁定。解锁也走这里，因此不再检查当前是否已锁定。
+    pub fn set_locked(&mut self, id: ElementId, locked: bool) -> bool {
+        if let Some(element) = self.elements.get_mut(&id) {
+            element.as_element_mut().props_mut().locked = locked;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 导出大纲面板用的场景树：根 → 组 → 叶子，带可见性和锁定。
+    pub fn scene_tree(&self) -> SceneTree {
+        let mut roots: Vec<ElementId> = self
+            .elements
+            .keys()
+            .copied()
+            .filter(|id| self.parent_id(*id).is_none())
+            .collect();
+        roots.sort_by_key(|id| {
+            let element = self.elements.get(id).unwrap().as_element();
+            (element.props().z_index, *id)
+        });
+        let mut visiting = HashSet::new();
+        let nodes = roots
+            .into_iter()
+            .filter_map(|id| self.build_tree_node(id, &mut visiting))
+            .collect();
+        SceneTree { roots: nodes }
+    }
+
+    fn normalize_members(&self, ids: &[ElementId]) -> Result<Vec<ElementId>, GroupError> {
+        let mut members = Vec::new();
+        for id in ids {
+            if members.contains(id) {
+                continue;
+            }
+            self.ensure_editable(*id)?;
+            members.push(*id);
+        }
+        if members.len() < 2 {
+            return Err(GroupError::NeedAtLeastTwo);
+        }
+        Ok(members)
+    }
+
+    fn ensure_known(&self, id: ElementId) -> Result<(), GroupError> {
+        if self.elements.contains_key(&id) {
+            Ok(())
+        } else {
+            Err(GroupError::UnknownElement(id))
+        }
+    }
+
+    fn ensure_editable(&self, id: ElementId) -> Result<(), GroupError> {
+        self.ensure_known(id)?;
+        if let Some(locked_id) = self.lock_blocker(id) {
+            Err(GroupError::Locked(locked_id))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn lock_blocker(&self, id: ElementId) -> Option<ElementId> {
+        let mut current = Some(id);
+        while let Some(element_id) = current {
+            let element = self.elements.get(&element_id)?;
+            if element.as_element().props().locked {
+                return Some(element_id);
+            }
+            current = element.as_element().props().parent;
+        }
+        None
+    }
+
+    fn parent_id(&self, id: ElementId) -> Option<ElementId> {
+        self.elements
+            .get(&id)
+            .and_then(|element| element.as_element().props().parent)
+    }
+
+    fn set_parent(&mut self, id: ElementId, parent: Option<ElementId>) {
+        if let Some(element) = self.elements.get_mut(&id) {
+            element.as_element_mut().props_mut().parent = parent;
+        }
+    }
+
+    fn group_child_ids(&self, id: ElementId) -> Vec<ElementId> {
+        self.elements
+            .get(&id)
+            .and_then(AnyElement::as_group)
+            .map(|group| group.children.clone())
+            .unwrap_or_default()
+    }
+
+    fn group_children(&self, id: ElementId) -> Result<Vec<ElementId>, GroupError> {
+        match self.elements.get(&id) {
+            Some(AnyElement::Group(group)) => Ok(group.children.clone()),
+            Some(_) => Err(GroupError::NotAGroup(id)),
+            None => Err(GroupError::UnknownElement(id)),
+        }
+    }
+
+    fn child_index(&self, parent_id: ElementId, members: &[ElementId]) -> Option<usize> {
+        self.group_child_ids(parent_id)
+            .iter()
+            .position(|id| members.contains(id))
+    }
+
+    fn insert_child(&mut self, group_id: ElementId, child_id: ElementId, index: usize) {
+        if let Some(group) = self
+            .elements
+            .get_mut(&group_id)
+            .and_then(AnyElement::as_group_mut)
+        {
+            if !group.children.contains(&child_id) {
+                let index = index.min(group.children.len());
+                group.children.insert(index, child_id);
+            }
+        }
+    }
+
+    fn detach_from_parent(&mut self, id: ElementId) {
+        if let Some(parent_id) = self.parent_id(id) {
+            if let Some(group) = self
+                .elements
+                .get_mut(&parent_id)
+                .and_then(AnyElement::as_group_mut)
+            {
+                group.children.retain(|child| *child != id);
+            }
+        }
+        self.set_parent(id, None);
+    }
+
+    fn member_contains_another(&self, id: ElementId, members: &[ElementId]) -> bool {
+        let mut current = self.parent_id(id);
+        while let Some(parent_id) = current {
+            if members.contains(&parent_id) {
+                return true;
+            }
+            current = self.parent_id(parent_id);
+        }
+        false
+    }
+
+    fn is_ancestor(&self, ancestor: ElementId, node: ElementId) -> bool {
+        let mut current = self.parent_id(node);
+        while let Some(parent_id) = current {
+            if parent_id == ancestor {
+                return true;
+            }
+            current = self.parent_id(parent_id);
+        }
+        false
+    }
+
+    fn has_ancestor_in(&self, id: ElementId, set: &HashSet<ElementId>) -> bool {
+        let mut current = self.parent_id(id);
+        while let Some(parent_id) = current {
+            if set.contains(&parent_id) {
+                return true;
+            }
+            current = self.parent_id(parent_id);
+        }
+        false
+    }
+
+    fn has_selected_descendant(&self, id: ElementId, set: &HashSet<ElementId>) -> bool {
+        self.descendant_ids(id)
+            .iter()
+            .any(|descendant| set.contains(descendant))
+    }
+
+    fn descendant_ids(&self, id: ElementId) -> Vec<ElementId> {
+        let mut ids = Vec::new();
+        for child_id in self.group_child_ids(id) {
+            self.collect_subtree(child_id, &mut ids);
+        }
+        ids
+    }
+
+    fn collect_subtree(&self, id: ElementId, out: &mut Vec<ElementId>) {
+        if !self.elements.contains_key(&id) || out.contains(&id) {
+            return;
+        }
+        out.push(id);
+        for child_id in self.group_child_ids(id) {
+            self.collect_subtree(child_id, out);
+        }
+    }
+
+    fn alloc_id(&mut self) -> ElementId {
+        while self.next_id == 0 || self.elements.contains_key(&self.next_id) {
+            self.next_id = self.next_id.wrapping_add(1);
+            if self.next_id == 0 {
+                self.next_id = 1;
+            }
+        }
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        if self.next_id == 0 {
+            self.next_id = 1;
+        }
+        id
+    }
+
+    /// 把元素和它的全部后代放进脏队列。
+    fn mark_subtree_dirty(&mut self, id: ElementId) {
+        let ids = self.subtree_ids(id);
+        for element_id in ids {
+            self.mark_dirty(element_id);
+        }
+    }
+
+    fn write_transform(&mut self, id: ElementId, transform: Transform) {
+        if let Some(element) = self.elements.get_mut(&id) {
+            element.as_element_mut().props_mut().transform = transform;
+        }
+    }
+
+    fn place_new_group_frame(&mut self, group_id: ElementId) {
+        let children = self.group_child_ids(group_id);
+        let center = self.union_center(&children);
+        self.write_transform(group_id, Transform::from_translation(center));
+        self.recompute_group_bounds(group_id);
+    }
+
+    fn union_center(&self, ids: &[ElementId]) -> Vec2 {
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        let mut any = false;
+        for id in ids {
+            let Some(element) = self.elements.get(id) else {
+                continue;
+            };
+            let bounds = element.as_element().world_bounds();
+            any = true;
+            min_x = min_x.min(bounds.x);
+            min_y = min_y.min(bounds.y);
+            max_x = max_x.max(bounds.right());
+            max_y = max_y.max(bounds.bottom());
+        }
+        if !any {
+            return Vec2::ZERO;
+        }
+        Vec2::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5)
+    }
+
+    fn refresh_bounds_upwards(&mut self, start: ElementId) {
+        let mut chain = Vec::new();
+        let mut current = Some(start);
+        while let Some(element_id) = current {
+            chain.push(element_id);
+            current = self.parent_id(element_id);
+        }
+        for element_id in chain {
+            self.recompute_group_bounds(element_id);
+        }
+    }
+
+    /// 用子元素的世界角点重算组的局部包围盒，并把组原点放到内容中心。
+    /// 只改组自己的变换，不移动子元素。
+    fn recompute_group_bounds(&mut self, group_id: ElementId) {
+        let children = self.group_child_ids(group_id);
+        if children.is_empty()
+            && self
+                .elements
+                .get(&group_id)
+                .and_then(AnyElement::as_group)
+                .is_none()
+        {
+            return;
+        }
+        if self
+            .elements
+            .get(&group_id)
+            .and_then(AnyElement::as_group)
+            .is_none()
+        {
+            return;
+        }
+        let transform = self
+            .elements
+            .get(&group_id)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform;
+        if !transform.is_invertible() {
+            return;
+        }
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        let mut any = false;
+        for child_id in &children {
+            for corner in self.world_corners(*child_id) {
+                let local = transform.inverse_transform_point(corner);
+                any = true;
+                min_x = min_x.min(local.x);
+                min_y = min_y.min(local.y);
+                max_x = max_x.max(local.x);
+                max_y = max_y.max(local.y);
+            }
+        }
+        let (local_bounds, translation) = if any {
+            let center = Vec2::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
+            let width = (max_x - min_x).max(0.0);
+            let height = (max_y - min_y).max(0.0);
+            let bounds =
+                infinitecanvas_math::Rect::new(min_x - center.x, min_y - center.y, width, height);
+            let translation = if center.length_squared() > 1e-10 {
+                transform.transform_point(center)
+            } else {
+                transform.translation
+            };
+            (bounds, translation)
+        } else {
+            (
+                infinitecanvas_math::Rect::new(0.0, 0.0, 0.0, 0.0),
+                transform.translation,
+            )
+        };
+        if let Some(group) = self
+            .elements
+            .get_mut(&group_id)
+            .and_then(AnyElement::as_group_mut)
+        {
+            group.local_bounds = local_bounds;
+            group.props.transform.translation = translation;
+        }
+    }
+
+    fn world_corners(&self, id: ElementId) -> [Vec2; 4] {
+        let Some(element) = self.elements.get(&id) else {
+            return [Vec2::ZERO; 4];
+        };
+        let local = element.as_element().local_bounds();
+        let transform = element.as_element().props().transform;
+        let min = local.min();
+        let max = local.max();
+        [
+            transform.transform_point(min),
+            transform.transform_point(Vec2::new(max.x, min.y)),
+            transform.transform_point(max),
+            transform.transform_point(Vec2::new(min.x, max.y)),
+        ]
+    }
+
+    fn build_tree_node(
+        &self,
+        id: ElementId,
+        visiting: &mut HashSet<ElementId>,
+    ) -> Option<SceneTreeNode> {
+        if !visiting.insert(id) {
+            return None;
+        }
+        let props = self.elements.get(&id)?.as_element().props().clone();
+        let element_type = self.elements.get(&id)?.as_element().type_name().to_string();
+        let parent_id = props.parent;
+        let visible = props.visible;
+        let locked = props.locked;
+        let z_index = props.z_index;
+        let children = self
+            .group_child_ids(id)
+            .into_iter()
+            .filter_map(|child_id| self.build_tree_node(child_id, visiting))
+            .collect();
+        visiting.remove(&id);
+        Some(SceneTreeNode {
+            id,
+            element_type,
+            parent_id,
+            visible,
+            locked,
+            z_index,
+            children,
+        })
     }
 }
 
@@ -425,5 +1228,312 @@ mod tests {
         assert_eq!(scene.next_id(), 1);
         assert_eq!(scene.next_id(), 2);
         assert_eq!(scene.next_id(), 3);
+    }
+
+    fn rect(id: ElementId, center: Vec2) -> Rectangle {
+        Rectangle::new(id, center, Vec2::new(10.0, 10.0))
+    }
+
+    fn translation(scene: &Scene, id: ElementId) -> Vec2 {
+        scene
+            .get(id)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform
+            .translation
+    }
+
+    fn approx(actual: Vec2, expected: Vec2) {
+        assert!(
+            (actual - expected).length() < 1e-3,
+            "actual {actual:?} expected {expected:?}"
+        );
+    }
+
+    #[test]
+    fn group_then_ungroup_keeps_children_in_the_scene() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::new(0.0, 0.0)));
+        scene.add_rect(rect(2, Vec2::new(100.0, 0.0)));
+        assert!(matches!(scene.group(&[1]), Err(GroupError::NeedAtLeastTwo)));
+
+        let group_id = scene.group(&[2, 1]).unwrap();
+        assert_eq!(scene.count(), 3);
+        assert_eq!(scene.children_of(group_id), vec![2, 1]);
+        assert_eq!(scene.parent_of(1), Some(group_id));
+        assert_eq!(scene.parent_of(2), Some(group_id));
+        assert!(scene.parent_of(group_id).is_none());
+        approx(translation(&scene, 1), Vec2::new(0.0, 0.0));
+        approx(translation(&scene, 2), Vec2::new(100.0, 0.0));
+
+        let children = scene.ungroup(group_id).unwrap();
+        assert_eq!(children, vec![2, 1]);
+        assert!(!scene.contains(group_id));
+        assert!(scene.contains(1) && scene.contains(2));
+        assert_eq!(scene.count(), 2);
+        assert!(scene.parent_of(1).is_none());
+        approx(translation(&scene, 2), Vec2::new(100.0, 0.0));
+    }
+
+    #[test]
+    fn translating_a_group_updates_child_world_coordinates() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::new(0.0, 0.0)));
+        scene.add_rect(rect(2, Vec2::new(100.0, 0.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+
+        scene
+            .translate_element(group_id, Vec2::new(15.0, -4.0))
+            .unwrap();
+        approx(translation(&scene, group_id), Vec2::new(65.0, -4.0));
+        approx(translation(&scene, 1), Vec2::new(15.0, -4.0));
+        approx(translation(&scene, 2), Vec2::new(115.0, -4.0));
+
+        let point = Vec2::new(15.0, -4.0);
+        assert_eq!(scene.find_at(point), Some(1));
+        assert_eq!(
+            crate::hit_test::hit_test_point(
+                &scene,
+                point,
+                &crate::hit_test::HitTestOptions::default()
+            )
+            .first()
+            .map(|hit| hit.id),
+            Some(1)
+        );
+        assert!(scene.find_at(Vec2::ZERO).is_none());
+    }
+
+    #[test]
+    fn rotating_and_scaling_a_group_keeps_children_in_the_group_frame() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(100.0, 0.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let center = translation(&scene, group_id);
+        approx(center, Vec2::new(50.0, 0.0));
+
+        let mut rotated = Transform::from_translation(center);
+        rotated.rotation = std::f32::consts::FRAC_PI_2;
+        scene.set_world_transform(group_id, rotated).unwrap();
+        approx(translation(&scene, 1), Vec2::new(50.0, -50.0));
+        approx(translation(&scene, 2), Vec2::new(50.0, 50.0));
+        let child_rotation = scene
+            .get(2)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform
+            .rotation;
+        assert!((child_rotation - std::f32::consts::FRAC_PI_2).abs() < 1e-3);
+
+        scene
+            .set_world_transform(group_id, Transform::from_translation(center))
+            .unwrap();
+        approx(translation(&scene, 1), Vec2::ZERO);
+        approx(translation(&scene, 2), Vec2::new(100.0, 0.0));
+
+        let mut scaled = Transform::from_translation(center);
+        scaled.scale = Vec2::splat(2.0);
+        scene.set_world_transform(group_id, scaled).unwrap();
+        approx(translation(&scene, 1), Vec2::new(-50.0, 0.0));
+        approx(translation(&scene, 2), Vec2::new(150.0, 0.0));
+    }
+
+    #[test]
+    fn scene_tree_walks_root_group_then_leaves() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(40.0, 0.0)));
+        scene.add_circle(Circle::new(3, Vec2::new(200.0, 0.0), 8.0));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene.set_locked(group_id, true);
+        scene.set_visible(1, false);
+
+        let tree = scene.scene_tree();
+        assert_eq!(tree.roots.len(), 2);
+        let group = tree.roots.iter().find(|node| node.id == group_id).unwrap();
+        assert_eq!(group.element_type, "Group");
+        assert!(group.parent_id.is_none());
+        assert!(group.locked);
+        assert!(group.visible);
+        assert_eq!(group.children.len(), 2);
+        assert_eq!(group.children[0].id, 1);
+        assert_eq!(group.children[0].parent_id, Some(group_id));
+        assert!(!group.children[0].visible);
+        assert_eq!(group.children[1].id, 2);
+        assert!(group.children[1].children.is_empty());
+        assert!(tree
+            .roots
+            .iter()
+            .any(|node| node.id == 3 && node.element_type == "Circle"));
+
+        let json = serde_json::to_string(&tree).unwrap();
+        let back: SceneTree = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, tree);
+    }
+
+    #[test]
+    fn element_props_without_hierarchy_fields_still_deserialize() {
+        let json = r#"{
+            "id": 4,
+            "transform": {"translation": [1.0, 2.0], "rotation": 0.0, "scale": [1.0, 1.0]},
+            "visible": true,
+            "selected": false,
+            "z_index": 3
+        }"#;
+        let props: crate::element::ElementProps = serde_json::from_str(json).unwrap();
+        assert_eq!(props.id, 4);
+        assert!(props.parent.is_none());
+        assert!(!props.locked);
+        assert_eq!(props.z_index, 3);
+    }
+
+    #[test]
+    fn scene_json_round_trip_keeps_group_children_and_parent() {
+        let mut scene = Scene::new();
+        let left = scene.next_id();
+        scene.add_rect(rect(left, Vec2::ZERO));
+        let right = scene.next_id();
+        scene.add_rect(rect(right, Vec2::new(20.0, 0.0)));
+        let group_id = scene.group(&[left, right]).unwrap();
+        scene
+            .translate_element(group_id, Vec2::new(3.0, 4.0))
+            .unwrap();
+        scene.set_locked(group_id, true);
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"type\":\"group\""));
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(restored, scene);
+        assert_eq!(restored.children_of(group_id), vec![left, right]);
+        assert_eq!(restored.parent_of(left), Some(group_id));
+        assert!(restored.get(group_id).unwrap().as_element().props().locked);
+        assert_eq!(
+            restored
+                .get(left)
+                .unwrap()
+                .as_element()
+                .props()
+                .transform
+                .translation,
+            Vec2::new(3.0, 4.0)
+        );
+        assert_eq!(restored.to_json().unwrap(), json);
+    }
+
+    #[test]
+    fn enter_and_leave_group_preserve_world_position() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(30.0, 0.0)));
+        scene.add_rect(rect(3, Vec2::new(80.0, 10.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene.enter_group(3, group_id).unwrap();
+        assert_eq!(scene.children_of(group_id), vec![1, 2, 3]);
+        approx(translation(&scene, 3), Vec2::new(80.0, 10.0));
+
+        scene.leave_group(3).unwrap();
+        assert!(scene.parent_of(3).is_none());
+        assert_eq!(scene.children_of(group_id), vec![1, 2]);
+        approx(translation(&scene, 3), Vec2::new(80.0, 10.0));
+        assert!(matches!(
+            scene.leave_group(3),
+            Err(GroupError::NotInGroup(3))
+        ));
+    }
+
+    #[test]
+    fn nested_group_translation_moves_grandchildren() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(20.0, 0.0)));
+        scene.add_rect(rect(3, Vec2::new(80.0, 0.0)));
+        let inner = scene.group(&[1, 2]).unwrap();
+        let outer = scene.group(&[inner, 3]).unwrap();
+        scene
+            .translate_element(outer, Vec2::new(0.0, 10.0))
+            .unwrap();
+        approx(translation(&scene, 1), Vec2::new(0.0, 10.0));
+        approx(translation(&scene, 2), Vec2::new(20.0, 10.0));
+        approx(translation(&scene, 3), Vec2::new(80.0, 10.0));
+        approx(translation(&scene, inner), Vec2::new(10.0, 10.0));
+        let tree = scene.scene_tree();
+        assert_eq!(tree.roots.len(), 1);
+        assert_eq!(tree.roots[0].id, outer);
+        assert_eq!(tree.roots[0].children[0].id, inner);
+        assert_eq!(tree.roots[0].children[0].children.len(), 2);
+    }
+
+    #[test]
+    fn hidden_group_is_not_hit_and_locked_group_does_not_move() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(40.0, 0.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene.set_visible(group_id, false);
+        assert!(scene.find_at(Vec2::ZERO).is_none());
+        assert!(!scene.is_effectively_visible(1));
+
+        scene.set_visible(group_id, true);
+        scene.set_locked(group_id, true);
+        assert!(matches!(
+            scene.translate_element(group_id, Vec2::new(5.0, 0.0)),
+            Err(GroupError::Locked(_))
+        ));
+        approx(translation(&scene, 1), Vec2::ZERO);
+        assert!(matches!(
+            scene.translate_element(1, Vec2::new(5.0, 0.0)),
+            Err(GroupError::Locked(locked)) if locked == group_id
+        ));
+    }
+
+    #[test]
+    fn move_command_undo_restores_grouped_children() {
+        use crate::command::{Command, MoveCommand};
+
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::new(10.0, 10.0)));
+        scene.add_rect(rect(2, Vec2::new(50.0, 10.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let mut command = MoveCommand::new(vec![group_id], Vec2::new(8.0, -3.0));
+        command.execute(&mut scene);
+        approx(translation(&scene, 1), Vec2::new(18.0, 7.0));
+        command.undo(&mut scene);
+        approx(translation(&scene, 1), Vec2::new(10.0, 10.0));
+        approx(translation(&scene, 2), Vec2::new(50.0, 10.0));
+    }
+
+    #[test]
+    fn removing_a_group_removes_its_subtree() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(20.0, 0.0)));
+        scene.add_rect(rect(3, Vec2::new(80.0, 0.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene.remove(group_id);
+        assert!(!scene.contains(group_id));
+        assert!(!scene.contains(1));
+        assert!(!scene.contains(2));
+        assert!(scene.contains(3));
+    }
+
+    #[test]
+    fn rejects_grouping_across_parents_or_into_a_cycle() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(20.0, 0.0)));
+        scene.add_rect(rect(3, Vec2::new(60.0, 0.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        assert!(matches!(
+            scene.group(&[1, 3]),
+            Err(GroupError::DifferentParents)
+        ));
+        let other = scene.group(&[group_id, 3]).unwrap();
+        assert!(matches!(
+            scene.enter_group(other, group_id),
+            Err(GroupError::WouldCycle)
+        ));
     }
 }

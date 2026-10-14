@@ -131,6 +131,77 @@ impl Transform {
             (sin * translated.x + cos * translated.y) / self.scale.y,
         )
     }
+
+    /// 从 3x3 矩阵分解回平移、旋转、缩放。
+    ///
+    /// 矩阵需要是 `T * R * S`（与 [`Transform::to_matrix`] 相同）。带剪切的矩阵会丢掉剪切，只保留最接近的旋转和轴向缩放。
+    pub fn from_mat3(matrix: Mat3) -> Self {
+        let column_x = Vec2::new(matrix.x_axis.x, matrix.x_axis.y);
+        let column_y = Vec2::new(matrix.y_axis.x, matrix.y_axis.y);
+        let (rotation, scale) = decompose_basis(column_x, column_y);
+        Self {
+            translation: Vec2::new(matrix.z_axis.x, matrix.z_axis.y),
+            rotation,
+            scale,
+        }
+    }
+
+    /// 缩放是否远离 0，矩阵可逆。
+    pub fn is_invertible(self) -> bool {
+        self.scale.x.is_finite()
+            && self.scale.y.is_finite()
+            && self.translation.x.is_finite()
+            && self.translation.y.is_finite()
+            && self.rotation.is_finite()
+            && self.scale.x.abs() > 1e-6
+            && self.scale.y.abs() > 1e-6
+    }
+
+    /// 先应用 `self`，再应用 `outer`（矩阵 `outer * self`）。
+    pub fn then(self, outer: Transform) -> Self {
+        Self::from_mat3(outer.to_matrix() * self.to_matrix())
+    }
+
+    /// 父变换从 `from` 变为 `to` 时，子元素的世界变换。
+    ///
+    /// 世界点的映射是 `to * inverse(from)`。组平移、旋转、均匀缩放都走这条路径，
+    /// 这样子元素不用单独存局部坐标，现有顶点生成仍然读世界变换。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_math::{Transform, Vec2};
+    ///
+    /// let from = Transform::from_translation(Vec2::new(10.0, 0.0));
+    /// let to = Transform::from_translation(Vec2::new(25.0, 4.0));
+    /// let child = Transform::from_translation(Vec2::new(12.0, 3.0));
+    /// let moved = child.rebase_between(from, to);
+    /// assert!((moved.translation - Vec2::new(27.0, 7.0)).length() < 1e-4);
+    /// ```
+    pub fn rebase_between(self, from: Transform, to: Transform) -> Self {
+        if !from.is_invertible() {
+            return self;
+        }
+        let delta = to.to_matrix() * from.to_matrix().inverse();
+        Self::from_mat3(delta * self.to_matrix())
+    }
+}
+
+/// 从矩阵的两列分解旋转和轴向缩放。
+fn decompose_basis(column_x: Vec2, column_y: Vec2) -> (f32, Vec2) {
+    let scale_x = column_x.length();
+    if scale_x < 1e-6 {
+        return (0.0, Vec2::new(1e-3, column_y.length().max(1e-3)));
+    }
+    let rotation = column_x.y.atan2(column_x.x);
+    let scale_y_len = column_y.length().max(1e-4);
+    let (sin, cos) = rotation.sin_cos();
+    let expected_y = Vec2::new(-sin, cos) * scale_y_len;
+    let scale_y = if column_y.dot(expected_y) < 0.0 {
+        -scale_y_len
+    } else {
+        scale_y_len
+    };
+    (rotation, Vec2::new(scale_x.max(1e-4), scale_y))
 }
 
 impl Default for Transform {
@@ -173,5 +244,40 @@ mod tests {
         let transformed = transform.transform_point(point);
         let back = transform.inverse_transform_point(transformed);
         assert!((back - point).length() < 0.001);
+    }
+
+    #[test]
+    fn rebase_between_translates_child() {
+        let from = Transform::from_translation(Vec2::new(10.0, 0.0));
+        let to = Transform::from_translation(Vec2::new(25.0, 4.0));
+        let child = Transform::from_translation(Vec2::new(12.0, 3.0));
+        let moved = child.rebase_between(from, to);
+        assert!((moved.translation - Vec2::new(27.0, 7.0)).length() < 1e-4);
+        assert!(moved.rotation.abs() < 1e-4);
+        assert!((moved.scale - Vec2::ONE).length() < 1e-4);
+    }
+
+    #[test]
+    fn rebase_between_rotates_child_around_parent_origin() {
+        let from = Transform::from_translation(Vec2::new(50.0, 0.0));
+        let mut to = from;
+        to.rotation = std::f32::consts::FRAC_PI_2;
+        let child = Transform::from_translation(Vec2::new(100.0, 0.0));
+        let moved = child.rebase_between(from, to);
+        assert!((moved.translation - Vec2::new(50.0, 50.0)).length() < 1e-3);
+        assert!((moved.rotation - std::f32::consts::FRAC_PI_2).abs() < 1e-3);
+    }
+
+    #[test]
+    fn matrix_round_trip_keeps_trs() {
+        let transform = Transform {
+            translation: Vec2::new(-12.0, 8.0),
+            rotation: 0.4,
+            scale: Vec2::new(2.0, 0.5),
+        };
+        let back = Transform::from_mat3(transform.to_matrix());
+        assert!((back.translation - transform.translation).length() < 1e-4);
+        assert!((back.rotation - transform.rotation).abs() < 1e-4);
+        assert!((back.scale - transform.scale).length() < 1e-4);
     }
 }
