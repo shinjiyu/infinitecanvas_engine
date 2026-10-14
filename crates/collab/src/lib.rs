@@ -24,4 +24,7 @@ mod session;
 
 pub use error::CollabError;
 pub use provider::MemoryProvider;
-pub use session::{CollabSession, DOC_SCHEMA_VERSION, ELEMENTS_ROOT, META_ROOT, VERSION_FIELD};
+pub use session::{
+    CollabSession, DOC_SCHEMA_VERSION, ELEMENTS_ROOT, MAX_PEER_SLOT, META_ROOT, PEER_SLOT_BITS,
+    VERSION_FIELD,
+};

@@ -22,6 +22,17 @@ pub const VERSION_FIELD: &str = "version";
 /// 当前 CRDT schema。元素载荷仍是场景 JSON version 1。
 pub const DOC_SCHEMA_VERSION: &str = "1";
 
+/// [`CollabSession::allocate_id`] 里 peer slot 可用的位数。
+///
+/// JavaScript `Number` 能精确表示的最大整数是 `2^53 - 1`。元素 id 的低 32 位
+/// 是本端序号，高位只剩 21 位给 peer slot。再宽的 id 传到 JS 会丢精度，键也会对不上。
+pub const PEER_SLOT_BITS: u32 = 21;
+
+/// [`CollabSession::with_client_id`] 接受的最大 `peer_slot`（含）。
+///
+/// 等于 `2^21 - 1`。和序号 `u32::MAX` 拼起来正好是 `2^53 - 1`。
+pub const MAX_PEER_SLOT: u32 = (1 << PEER_SLOT_BITS) - 1;
+
 /// 一个对等端：一份 Y.Doc，加一份由它物化出来的 [`Scene`]。
 ///
 /// # 文档结构
@@ -57,7 +68,8 @@ pub const DOC_SCHEMA_VERSION: &str = "1";
 /// ```
 pub struct CollabSession {
     awareness: Awareness,
-    /// [`Self::allocate_id`] 的高 32 位。并发分配的两端必须不同。
+    /// [`Self::allocate_id`] 从 bit 32 起的那一段，最多 [`PEER_SLOT_BITS`] 位。
+    /// 并发分配的两端必须不同。
     peer_slot: u32,
     /// [`Self::allocate_id`] 的低 32 位，从 1 递增。
     local_seq: u32,
@@ -67,8 +79,9 @@ pub struct CollabSession {
 impl CollabSession {
     /// 用随机的 yrs client id 创建一个空会话。
     ///
-    /// client id 和 peer slot 都从该随机 id 推导。要对拍两个连接，用
-    /// [`Self::with_client_id`] 显式指定，避免撞车。
+    /// client id 和 peer slot 都从该随机 id 推导。推导出的 slot 会掩到
+    /// [`PEER_SLOT_BITS`] 位，所以 [`Self::allocate_id`] 仍落在 `2^53 - 1` 以内。
+    /// 要对拍两个连接，用 [`Self::with_client_id`] 显式指定，避免撞车。
     ///
     /// # 返回
     /// 空场景。`meta.version` 已经写成 [`DOC_SCHEMA_VERSION`]。
@@ -83,23 +96,33 @@ impl CollabSession {
     /// # 参数
     /// - `client_id`: yrs 副本 id。同时在线的两端必须不同，且必须落在 53 位以内
     ///   （Yjs 的安全整数）。相同 client id 的并发写入会损坏文档。
-    /// - `peer_slot`: 放进 [`Self::allocate_id`] 的高 32 位。两端必须不同，否则
-    ///   可能分到同一个元素 id，随后按 last-write-wins 收成一个元素。
+    /// - `peer_slot`: 放进 [`Self::allocate_id`]、从 bit 32 起的那一段。必须
+    ///   `<= `[`MAX_PEER_SLOT`]（21 位），两端还必须不同，否则可能分到同一个元素
+    ///   id，随后按 last-write-wins 收成一个元素。
     ///
     /// # 返回
     /// 空场景会话。
     ///
+    /// # Panics
+    /// `peer_slot` 大于 [`MAX_PEER_SLOT`] 时 panic。超过 21 位的 slot 会让元素 id
+    /// 大于 `2^53 - 1`，JavaScript `Number` 无法精确保存。
+    ///
     /// # 示例
     ///
     /// ```
-    /// use infinitecanvas_collab::CollabSession;
+    /// use infinitecanvas_collab::{CollabSession, MAX_PEER_SLOT};
     ///
     /// let session = CollabSession::with_client_id(1, 1);
     /// assert_eq!(session.client_id(), 1);
     /// assert_eq!(session.peer_slot(), 1);
     /// assert!(session.scene().is_empty());
+    /// assert_eq!(MAX_PEER_SLOT, (1u32 << 21) - 1);
     /// ```
     pub fn with_client_id(client_id: u64, peer_slot: u32) -> Self {
+        assert!(
+            peer_slot <= MAX_PEER_SLOT,
+            "peer_slot {peer_slot} exceeds {PEER_SLOT_BITS} bits; allocate_id would not fit in a JS safe integer (2^53-1)"
+        );
         Self::from_doc(Doc::with_client_id(client_id), peer_slot)
     }
 
@@ -111,10 +134,10 @@ impl CollabSession {
         self.doc().client_id().get()
     }
 
-    /// 元素 id 的高 32 位。
+    /// 元素 id 里序号以上的那一段。
     ///
     /// # 返回
-    /// 构造时的 `peer_slot`。
+    /// 构造时的 `peer_slot`，范围是 `0..=`[`MAX_PEER_SLOT`]。
     pub fn peer_slot(&self) -> u32 {
         self.peer_slot
     }
@@ -123,6 +146,7 @@ impl CollabSession {
     ///
     /// # 返回
     /// `(peer_slot << 32) | seq`。`seq` 从 1 开始，用尽 `u32` 后回绕。
+    /// `peer_slot` 最多 [`PEER_SLOT_BITS`] 位，所以结果始终 `<= 2^53 - 1`。
     /// 这不是 CRDT 计数器，只保证本会话内部不重复；跨端唯一靠 peer slot。
     ///
     /// # 示例
@@ -305,6 +329,10 @@ impl CollabSession {
     }
 
     fn from_doc(doc: Doc, peer_slot: u32) -> Self {
+        debug_assert!(
+            peer_slot <= MAX_PEER_SLOT,
+            "peer_slot must fit in {PEER_SLOT_BITS} bits"
+        );
         let meta = doc.get_or_insert_map(META_ROOT);
         {
             let mut txn = doc.transact_mut();
@@ -401,10 +429,27 @@ impl Default for CollabSession {
 
 fn peer_slot_from_client(client_id: u64) -> u32 {
     let mixed = (client_id as u32) ^ ((client_id >> 32) as u32);
-    if mixed == 0 {
+    let slot = mixed & MAX_PEER_SLOT;
+    if slot == 0 {
         1
     } else {
-        mixed
+        slot
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derived_slots_stay_inside_21_bits() {
+        for client_id in [0, 1, u64::from(u32::MAX), u64::MAX, 1 << 40, (1 << 53) - 1] {
+            let slot = peer_slot_from_client(client_id);
+            assert!(
+                (1..=MAX_PEER_SLOT).contains(&slot),
+                "{client_id} derived peer_slot {slot}"
+            );
+        }
     }
 }
 

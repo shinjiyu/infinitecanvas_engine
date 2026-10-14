@@ -1,8 +1,8 @@
 //! 两个本地连接通过内存 provider 同步后，场景收敛。
 
-use infinitecanvas_collab::{CollabError, CollabSession, MemoryProvider};
+use infinitecanvas_collab::{CollabError, CollabSession, MemoryProvider, MAX_PEER_SLOT};
 use infinitecanvas_engine::math::{Color, Vec2};
-use infinitecanvas_engine::{AnyElement, Circle, ElementStyle, Line, Rectangle};
+use infinitecanvas_engine::{AnyElement, Circle, ElementStyle, Line, Rectangle, Text};
 
 fn rect(id: u64, width: f32) -> AnyElement {
     let mut rect = Rectangle::new(id, Vec2::new(10.0, 20.0), Vec2::new(width, 40.0));
@@ -161,4 +161,48 @@ fn same_id_inserts_and_local_guards_converge() -> Result<(), CollabError> {
     b.insert(AnyElement::Circle(Circle::new(circle_id, Vec2::ZERO, 1.0)))?;
     assert_ne!(before, b.encode_state_v1());
     Ok(())
+}
+
+#[test]
+fn text_syncs_content_style_and_drops_texture_id() -> Result<(), CollabError> {
+    let mut a = CollabSession::with_client_id(1, 1);
+    let mut b = CollabSession::with_client_id(2, 2);
+    let id = a.allocate_id();
+    let color = Color::new(0.2, 0.4, 0.6, 1.0);
+    let mut text = Text::new(id, Vec2::new(12.0, 34.0), "Hello 你好")
+        .with_font_size(24.0)
+        .with_color(color);
+    text.texture_id = Some("text-local-r1-l0".to_string());
+    a.insert(AnyElement::Text(text))?;
+
+    MemoryProvider::sync(&mut a, &mut b)?;
+    assert_eq!(a.scene(), b.scene());
+
+    match b.scene().get(id) {
+        Some(AnyElement::Text(remote)) => {
+            assert_eq!(remote.content, "Hello 你好");
+            assert_eq!(remote.font_size, 24.0);
+            assert_eq!(remote.color, color);
+            assert!(remote.texture_id.is_none());
+        }
+        other => panic!("peer B did not materialize text {id}, got {other:?}"),
+    }
+    Ok(())
+}
+
+#[test]
+fn allocated_id_stays_within_js_safe_integer() {
+    let mut session = CollabSession::with_client_id(9, MAX_PEER_SLOT);
+    let id = session.allocate_id();
+    assert_eq!(id, (u64::from(MAX_PEER_SLOT) << 32) | 1);
+    assert!(id <= (1u64 << 53) - 1);
+    let again = session.allocate_id();
+    assert_eq!(again, id + 1);
+    assert!(again <= (1u64 << 53) - 1);
+}
+
+#[test]
+#[should_panic(expected = "21 bits")]
+fn peer_slot_above_21_bits_is_rejected() {
+    let _session = CollabSession::with_client_id(9, 1u32 << 21);
 }

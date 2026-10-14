@@ -53,7 +53,7 @@ npm run dev --workspace=@infinitecanvas/server
 
 场景元素的 CRDT 在 `crates/collab`（`infinitecanvas-collab`），用 Rust 的 [yrs](https://docs.rs/yrs)。它没有链进 WASM，首页 Demo 也不会加载它。和上面的 WebSocket 房间是两条线。
 
-启用方式：在宿主进程里依赖这个 crate，每个对等端建一个 `CollabSession`（`client_id` 和 `peer_slot` 都要不同），用 `insert` / `update` / `delete` 改元素，用 `MemoryProvider::sync` 做内存里的 y-sync，或用 `encode_state_v1` / `apply_update` 交换 Yjs v1 字节。元素 id 用 `allocate_id`，不要让两端共用 `Scene::next_id`。
+启用方式：在宿主进程里依赖这个 crate，每个对等端建一个 `CollabSession`（`client_id` 和 `peer_slot` 都要不同），用 `insert` / `update` / `delete` 改元素，用 `MemoryProvider::sync` 做内存里的 y-sync，或用 `encode_state_v1` / `apply_update` 交换 Yjs v1 字节。元素 id 用 `allocate_id`，不要让两端共用 `Scene::next_id`。`peer_slot` 必须落在 21 位以内（`<= 2_097_151`），否则 id 会超过 JavaScript 安全整数 `2^53 - 1`。Text 走场景 JSON（内容、字号、颜色）；光栅用的 `texture_id` 不同步，对端物化后为空。
 
 ```bash
 cargo test -p infinitecanvas-collab

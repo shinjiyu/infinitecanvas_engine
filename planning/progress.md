@@ -151,12 +151,14 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 - [x] 本地 `insert` / `update` / `delete` 写成 Yjs 事务，远端 v1 更新物化回 `Scene`
 - [x] `MemoryProvider` 做双连接 y-sync；`encode_state_v1` 可回放
 - [x] 冲突策略见 `docs/design/crdt.md`（整元素 LWW；选区 / 光标 / 房间服务不在这次）
+- [x] Text 经 `MemoryProvider` 同步（内容、字号、颜色），对端 `texture_id` 为空
+- [x] `peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`
 
 ```text
 Scene ── 事务 ──▶ Y.Doc elements ── SyncStep1/2 ──▶ 另一份 Y.Doc ──▶ Scene
 ```
 
-未接到 WASM、`www` 和 `packages/server`。未知元素种类（例如还没合并的 `text`）会让物化失败，和 JSON 导入一样。
+未接到 WASM、`www` 和 `packages/server`。Text 随场景 JSON v1 同步（内容、字号、颜色）；`texture_id` 不进文档，对端物化后为空。`peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`。未知种类（例如 `group`）仍会使物化失败。整场景重物化是 O(n)。
 
 ---
 
