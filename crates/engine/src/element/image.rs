@@ -10,6 +10,7 @@ use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
+use crate::element::blur::{blur_active, BLUR_EXTENT};
 use crate::element::shadow::quad_shadow;
 use crate::element::{DropShadow, Element, ElementId, ElementProps};
 
@@ -108,7 +109,7 @@ pub struct Image {
     pub crop: Rect,
     /// 投影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
     ///
-    /// 按显示矩形画偏移羽化，不模糊纹理像素。
+    /// 按裁剪后的显示矩形画偏移羽化，不模糊纹理像素。
     #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
     pub shadow: DropShadow,
     /// 混合模式。JSON 可省略，缺省 [`BlendMode::Normal`]。Normal 不写出。
@@ -117,6 +118,16 @@ pub struct Image {
         skip_serializing_if = "crate::blend::blend_is_normal"
     )]
     pub blend_mode: BlendMode,
+    /// 图层高斯模糊的标准差，和显示尺寸同一单位。缺省 0。
+    ///
+    /// 0 不写入 JSON。纹理着色器用 5×5 核近似，命中仍是未模糊的裁剪窗口。
+    /// 外扩绕这个窗口，不把裁掉的区域算进命中。
+    #[serde(default, skip_serializing_if = "image_blur_is_zero")]
+    pub blur_radius: f32,
+}
+
+fn image_blur_is_zero(value: &f32) -> bool {
+    !value.is_finite() || *value <= 0.0
 }
 
 impl Image {
@@ -143,6 +154,7 @@ impl Image {
             crop: default_image_crop(),
             shadow: DropShadow::default(),
             blend_mode: BlendMode::Normal,
+            blur_radius: 0.0,
         }
     }
 
@@ -231,6 +243,7 @@ impl Image {
             crop: default_image_crop(),
             shadow: DropShadow::default(),
             blend_mode: BlendMode::Normal,
+            blur_radius: 0.0,
         }
     }
 
@@ -242,6 +255,7 @@ impl Image {
             self.texture_id = self.asset_id.clone();
         }
         self.shadow = self.shadow.sanitized();
+        self.blur_radius = crate::element::blur::sanitize_blur(self.blur_radius);
     }
 
     /// 在世界坐标采样资源像素。
@@ -461,6 +475,11 @@ impl Image {
         )
     }
 
+    /// 未模糊的显示矩形，给纯色底用。模糊打开时纹理四边形会外扩，底不能跟着外扩。
+    pub(crate) fn plate_vertices(&self) -> Vec<Vertex> {
+        self.textured_quad(0.0)
+    }
+
     /// 生成纹理顶点（6个顶点 = 2个三角形）
     ///
     /// # 返回
@@ -480,35 +499,82 @@ impl Image {
     /// Triangle 2: v1, v2, v3
     /// ```
     pub fn generate_vertices(&self) -> Vec<Vertex> {
+        let margin = if blur_active(self.blur_radius) {
+            BLUR_EXTENT * crate::element::blur::sanitize_blur(self.blur_radius)
+        } else {
+            0.0
+        };
+        self.textured_quad(margin)
+    }
+
+    /// `margin` 为 0 时顶点与模糊关闭时相同，四边形就是裁剪窗口。
+    /// 大于 0 时绕这个窗口外扩，UV 按同一比例伸出采样窗口，并写入 `blur_uv`。
+    ///
+    /// 整张图且没有 `uv_rect` 时，外扩部分的 UV 落到 0–1 之外，着色器当成透明。
+    /// 裁剪或 `uv_rect` 把采样窗口收进 0–1 时，光晕仍可能采到窗口外、纹理内的纹素。
+    fn textured_quad(&self, margin: f32) -> Vec<Vertex> {
         let (uv_min, uv_max) = self.get_uv_coords();
         let color = Color::new(1.0, 1.0, 1.0, self.alpha);
-        let transform = &self.props.transform;
         let visible = self.visible_local_rect();
-        let local = [
-            (Vec2::new(visible.x, visible.y), uv_min.0, uv_min.1),
-            (Vec2::new(visible.right(), visible.y), uv_max.0, uv_min.1),
-            (Vec2::new(visible.x, visible.bottom()), uv_min.0, uv_max.1),
-            (
-                Vec2::new(visible.right(), visible.bottom()),
-                uv_max.0,
-                uv_max.1,
-            ),
-        ];
-        let world: Vec<(Vec2, f32, f32)> = local
-            .iter()
-            .map(|(point, u, v)| (transform.transform_point(*point), *u, *v))
-            .collect();
-        let vertex = |index: usize| {
-            Vertex::with_uv(
-                world[index].0.x,
-                world[index].0.y,
-                color,
-                world[index].1,
-                world[index].2,
-            )
+        let origin_x = visible.x;
+        let origin_y = visible.y;
+        let width = visible.width;
+        let height = visible.height;
+        let span_u = uv_max.0 - uv_min.0;
+        let span_v = uv_max.1 - uv_min.1;
+        let sigma = if margin > 0.0 {
+            margin / BLUR_EXTENT
+        } else {
+            0.0
         };
-
-        // 无旋转且缩放为 1 时，顶点仍落在以平移为左上角的矩形上。
+        let blur_u = if width.abs() > 1.0e-6 && sigma > 0.0 {
+            sigma / width.abs() * span_u.abs()
+        } else {
+            0.0
+        };
+        let blur_v = if height.abs() > 1.0e-6 && sigma > 0.0 {
+            sigma / height.abs() * span_v.abs()
+        } else {
+            0.0
+        };
+        let x0 = origin_x + width.min(0.0) - margin;
+        let x1 = origin_x + width.max(0.0) + margin;
+        let y0 = origin_y + height.min(0.0) - margin;
+        let y1 = origin_y + height.max(0.0) + margin;
+        let uv_at = |x: f32, y: f32| -> (f32, f32) {
+            let u = if width.abs() > 1.0e-6 {
+                uv_min.0 + ((x - origin_x) / width) * span_u
+            } else {
+                uv_min.0
+            };
+            let v = if height.abs() > 1.0e-6 {
+                uv_min.1 + ((y - origin_y) / height) * span_v
+            } else {
+                uv_min.1
+            };
+            (u, v)
+        };
+        let transform = &self.props.transform;
+        let corners = [
+            Vec2::new(x0, y0),
+            Vec2::new(x1, y0),
+            Vec2::new(x0, y1),
+            Vec2::new(x1, y1),
+        ];
+        let mut uvs = [uv_at(x0, y0), uv_at(x1, y0), uv_at(x0, y1), uv_at(x1, y1)];
+        if margin == 0.0 && width >= 0.0 && height >= 0.0 {
+            uvs = [
+                (uv_min.0, uv_min.1),
+                (uv_max.0, uv_min.1),
+                (uv_min.0, uv_max.1),
+                (uv_max.0, uv_max.1),
+            ];
+        }
+        let vertex = |index: usize| {
+            let world = transform.transform_point(corners[index]);
+            Vertex::with_uv(world.x, world.y, color, uvs[index].0, uvs[index].1)
+                .with_blur_uv(blur_u, blur_v)
+        };
         vec![
             vertex(0),
             vertex(2),
@@ -791,5 +857,27 @@ mod tests {
         assert!(text.contains("\"crop\""));
         let restored: Image = serde_json::from_str(&text).unwrap();
         assert_eq!(restored.normalized_crop(), cropped.normalized_crop());
+    }
+
+    #[test]
+    fn blur_expands_around_the_crop_window_without_hitting_the_halo() {
+        let mut image = Image::new(1, Vec2::ZERO, Vec2::new(100.0, 40.0), "photo".into());
+        image.set_crop(Rect::new(0.5, 0.0, 0.5, 1.0));
+        image.blur_radius = 4.0;
+
+        let plate = image.plate_vertices();
+        assert_eq!(plate[0].position, [50.0, 0.0]);
+        assert_eq!(plate[5].position, [100.0, 40.0]);
+        assert_eq!(plate[0].blur_uv, [0.0, 0.0]);
+
+        let vertices = image.generate_vertices();
+        assert_eq!(vertices[0].position, [38.0, -12.0]);
+        assert_eq!(vertices[5].position, [112.0, 52.0]);
+        assert!((vertices[0].blur_uv[0] - 0.04).abs() < 1e-4);
+        assert!((vertices[0].blur_uv[1] - 0.1).abs() < 1e-4);
+        assert!(!image.contains_point(Vec2::new(40.0, 20.0)));
+        assert!(image.contains_point(Vec2::new(60.0, 20.0)));
+        assert_eq!(image.bounding_box().x, 50.0);
+        assert_eq!(image.bounding_box().width, 50.0);
     }
 }

@@ -2,6 +2,7 @@
 //!
 //! 两个端点之间生成带线宽的三角形带。命中测试使用点到线段距离。
 
+use super::blur::{blur_active, gaussian_capsule_vertices, gaussian_fill_vertices};
 use super::shadow::{soft_shadow_vertices, stroke_capsule_shadow};
 use super::stroke::{
     arrow_length_for, arrow_points, arrow_width_for, bounds_containing, effective_width,
@@ -196,6 +197,25 @@ impl Line {
     /// 直线本身是一条三角形带；箭头是额外的一个三角形。
     pub fn generate_vertices(&self) -> Vec<Vertex> {
         let color = paint_color(&self.style);
+        if blur_active(self.style.blur_radius) {
+            let (start, end, arrow) = self.local_shaft_and_arrow();
+            let mut vertices = gaussian_capsule_vertices(
+                &[start, end],
+                self.stroke_width() * 0.5,
+                color,
+                self.style.blur_radius,
+                &self.props.transform,
+            );
+            if let Some(tri) = arrow {
+                vertices.extend(gaussian_fill_vertices(
+                    &[tri[0], tri[1], tri[2], tri[0]],
+                    color,
+                    self.style.blur_radius,
+                    &self.props.transform,
+                ));
+            }
+            return vertices;
+        }
         let width = self.stroke_width();
         let (shaft, arrow) = self.shaft_and_arrow();
         let mut vertices = stroke_styled(

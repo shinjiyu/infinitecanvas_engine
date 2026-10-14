@@ -3,13 +3,14 @@
 //! 定义用于 WebGPU 渲染的顶点数据
 use crate::Color;
 
-/// 2D 顶点（位置 + 颜色 + UV）
+/// 2D 顶点（位置 + 颜色 + UV + 纹理模糊）
 ///
 /// # 内存布局
 /// - position: [f32; 2] - 8 字节
 /// - color: [f32; 4] - 16 字节
 /// - uv: [f32; 2] - 8 字节
-/// - 总计: 32 字节
+/// - blur_uv: [f32; 2] - 8 字节，纹理高斯标准差（UV 单位）。形状顶点保持 0，基础着色器不读它
+/// - 总计: 40 字节
 ///
 /// # 对齐要求
 /// - 符合 WebGPU 顶点缓冲区要求
@@ -23,6 +24,11 @@ pub struct Vertex {
     pub color: [f32; 4],
     /// 纹理坐标（UV，归一化 0-1）
     pub uv: [f32; 2],
+    /// 纹理模糊的标准差，单位是 UV。`(0, 0)` 表示只采样一次。
+    ///
+    /// 形状、描边和网格保持零。图片和文本在 `blur_radius > 0` 时写入，
+    /// 纹理管线用它做 5×5 高斯近似。
+    pub blur_uv: [f32; 2],
 }
 
 impl Vertex {
@@ -32,6 +38,7 @@ impl Vertex {
             position: [x, y],
             color: color.to_array(),
             uv: [0.0, 0.0],
+            blur_uv: [0.0, 0.0],
         }
     }
 
@@ -41,7 +48,16 @@ impl Vertex {
             position: [x, y],
             color: color.to_array(),
             uv: [u, v],
+            blur_uv: [0.0, 0.0],
         }
+    }
+
+    /// 带上纹理模糊标准差（UV 单位）后返回自身。
+    ///
+    /// 形状顶点不要调用。`(0, 0)` 与 [`Self::with_uv`] 相同，纹理着色器只采样一次。
+    pub fn with_blur_uv(mut self, blur_u: f32, blur_v: f32) -> Self {
+        self.blur_uv = [blur_u, blur_v];
+        self
     }
 
     /// 从位置和颜色数组创建（UV 默认为 0）
@@ -50,6 +66,7 @@ impl Vertex {
             position,
             color,
             uv: [0.0, 0.0],
+            blur_uv: [0.0, 0.0],
         }
     }
 
@@ -59,6 +76,7 @@ impl Vertex {
             position,
             color,
             uv,
+            blur_uv: [0.0, 0.0],
         }
     }
 }
@@ -75,8 +93,8 @@ mod tests {
     #[test]
     fn test_vertex_size() {
         use std::mem::size_of;
-        // 确保顶点大小正确（2 * f32 + 4 * f32 + 2 * f32 = 32 bytes）
-        assert_eq!(size_of::<Vertex>(), 32);
+        // 2 * f32 + 4 * f32 + 2 * f32 + 2 * f32 = 40 bytes
+        assert_eq!(size_of::<Vertex>(), 40);
     }
 
     #[test]
@@ -85,6 +103,7 @@ mod tests {
         assert_eq!(v.position, [10.0, 20.0]);
         assert_eq!(v.color, [1.0, 0.0, 0.0, 1.0]);
         assert_eq!(v.uv, [0.0, 0.0]);
+        assert_eq!(v.blur_uv, [0.0, 0.0]);
     }
 
     #[test]
@@ -99,6 +118,6 @@ mod tests {
     fn test_bytemuck_conversion() {
         let v = Vertex::new(1.0, 2.0, Color::GREEN);
         let bytes: &[u8] = bytemuck::bytes_of(&v);
-        assert_eq!(bytes.len(), 32);
+        assert_eq!(bytes.len(), 40);
     }
 }
