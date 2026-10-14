@@ -49,6 +49,30 @@ test('drop before the front row brings a back root forward', () => {
   assert.deepEqual(target, { parentId: 0, index: 2 });
 });
 
+test('frames show their name, expand, and accept drops', () => {
+  const roots = [
+    { id: 9, elementType: 'Rectangle', visible: true, locked: false, children: [] },
+    {
+      id: 7,
+      elementType: 'Frame',
+      name: '封面',
+      visible: true,
+      locked: false,
+      children: [
+        { id: 8, elementType: 'Rectangle', visible: true, locked: false, children: [] },
+      ],
+    },
+  ];
+  const rows = flattenTree(roots, new Set());
+  assert.equal(rows[0].id, '7');
+  assert.equal(rows[0].label, '封面');
+  assert.equal(rows[1].id, '8');
+  assert.deepEqual(flattenTree(roots, new Set(['7'])).map((row) => row.id), ['7', '9']);
+  const target = dropIndex(rows, 0, 'into', '9', indexTree(roots));
+  assert.equal(idKey(target.parentId), '7');
+  assert.equal(target.index, 1);
+});
+
 test('drop into a group appends the element at the front of that group', () => {
   const roots = sampleTree();
   const rows = flattenTree(roots, new Set());

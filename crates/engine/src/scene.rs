@@ -21,7 +21,7 @@
 //! 复制、粘贴和克隆在 [`self::clipboard`]：新 ID、子树重映射，图片引用一起带走，并走命令栈。
 use crate::asset::{AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
 use crate::element::{
-    Circle, Element, ElementId, Group, Image, Line, Path, Polygon, Rectangle, Text,
+    Circle, Element, ElementId, Frame, Group, Image, Line, Path, Polygon, Rectangle, Text,
 };
 use crate::guides::{GuideSnapshot, GuideStore, ManualGuide};
 use crate::scene_tree::{SceneTree, SceneTreeNode};
@@ -73,7 +73,7 @@ impl std::error::Error for GroupError {}
 /// 元素枚举（支持不同类型元素）
 ///
 /// JSON 使用 `{"type":"text","data":{...}}` 这种相邻标签。
-/// `type` 为小写的 `rectangle`、`circle`、`polygon`、`image`、`line`、`path`、`text`、`group`。
+/// `type` 为小写的 `rectangle`、`circle`、`polygon`、`image`、`line`、`path`、`text`、`group`、`frame`。
 /// 正多边形和星形都是 `polygon`，用 `data.kind`（`polygon` / `star`）区分。
 /// 反序列化时未知字段会被忽略；缺省的可选字段使用各结构体的 serde 默认值。
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -88,6 +88,8 @@ pub enum AnyElement {
     Path(Path),
     Text(Text),
     Group(Group),
+    /// 命名画板。子元素与组相同，尺寸是自己的矩形。
+    Frame(Frame),
 }
 
 impl AnyElement {
@@ -102,7 +104,31 @@ impl AnyElement {
             AnyElement::Path(path) => path.props().id,
             AnyElement::Text(text) => text.props().id,
             AnyElement::Group(group) => group.props().id,
+            AnyElement::Frame(frame) => frame.props().id,
         }
+    }
+
+    /// 组或画板的直接子元素。叶子返回 `None`。
+    pub fn container_children(&self) -> Option<&[ElementId]> {
+        match self {
+            AnyElement::Group(group) => Some(group.child_ids()),
+            AnyElement::Frame(frame) => Some(frame.child_ids()),
+            _ => None,
+        }
+    }
+
+    /// 组或画板的可变子元素列表。
+    pub fn container_children_mut(&mut self) -> Option<&mut Vec<ElementId>> {
+        match self {
+            AnyElement::Group(group) => Some(&mut group.children),
+            AnyElement::Frame(frame) => Some(&mut frame.children),
+            _ => None,
+        }
+    }
+
+    /// 能否作为父节点。组和画板可以。
+    pub fn is_container(&self) -> bool {
+        self.container_children().is_some()
     }
 
     /// 如果这是一个组，返回组数据。
@@ -132,6 +158,7 @@ impl AnyElement {
             AnyElement::Path(path) => path,
             AnyElement::Text(text) => text,
             AnyElement::Group(group) => group,
+            AnyElement::Frame(frame) => frame,
         }
     }
 
@@ -146,6 +173,7 @@ impl AnyElement {
             AnyElement::Path(path) => path,
             AnyElement::Text(text) => text,
             AnyElement::Group(group) => group,
+            AnyElement::Frame(frame) => frame,
         }
     }
 }
@@ -453,6 +481,15 @@ impl Scene {
         id
     }
 
+    /// 添加画板，并 [`Scene::mark_dirty`]。
+    ///
+    /// 画板按自己的 `size` 绘制，不根据子元素改尺寸。
+    pub fn add_frame(&mut self, frame: Frame) -> ElementId {
+        let id = self.insert_element(AnyElement::Frame(frame));
+        self.mark_dirty(id);
+        id
+    }
+
     /// 添加图片元素
     ///
     /// 若 `asset_id` 在资源表里，引用计数加一。
@@ -687,8 +724,11 @@ impl Scene {
         };
         let root_id = root.id();
         let declared_parent = root.as_element().props().parent;
-        let parent = declared_parent
-            .filter(|parent_id| matches!(self.elements.get(parent_id), Some(AnyElement::Group(_))));
+        let parent = declared_parent.filter(|parent_id| {
+            self.elements
+                .get(parent_id)
+                .is_some_and(AnyElement::is_container)
+        });
         if parent.is_none() {
             if let Some(root) = snapshot.nodes.first_mut() {
                 root.as_element_mut().props_mut().parent = None;
@@ -1016,7 +1056,7 @@ impl Scene {
         group_id: ElementId,
     ) -> Result<(), GroupError> {
         self.ensure_known(element_id)?;
-        self.group_children(group_id)?;
+        self.container_child_list(group_id)?;
         if element_id == group_id || self.is_ancestor(element_id, group_id) {
             return Err(GroupError::WouldCycle);
         }
@@ -1042,7 +1082,7 @@ impl Scene {
         let parent = self
             .parent_id(element_id)
             .ok_or(GroupError::NotInGroup(element_id))?;
-        self.group_children(parent)?;
+        self.container_child_list(parent)?;
         self.ensure_editable(element_id)?;
         let grandparent = self.parent_id(parent);
         let insert_at = grandparent
@@ -1362,7 +1402,7 @@ impl Scene {
         order: &[ElementId],
     ) -> Result<bool, GroupError> {
         if let Some(parent_id) = parent {
-            self.group_children(parent_id)?;
+            self.container_child_list(parent_id)?;
         }
         let current = self.sibling_order(parent);
         if !Self::permutation_matches(&current, order) {
@@ -1393,7 +1433,7 @@ impl Scene {
                 let element = self.elements.get(&id)?;
                 let parent = element.as_element().props().parent;
                 let z_index = element.as_element().props().z_index;
-                let children = element.as_group().map(|group| group.children.clone());
+                let children = element.container_children().map(|ids| ids.to_vec());
                 Some(OutlineNode {
                     id,
                     parent,
@@ -1441,7 +1481,7 @@ impl Scene {
             if parent_id == id || self.is_ancestor(id, parent_id) {
                 return Err(GroupError::WouldCycle);
             }
-            self.group_children(parent_id)?;
+            self.container_child_list(parent_id)?;
             self.ensure_editable(parent_id)?;
         }
 
@@ -1524,7 +1564,7 @@ impl Scene {
 
     fn sibling_ids(&self, parent: Option<ElementId>) -> Result<Vec<ElementId>, GroupError> {
         match parent {
-            Some(parent_id) => self.group_children(parent_id),
+            Some(parent_id) => self.container_child_list(parent_id),
             None => Ok(self.root_ids_back_to_front()),
         }
     }
@@ -1562,12 +1602,12 @@ impl Scene {
     }
 
     fn set_group_children(&mut self, group_id: ElementId, children: Vec<ElementId>) {
-        if let Some(group) = self
+        if let Some(stored) = self
             .elements
             .get_mut(&group_id)
-            .and_then(AnyElement::as_group_mut)
+            .and_then(AnyElement::container_children_mut)
         {
-            group.children = children;
+            *stored = children;
         }
     }
 
@@ -1652,9 +1692,22 @@ impl Scene {
     fn group_child_ids(&self, id: ElementId) -> Vec<ElementId> {
         self.elements
             .get(&id)
-            .and_then(AnyElement::as_group)
-            .map(|group| group.children.clone())
+            .and_then(AnyElement::container_children)
+            .map(|children| children.to_vec())
             .unwrap_or_default()
+    }
+
+    /// 组或画板的直接子元素。叶子返回 [`GroupError::NotAGroup`]。
+    fn container_child_list(&self, id: ElementId) -> Result<Vec<ElementId>, GroupError> {
+        match self
+            .elements
+            .get(&id)
+            .and_then(AnyElement::container_children)
+        {
+            Some(children) => Ok(children.to_vec()),
+            None if self.elements.contains_key(&id) => Err(GroupError::NotAGroup(id)),
+            None => Err(GroupError::UnknownElement(id)),
+        }
     }
 
     fn group_children(&self, id: ElementId) -> Result<Vec<ElementId>, GroupError> {
@@ -1672,26 +1725,26 @@ impl Scene {
     }
 
     fn insert_child(&mut self, group_id: ElementId, child_id: ElementId, index: usize) {
-        if let Some(group) = self
+        if let Some(children) = self
             .elements
             .get_mut(&group_id)
-            .and_then(AnyElement::as_group_mut)
+            .and_then(AnyElement::container_children_mut)
         {
-            if !group.children.contains(&child_id) {
-                let index = index.min(group.children.len());
-                group.children.insert(index, child_id);
+            if !children.contains(&child_id) {
+                let index = index.min(children.len());
+                children.insert(index, child_id);
             }
         }
     }
 
     fn detach_from_parent(&mut self, id: ElementId) {
         if let Some(parent_id) = self.parent_id(id) {
-            if let Some(group) = self
+            if let Some(children) = self
                 .elements
                 .get_mut(&parent_id)
-                .and_then(AnyElement::as_group_mut)
+                .and_then(AnyElement::container_children_mut)
             {
-                group.children.retain(|child| *child != id);
+                children.retain(|child| *child != id);
             }
         }
         self.set_parent(id, None);
@@ -1925,6 +1978,10 @@ impl Scene {
         }
         let props = self.elements.get(&id)?.as_element().props().clone();
         let element_type = self.elements.get(&id)?.as_element().type_name().to_string();
+        let name = match self.elements.get(&id) {
+            Some(AnyElement::Frame(frame)) => frame.name.clone(),
+            _ => String::new(),
+        };
         let parent_id = props.parent;
         let visible = props.visible;
         let locked = props.locked;
@@ -1938,6 +1995,7 @@ impl Scene {
         Some(SceneTreeNode {
             id,
             element_type,
+            name,
             parent_id,
             visible,
             locked,

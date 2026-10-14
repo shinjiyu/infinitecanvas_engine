@@ -12,7 +12,7 @@ infinitecanvas-wasm::InfiniteCanvas
     │ export_svg
     │ import_svg ── 一条 ImportSvgCommand
     ▼
-Scene ── elements: rectangle | circle | polygon | image | line | path | text | group
+Scene ── elements: rectangle | circle | polygon | image | line | path | text | group | frame
          assets:   图片像素，data URL，同一张图一份
          PNG 与 SVG 共用 elements_in_paint_order（z_index，再按 id）
 ```
@@ -24,16 +24,16 @@ Scene ── elements: rectangle | circle | polygon | image | line | path | text
 | `version` | 必须是 `1`，缺失或其它值都拒绝 |
 | `next_id` | 可省略。小于等于已有最大 ID 时抬到 `max_id + 1` |
 | `assets[]` | 可省略。图片资源 `{ id, mime, width, height, data }`。`data` 是 data URL，同一张图只写一次 |
-| `elements[]` | `{ "type", "data" }`。`type` 为 `rectangle`、`circle`、`polygon`、`image`、`line`、`path`、`text`、`group`。`star` 是 `polygon` 的导入别名 |
+| `elements[]` | `{ "type", "data" }`。`type` 为 `rectangle`、`circle`、`polygon`、`image`、`line`、`path`、`text`、`group`、`frame`。`star` 是 `polygon` 的导入别名 |
 | `guides[]` | 可省略。手动参考线 `{ id, axis, position }`。`axis` 为 `horizontal`（世界 y）或 `vertical`（世界 x）。没有参考线时不写这个字段 |
 
 `data.props.transform` 含 `translation`、`rotation`（弧度，即 `ElementProps::rotation`）、`scale`。直线的 `arrow` 缺省为 `false`。路径的 `points` 缺省为空。文本的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 可省略；对齐缺省为 `left`，字号缺省为 32，尺寸缺省时按内容估算。`texture_id`、LOD、`revision`、`editing` 用 `#[serde(skip)]`，不进文件。PNG 采样先把世界点逆变换回局部空间，所以旋转和非均匀缩放与命中测试一致。
 
-省略的可选字段使用 serde 默认值（旋转 0、缩放 1、可见、不透明度 1、颜色 alpha 1）。形状的 `style.fill` / `stroke` / `stroke_width` / `opacity` 可省略，缺省与 `ElementStyle::new` 相同。`style.stroke_dash` 缺省为空数组（实线），`style.stroke_cap` 缺省 `butt`，`style.stroke_join` 缺省 `miter`；三者与缺省值相同时不写入文件。矩形的 `corner_radius` 可省略，缺省为 0；为 0 时不写出该字段。多边形的 `kind` 缺省为 `polygon`，`sides`（别名 `points`）缺省为 6 并钳到 3–64，`inner_radius` 缺省为 0.5 并钳到 0.05–0.95。`type: "star"` 读成星形；若同时省略边数，角数用 5。旧文档没有 `polygon` 时不受影响。文本的 `opacity` 缺省 1，`stroke` 缺省无，`stroke_width` 缺省 0。文本描边没有虚线、线帽和线结。形状的 `style.shadow`、文本和图片的 `shadow` 都可省略，缺省为关闭（偏移 0、模糊 0、颜色透明）。字段是 `{ "offset": [x, y], "blur", "color" }`，与默认值相同时不写入。旧文档没有这个字段仍能打开。`props.parent` 和 `props.locked` 也可省略，缺省为根节点和未锁定，文本与其它元素相同。文档或元素上的未知字段会被忽略，因此以后增加可选字段不必升版本。未知元素种类会报错，避免静默丢掉数据。
+省略的可选字段使用 serde 默认值（旋转 0、缩放 1、可见、不透明度 1、颜色 alpha 1）。形状的 `style.fill` / `stroke` / `stroke_width` / `opacity` 可省略，缺省与 `ElementStyle::new` 相同。`style.stroke_dash` 缺省为空数组（实线），`style.stroke_cap` 缺省 `butt`，`style.stroke_join` 缺省 `miter`；三者与缺省值相同时不写入文件。矩形的 `corner_radius` 可省略，缺省为 0；为 0 时不写出该字段。多边形的 `kind` 缺省为 `polygon`，`sides`（别名 `points`）缺省为 6 并钳到 3–64，`inner_radius` 缺省为 0.5 并钳到 0.05–0.95。`type: "star"` 读成星形；若同时省略边数，角数用 5。旧文档没有 `polygon` 时不受影响。画板的 `name` 缺省 `"Frame"`，`size` 缺省 100×100，`style` 缺省浅底加细描边，`children` 缺省空数组。旧文档没有 `frame` 时不受影响。文本的 `opacity` 缺省 1，`stroke` 缺省无，`stroke_width` 缺省 0。文本描边没有虚线、线帽和线结。形状的 `style.shadow`、文本和图片的 `shadow` 都可省略，缺省为关闭（偏移 0、模糊 0、颜色透明）。字段是 `{ "offset": [x, y], "blur", "color" }`，与默认值相同时不写入。旧文档没有这个字段仍能打开。`props.parent` 和 `props.locked` 也可省略，缺省为根节点和未锁定，文本与其它元素相同。文档或元素上的未知字段会被忽略，因此以后增加可选字段不必升版本。未知元素种类会报错，避免静默丢掉数据。
 
 ## PNG
 
-视口导出使用视口的世界包围盒和当前缩放。选区导出使用选中元素包围盒并外扩 1 个世界单位。手动参考线默认不画。`export_viewport_png_with_guides` 把 `include_guides` 设为 true 时，参考线盖一层青色像素。标尺不进 PNG。直线、箭头和路径按半线宽上色，不含点选余量。文本用 `font8x8` 点阵画该字体覆盖的字符；没有点阵的字符（包括中文）画成方框，因为屏幕上的 Canvas2D 纹理不在场景文件里。图片若在资源表里有像素，PNG 按显示矩形采样这些像素；只有 GPU 纹理 id、没有字节的图片仍用纯色占位。投影在元素外侧按轮廓距离羽化采样，不透明本体盖住投影。导出范围按偏移长度加模糊略为放大，命中用的包围盒不放大。
+视口导出使用视口的世界包围盒和当前缩放。选区导出使用选中元素包围盒并外扩 1 个世界单位。选区根全是画板时不外扩，区域就是这些画板世界包围盒的并集，并且只画它们的子树。`export_frame_png` 同样裁到单张画板的包围盒；空画板仍导出矩形尺寸。手动参考线默认不画。`export_viewport_png_with_guides` 把 `include_guides` 设为 true 时，参考线盖一层青色像素。标尺不进 PNG。直线、箭头和路径按半线宽上色，不含点选余量。文本用 `font8x8` 点阵画该字体覆盖的字符；没有点阵的字符（包括中文）画成方框，因为屏幕上的 Canvas2D 纹理不在场景文件里。图片若在资源表里有像素，PNG 按显示矩形采样这些像素；只有 GPU 纹理 id、没有字节的图片仍用纯色占位。投影在元素外侧按轮廓距离羽化采样，不透明本体盖住投影。导出范围按偏移长度加模糊略为放大，命中用的包围盒不放大。
 
 ## SVG
 
@@ -49,6 +49,7 @@ Scene ── elements: rectangle | circle | polygon | image | line | path | text
 | image | 资源表里有编码字节时写成 `<image href="data:...">`，局部原点在左上角，宽高是显示尺寸，`preserveAspectRatio="none"`。`alpha` 写在外层 `opacity`。UV 裁剪用嵌套 `<svg viewBox>` 取像素区域。没有字节的旧纹理跳过，文件中留 `<!-- image N skipped: ... -->`，且不计入 viewBox |
 | text | `<text>` + `<tspan>`。锚点与 `TextAlign` 一致，`font-size` 是世界单位字号 |
 | group | 不画几何。子孙已是世界变换，矩阵不再乘组变换。绘制顺序里连成一段时写成不带 `transform` 的 `<g id="eN">`。隐藏组藏住子孙 |
+| frame | `<rect>`，几何与矩形相同。`export_frame_svg` 和「选区根全是画板」的 `export_svg` 把 `viewBox` 设成画板世界包围盒，并写 `overflow="hidden"`。画布上不裁剪 |
 
 变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。直线和路径的缺省线帽线结仍是 `butt` / `miter`。非默认线帽、线结，以及非空虚线，额外写成 `stroke-linecap`、`stroke-linejoin`、`stroke-dasharray`。图片的 `opacity` 来自 `Image::alpha`。Y 轴向下。文本描边不写虚线、线帽和线结。投影打开时，元素外层 `<g>` 加 `feDropShadow`：`dx` / `dy` 是局部偏移乘上变换，`stdDeviation` 约为模糊乘缩放的一半，`flood-opacity` 只用颜色 alpha（组透明度已经乘过一次）。关闭时不写滤镜。滤镜区域是对象包围盒外扩，很大的偏移在 SVG 里可能被裁切。
 

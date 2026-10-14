@@ -1535,6 +1535,7 @@ function syncPropertyPanel(engine) {
   if (!visible || !style) return;
 
   setText('prop-count', style.count ?? 0);
+  syncFrameName(engine);
   const fillRow = document.getElementById('prop-fill-row');
   if (fillRow) fillRow.hidden = !style.hasShape;
   const strokeRow = document.getElementById('prop-stroke-row');
@@ -1731,6 +1732,49 @@ function bindOrientControls(engine) {
   });
 }
 
+/**
+ * 只选中一张画板时显示名称。改完名称记一条撤销。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncFrameName(engine) {
+  const row = document.getElementById('prop-frame-name-row');
+  const input = document.getElementById('prop-frame-name');
+  if (!row || !(input instanceof HTMLInputElement)) return;
+  const ids = typeof engine.get_selected_ids === 'function' ? Array.from(engine.get_selected_ids()) : [];
+  let name = null;
+  if (ids.length === 1 && typeof engine.frame_name === 'function') {
+    const value = engine.frame_name(ids[0]);
+    if (typeof value === 'string') name = value;
+  }
+  row.hidden = name == null;
+  if (name != null && document.activeElement !== input) input.value = name;
+}
+
+/**
+ * 双击画板空白处改名称。点在子元素上时不改画板。
+ *
+ * @param {WasmCanvas} engine
+ * @param {{ x: number, y: number }} point
+ */
+function renameFrameAt(engine, point) {
+  if (typeof engine.hit_test_screen_point !== 'function' || typeof engine.rename_frame !== 'function') return;
+  const hits = Array.from(engine.hit_test_screen_point(point.x, point.y, 1) || []);
+  const hit = hits[0];
+  if (!hit || hit.elementType !== 'Frame') return;
+  const current = typeof engine.frame_name === 'function' ? engine.frame_name(hit.id) : '';
+  if (typeof current !== 'string') return;
+  const next = window.prompt('画板名称', current);
+  if (next == null) return;
+  const trimmed = next.trim();
+  if (!trimmed || trimmed === current) return;
+  if (engine.rename_frame(hit.id, trimmed)) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+    setStatus('已重命名画板');
+  }
+}
+
 function bindPropertyPanel(engine) {
   const bindRange = (id, key, labelId, format) => {
     const input = document.getElementById(id);
@@ -1749,6 +1793,23 @@ function bindPropertyPanel(engine) {
   bindPolygonFields(engine);
   bindShadow(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
+
+  document.getElementById('prop-frame-name')?.addEventListener('change', (event) => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    const ids = Array.from(engine.get_selected_ids?.() || []);
+    if (ids.length !== 1 || typeof engine.rename_frame !== 'function') return;
+    const next = input.value.trim();
+    if (!next) {
+      syncFrameName(engine);
+      return;
+    }
+    if (engine.rename_frame(ids[0], next)) {
+      scheduleAutosave(engine);
+      setStatus('已重命名画板');
+    }
+    syncPropertyPanel(engine);
+  });
 
   const bindColor = (id, key) => {
     const input = document.getElementById(id);
@@ -2167,7 +2228,11 @@ function bindInput(canvas, engine) {
       return;
     }
     const info = engine.begin_text_edit_at(point.x, point.y);
-    if (info) openTextEditor(engine, info);
+    if (info) {
+      openTextEditor(engine, info);
+      return;
+    }
+    renameFrameAt(engine, point);
   });
 
   canvas.addEventListener('contextmenu', (event) => {

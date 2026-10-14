@@ -30,6 +30,8 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 多边形和星形（#65）也在这张表里：不带修饰键的 `N` 切换多边形工具，`K` 切换星形工具。`?` 帮助面板列出这两行。工具栏按钮调用同一个 `set_tool`。
 
+画板（#74）也在这张表里：不带修饰键的 `F` 切换画板工具。`Shift+F`、`Ctrl/Cmd+F`、`Alt+F` 不触发。它不占用 V / L / P / R / O / T / H / I / M / G / N / K，也不占用 `Ctrl/Cmd+'` 或 `Ctrl/Cmd+L`。`?` 帮助面板列出这一行。工具栏「画板」按钮调用同一个 `set_tool`。按住 Alt 单击选中画板而不是它上面的子元素。详见 [frame.md](./frame.md)。
+
 标尺和手动参考线（#56）也在这张表里：不带修饰键的 `G` 显示或隐藏标尺和参考线，按住不重复。`Ctrl/Cmd+G` 仍是成组，`Ctrl/Cmd+Shift+G` 仍是取消分组。吸附一组里的按钮调用同一个 `set_rulers_visible`。选中参考线时，键盘 Delete / Backspace 先删参考线，否则仍删除选中元素。右键菜单里的「删除」只删元素。
 
 吸管（#60）是不带修饰键的 `I`。`Shift+I`、`Ctrl/Cmd+I`、`Alt+I` 都不触发，因此不会占用 V / L / P / R / O / T / H / G，也不会和 Shift+H / Shift+V / Shift+R 撞车。工具栏有同样的按钮。按住不重复。

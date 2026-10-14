@@ -1,6 +1,6 @@
 # 分组与场景树
 
-组是场景里的容器节点。叶子仍然各自保存世界变换，渲染不用改顶点生成。
+组是场景里的容器节点。画板（`Frame`）也是容器，但自己有矩形尺寸和名称，见 [frame.md](./frame.md)。叶子仍然各自保存世界变换，渲染不用改顶点生成。
 
 ```text
 Scene
@@ -25,8 +25,8 @@ Scene
 ## API
 
 - `Scene::duplicate`：克隆选中根和整棵子树。新 ID 下 `parent` / `children` 一一对应。副本挂在原来的父节点下，z 整块高于场景中已有元素
-- `Scene::group` / `ungroup`：成组至少两个同一父节点下的元素；解散后子元素仍在场景中
-- `Scene::enter_group` / `leave_group`：进组、出组，世界坐标不变
+- `Scene::group` / `ungroup`：成组至少两个同一父节点下的元素；解散后子元素仍在场景中。`ungroup` 只接受组，不解散画板
+- `Scene::enter_group` / `leave_group`：进组或进画板、再离开，世界坐标不变
 - `Scene::move_in_outline`：改兄弟顺序，或移入 / 移出组。下标 `0` 是最底层。世界坐标不变
 - `Scene::arrange_siblings` / `ReorderSelectionCommand`：对当前选中做置顶、置底、前移、后移。只动同一父节点下的兄弟；选中组时移动组根。见 [stack-order.md](./stack-order.md)
 - `Scene::scene_tree`：层级面板数据
@@ -44,7 +44,7 @@ Demo 的图层面板在 `www/layer-panel.js`。列表按视口虚拟滚动；点
 
 ## 和场景 JSON
 
-`Scene::to_json` 把组写成 `{"type":"group","data":{...}}`。`data.children` 是直接子元素 ID，`data.props.parent` 是父元素。缺省的 `parent` 表示根，缺省的 `locked` 表示未锁定。解散前的世界坐标会随元素自己的 `transform` 一起往返。`dirty` 不写入 JSON。
+`Scene::to_json` 把组写成 `{"type":"group","data":{...}}`，把画板写成 `{"type":"frame","data":{...}}`。`data.children` 是直接子元素 ID，`data.props.parent` 是父元素。缺省的 `parent` 表示根，缺省的 `locked` 表示未锁定。画板的 `name`、`size`、`style`、`children` 都可省略。解散前的世界坐标会随元素自己的 `transform` 一起往返。`dirty` 不写入 JSON。
 
 ## 和顶点缓存
 

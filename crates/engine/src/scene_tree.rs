@@ -33,8 +33,11 @@ pub struct SceneTree {
 pub struct SceneTreeNode {
     /// 元素 ID
     pub id: ElementId,
-    /// 与 [`crate::Element::type_name`] 相同，例如 `"Rectangle"`、`"Group"`。
+    /// 与 [`crate::Element::type_name`] 相同，例如 `"Rectangle"`、`"Group"`、`"Frame"`。
     pub element_type: String,
+    /// 画板名称。其它元素为空字符串。旧快照可以省略。
+    #[serde(default)]
+    pub name: String,
     /// 父元素。根节点为 `None`。
     pub parent_id: Option<ElementId>,
     /// 元素自己的可见性。祖先被隐藏时，命中和绘制还要看有效可见性。

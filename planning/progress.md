@@ -2,6 +2,19 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #74: 画板 / Frame
+
+- [x] `Frame`：名称、尺寸、样式、子元素。JSON `type: frame`，字段 `serde(default)`。旧文档仍有效
+- [x] 子元素优先命中；Alt 选中画板。画布不裁剪；PNG / SVG 导出裁到画板世界包围盒，空画板仍导出矩形尺寸
+- [x] 创建、重命名、移入画板、缩放都可撤销。空操作不入栈，成功路径 `mark_dirty`
+- [x] Demo：工具栏画板（F）。F 不占用 V/L/P/R/O/T/H/I/M/G/N/K。双击空白处或属性面板改名称。图层面板把画板当容器
+
+```text
+F 拖拽 ──► AddElementCommand ──► Frame
+重命名 / 移入 ──► RenameFrame / ReparentIntoFrame ──► mark_dirty
+导出 ──► 世界包围盒 + 子树；画布绘制不裁剪
+```
+
 ## Issue #70: 投影
 
 - [x] 形状（含多边形和星形）、文本、图片各有 `shadow`（局部偏移、模糊、颜色含浓度）。全零默认值不写入 JSON，旧文档仍能打开
