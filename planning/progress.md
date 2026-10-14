@@ -78,6 +78,19 @@
 
 ---
 
+## 场景持久化 (#6) - ✅ 已完成
+
+- [x] 版本化场景 JSON（`version`、`next_id`、`elements`），缺省字段用 serde default，未知字段忽略
+- [x] 覆盖矩形、圆、图片、直线（含箭头）、自由路径，以及 `transform.rotation` / `scale`
+- [x] WASM `export_json` / `import_json` / `export_png`
+- [x] 视口或选中区域 PNG
+- [x] Demo 保存/打开与 localStorage 自动保存
+- [x] JSON round-trip 与 PNG 单元测试
+
+**依赖**: M1 完成。#7 已合并：`rotation` / `scale` 写在 `Transform` 上并参与往返。Text（#4）尚未合并，`text` 元素会拒绝导入。未知字段仍会被忽略。
+
+---
+
 ## M3: 场景管理 (6/9) - 🔄 进行中
 
 - [ ] M3.1: 场景图树结构（待定：当前扁平结构满足需求）

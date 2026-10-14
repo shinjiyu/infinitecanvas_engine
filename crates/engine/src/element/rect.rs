@@ -9,13 +9,14 @@ use serde::{Deserialize, Serialize};
 /// - 位置、尺寸（局部坐标系）
 /// - 填充和描边样式
 /// - 变换（通过 ElementProps）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Rectangle {
     /// 元素属性
     pub props: ElementProps,
     /// 尺寸
     pub size: Vec2,
-    /// 样式
+    /// 样式。JSON 中可省略，缺省为 [`ElementStyle::new`]。
+    #[serde(default)]
     pub style: ElementStyle,
 }
 

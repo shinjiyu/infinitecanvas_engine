@@ -275,7 +275,7 @@
         <div class="mark" aria-hidden="true"></div>
         <div>
           <h1>InfiniteCanvas</h1>
-          <p class="subtitle">选择、绘制、纹理与压力测试 · Rust + WebGPU + WASM</p>
+          <p class="subtitle">选择、绘制、保存与纹理 · Rust + WebGPU + WASM</p>
         </div>
       </div>
       <div class="fps" title="渲染帧率">
@@ -306,6 +306,18 @@
           <button type="button" id="clear-btn">清空场景</button>
         </div>
         <div class="group">
+          <p class="group-label">文件</p>
+          <div class="row">
+            <button type="button" id="save-btn">保存</button>
+            <button type="button" id="open-btn">打开</button>
+          </div>
+          <div class="row">
+            <button type="button" id="png-btn">视口 PNG</button>
+            <button type="button" id="png-selection-btn">选区 PNG</button>
+          </div>
+          <input id="open-file" type="file" accept="application/json,.json" hidden>
+        </div>
+        <div class="group">
           <p class="group-label">压力</p>
           <div class="row">
             <button type="button" data-count="100">+100</button>
@@ -314,7 +326,7 @@
             <button type="button" id="clear-selection-btn">取消选择</button>
           </div>
         </div>
-        <p class="hint">拖拽框选或移动。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头。</p>
+        <p class="hint">拖拽框选或移动。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头。Ctrl+S 保存 JSON，场景会自动写入本地。</p>
       </aside>
 
       <div id="stage">

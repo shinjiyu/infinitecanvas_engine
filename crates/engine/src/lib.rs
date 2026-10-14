@@ -21,6 +21,7 @@ pub mod command;
 pub mod element;
 pub mod event;
 pub mod hit_test;
+pub mod persist;
 pub mod quadtree;
 pub mod scene;
 pub mod selection;
@@ -43,6 +44,9 @@ pub use event::{
 };
 pub use hit_test::{hit_test_point, HitTestOptions, HitTestResult};
 pub use infinitecanvas_math as math;
+pub use persist::{
+    export_selection_png, export_viewport_png, PersistError, SceneFile, SCENE_FORMAT_VERSION,
+};
 pub use quadtree::QuadTree;
 pub use scene::{AnyElement, Scene};
 pub use selection::SelectionManager;

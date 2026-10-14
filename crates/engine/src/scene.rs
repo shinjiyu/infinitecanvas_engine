@@ -2,10 +2,16 @@
 //!
 //! 管理无限画布上的所有元素
 use crate::element::{Circle, Element, ElementId, Image, Line, Path, Rectangle};
+use serde::Serialize;
 use std::collections::HashMap;
 
 /// 元素枚举（支持不同类型元素）
-#[derive(Debug, Clone)]
+///
+/// JSON 使用 `{"type":"line","data":{...}}` 这种相邻标签。
+/// `type` 为小写的 `rectangle`、`circle`、`image`、`line`、`path`。
+/// 反序列化时未知字段会被忽略；缺省的可选字段使用各结构体的 serde 默认值。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", content = "data", rename_all = "lowercase")]
 pub enum AnyElement {
     Rectangle(Rectangle),
     Circle(Circle),
@@ -56,6 +62,7 @@ impl AnyElement {
 /// - 元素增删改查
 /// - 元素查找和过滤
 /// - Z-index 排序
+/// - 版本化 JSON 导入导出（[`Scene::to_json`] / [`Scene::from_json`]）
 ///
 /// # 示例
 /// ```
@@ -67,6 +74,7 @@ impl AnyElement {
 /// scene.add_rect(rect);
 /// assert_eq!(scene.count(), 1);
 /// ```
+#[derive(Debug, PartialEq)]
 pub struct Scene {
     elements: HashMap<ElementId, AnyElement>,
     next_id: ElementId,
@@ -79,6 +87,18 @@ impl Scene {
             elements: HashMap::new(),
             next_id: 1,
         }
+    }
+
+    /// 用已经校验过的元素表恢复场景
+    ///
+    /// `next_id` 是下一次 [`Scene::next_id`] 的返回值。
+    pub(crate) fn from_parts(elements: HashMap<ElementId, AnyElement>, next_id: ElementId) -> Self {
+        Self { elements, next_id }
+    }
+
+    /// 下一次 [`Scene::next_id`] 会返回的 ID，不消耗它
+    pub fn peek_next_id(&self) -> ElementId {
+        self.next_id
     }
 
     /// 生成新的元素 ID

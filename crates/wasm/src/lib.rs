@@ -26,6 +26,7 @@ mod renderer;
 mod texture_manager;
 
 use infinitecanvas_engine::{
+    export_selection_png, export_viewport_png,
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
     math::{Color, Transform, Vec2},
     transform_handles::{
@@ -910,6 +911,70 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn get_element_count(&self) -> usize {
         self.scene.count()
+    }
+
+    /// 导出场景为版本化 JSON
+    ///
+    /// 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
+    /// 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+    ///
+    /// # 返回
+    /// 紧凑 JSON 字符串
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const json = canvas.export_json();
+    /// localStorage.setItem("infinitecanvas.scene.v1", json);
+    /// ```
+    #[wasm_bindgen]
+    pub fn export_json(&self) -> Result<String, JsValue> {
+        self.scene
+            .to_json()
+            .map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// 用版本化 JSON 替换当前场景
+    ///
+    /// 缺省字段使用默认值，未知字段会被忽略。导入会按 `selected` 标记重建选择，
+    /// 并清空撤销栈和未完成的拖动。解析失败时场景保持不变。
+    ///
+    /// # 参数
+    /// - `json`: [`export_json`](Self::export_json) 生成的文本
+    ///
+    /// # 错误
+    /// JSON 无法解析、版本不受支持、元素种类未知或 ID 重复
+    #[wasm_bindgen]
+    pub fn import_json(&mut self, json: &str) -> Result<(), JsValue> {
+        let scene = Scene::from_json(json).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        self.cancel_handle_gesture();
+        self.scene = scene;
+        self.selection.sync_from_scene(&self.scene);
+        self.selection_box.cancel();
+        self.command_history.clear();
+        self.drag_state = DragState::default();
+        log::info!("Imported scene with {} elements", self.scene.count());
+        Ok(())
+    }
+
+    /// 把当前视口或选中区域导出为 PNG
+    ///
+    /// # 参数
+    /// - `selection_only`: `true` 时导出选中元素的包围盒；`false` 时导出当前视口
+    ///
+    /// # 返回
+    /// RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。图片纹理不在场景文件里，
+    /// 导出为纯色占位。
+    ///
+    /// # 错误
+    /// 没有选中元素、区域为空或编码失败
+    #[wasm_bindgen]
+    pub fn export_png(&self, selection_only: bool) -> Result<Vec<u8>, JsValue> {
+        let bytes = if selection_only {
+            export_selection_png(&self.scene, self.viewport.zoom())
+        } else {
+            export_viewport_png(&self.scene, &self.viewport)
+        };
+        bytes.map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
     // ========== 纹理/图片 API ==========

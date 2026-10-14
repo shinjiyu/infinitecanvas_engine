@@ -138,6 +138,36 @@ export class InfiniteCanvas {
     debug_pending_event_count(): number;
     deselect_element(element_id: bigint): boolean;
     /**
+     * 导出场景为版本化 JSON
+     *
+     * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
+     * 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+     *
+     * # 返回
+     * 紧凑 JSON 字符串
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const json = canvas.export_json();
+     * localStorage.setItem("infinitecanvas.scene.v1", json);
+     * ```
+     */
+    export_json(): string;
+    /**
+     * 把当前视口或选中区域导出为 PNG
+     *
+     * # 参数
+     * - `selection_only`: `true` 时导出选中元素的包围盒；`false` 时导出当前视口
+     *
+     * # 返回
+     * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。图片纹理不在场景文件里，
+     * 导出为纯色占位。
+     *
+     * # 错误
+     * 没有选中元素、区域为空或编码失败
+     */
+    export_png(selection_only: boolean): Uint8Array;
+    /**
      * 获取当前工具名称
      */
     get_current_tool(): string;
@@ -237,6 +267,19 @@ export class InfiniteCanvas {
     handle_wheel_event(delta_x: number, delta_y: number, delta_mode: number, shift_key: boolean, ctrl_key: boolean, alt_key: boolean, meta_key: boolean): void;
     hit_test_screen_point(x: number, y: number, max_results?: number | null): Array<any>;
     hit_test_world_point(x: number, y: number, max_results?: number | null): Array<any>;
+    /**
+     * 用版本化 JSON 替换当前场景
+     *
+     * 缺省字段使用默认值，未知字段会被忽略。导入会按 `selected` 标记重建选择，
+     * 并清空撤销栈和未完成的拖动。解析失败时场景保持不变。
+     *
+     * # 参数
+     * - `json`: [`export_json`](Self::export_json) 生成的文本
+     *
+     * # 错误
+     * JSON 无法解析、版本不受支持、元素种类未知或 ID 重复
+     */
+    import_json(json: string): void;
     /**
      * 初始化画布（异步，因为 WebGPU 初始化需要异步）
      *
@@ -393,6 +436,8 @@ export interface InitOutput {
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
+    readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
+    readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
     readonly infinitecanvas_get_current_tool: (a: number) => [number, number];
     readonly infinitecanvas_get_element_count: (a: number) => number;
     readonly infinitecanvas_get_element_info: (a: number, b: bigint) => any;
@@ -416,6 +461,7 @@ export interface InitOutput {
     readonly infinitecanvas_handle_wheel_event: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
     readonly infinitecanvas_hit_test_screen_point: (a: number, b: number, c: number, d: number) => any;
     readonly infinitecanvas_hit_test_world_point: (a: number, b: number, c: number, d: number) => any;
+    readonly infinitecanvas_import_json: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_init: (a: number, b: any) => any;
     readonly infinitecanvas_is_dragging: (a: number) => number;
     readonly infinitecanvas_is_selection_box_active: (a: number) => number;

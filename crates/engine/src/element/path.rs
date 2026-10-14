@@ -8,7 +8,7 @@ use super::stroke::{
     transform_vertices, HIT_SLOP, MITER_LIMIT,
 };
 use super::{Element, ElementId, ElementProps, ElementStyle};
-use infinitecanvas_math::{Rect, Vec2, Vertex};
+use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 
 /// 自由绘制路径
@@ -30,13 +30,15 @@ use serde::{Deserialize, Serialize};
 /// assert!(path.contains_point(Vec2::new(30.0, 20.0)));
 /// assert!(!path.contains_point(Vec2::new(0.0, 40.0)));
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Path {
     /// 元素属性
     pub props: ElementProps,
-    /// 采样点（局部坐标）
+    /// 采样点（局部坐标）。JSON 中缺省为空路径。
+    #[serde(default)]
     pub points: Vec<Vec2>,
-    /// 样式（描边色和线宽）
+    /// 样式（描边色和线宽）。JSON 中可省略。
+    #[serde(default)]
     pub style: ElementStyle,
 }
 
@@ -87,6 +89,32 @@ impl Path {
         &self.points
     }
 
+    /// 世界坐标处的导出颜色
+    ///
+    /// 点到折线的距离不超过半线宽时返回描边色。不含点选余量。
+    /// 不可见、空路径或完全透明时返回 `None`。
+    ///
+    /// # 参数
+    /// - `world`: 世界坐标
+    ///
+    /// # 返回
+    /// 该点的描边颜色；点在笔画外时为 `None`
+    pub fn color_at(&self, world: Vec2) -> Option<Color> {
+        if !self.props.visible || self.points.is_empty() {
+            return None;
+        }
+        let local = try_local(&self.props.transform, world)?;
+        if distance_to_polyline(local, &self.points) > self.stroke_width() * 0.5 {
+            return None;
+        }
+        let color = paint_color(&self.style);
+        if color.a <= 0.0 {
+            None
+        } else {
+            Some(color)
+        }
+    }
+
     /// 生成描边三角形带（展开为三角形列表），坐标在世界空间。
     pub fn generate_vertices(&self) -> Vec<Vertex> {
         let vertices =
@@ -96,6 +124,22 @@ impl Path {
 
     fn hit_radius(&self) -> f32 {
         self.stroke_width() * 0.5 + HIT_SLOP
+    }
+}
+
+fn try_local(transform: &Transform, world: Vec2) -> Option<Vec2> {
+    if !transform.scale.x.is_finite()
+        || !transform.scale.y.is_finite()
+        || transform.scale.x.abs() < 1e-6
+        || transform.scale.y.abs() < 1e-6
+    {
+        return None;
+    }
+    let local = transform.inverse_transform_point(world);
+    if local.x.is_finite() && local.y.is_finite() {
+        Some(local)
+    } else {
+        None
     }
 }
 

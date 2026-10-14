@@ -9,9 +9,13 @@ use serde::{Deserialize, Serialize};
 /// 使用左上角坐标 + 宽高表示
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Rect {
+    #[serde(default)]
     pub x: f32,
+    #[serde(default)]
     pub y: f32,
+    #[serde(default)]
     pub width: f32,
+    #[serde(default)]
     pub height: f32,
 }
 

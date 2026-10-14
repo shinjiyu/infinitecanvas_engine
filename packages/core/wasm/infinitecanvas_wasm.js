@@ -252,6 +252,64 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 导出场景为版本化 JSON
+     *
+     * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
+     * 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+     *
+     * # 返回
+     * 紧凑 JSON 字符串
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const json = canvas.export_json();
+     * localStorage.setItem("infinitecanvas.scene.v1", json);
+     * ```
+     * @returns {string}
+     */
+    export_json() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.infinitecanvas_export_json(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * 把当前视口或选中区域导出为 PNG
+     *
+     * # 参数
+     * - `selection_only`: `true` 时导出选中元素的包围盒；`false` 时导出当前视口
+     *
+     * # 返回
+     * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。图片纹理不在场景文件里，
+     * 导出为纯色占位。
+     *
+     * # 错误
+     * 没有选中元素、区域为空或编码失败
+     * @param {boolean} selection_only
+     * @returns {Uint8Array}
+     */
+    export_png(selection_only) {
+        const ret = wasm.infinitecanvas_export_png(this.__wbg_ptr, selection_only);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * 获取当前工具名称
      * @returns {string}
      */
@@ -508,6 +566,27 @@ export class InfiniteCanvas {
     hit_test_world_point(x, y, max_results) {
         const ret = wasm.infinitecanvas_hit_test_world_point(this.__wbg_ptr, x, y, isLikeNone(max_results) ? Number.MAX_SAFE_INTEGER : (max_results) >>> 0);
         return ret;
+    }
+    /**
+     * 用版本化 JSON 替换当前场景
+     *
+     * 缺省字段使用默认值，未知字段会被忽略。导入会按 `selected` 标记重建选择，
+     * 并清空撤销栈和未完成的拖动。解析失败时场景保持不变。
+     *
+     * # 参数
+     * - `json`: [`export_json`](Self::export_json) 生成的文本
+     *
+     * # 错误
+     * JSON 无法解析、版本不受支持、元素种类未知或 ID 重复
+     * @param {string} json
+     */
+    import_json(json) {
+        const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_import_json(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
     }
     /**
      * 初始化画布（异步，因为 WebGPU 初始化需要异步）

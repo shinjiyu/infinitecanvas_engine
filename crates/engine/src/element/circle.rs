@@ -10,13 +10,14 @@ use std::f32::consts::PI;
 /// - 位置（中心点）、半径
 /// - 填充和描边样式
 /// - 变换（通过 ElementProps）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Circle {
     /// 元素属性
     pub props: ElementProps,
     /// 半径
     pub radius: f32,
-    /// 样式
+    /// 样式。JSON 中可省略，缺省为 [`ElementStyle::new`]。
+    #[serde(default)]
     pub style: ElementStyle,
 }
 
