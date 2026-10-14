@@ -26,10 +26,15 @@ Scene
 
 - `Scene::group` / `ungroup`：成组至少两个同一父节点下的元素；解散后子元素仍在场景中
 - `Scene::enter_group` / `leave_group`：进组、出组，世界坐标不变
+- `Scene::move_in_outline`：改兄弟顺序，或移入 / 移出组。下标 `0` 是最底层。世界坐标不变
 - `Scene::scene_tree`：层级面板数据
 - 删除组会删掉整棵子树；只去掉组节点用 `ungroup`
 
-隐藏组时，子孙的命中和绘制会被跳过，但不会改写它们自己的 `visible`。锁定会沿着祖先链生效。
+`move_in_outline` 成功后按深度优先重写 `z_index`（越靠后的兄弟越大），并推进 `structure_epoch`。顶点缓存、PNG 和 SVG 都按这个 `z_index` 绘制。`ReorderOutlineCommand` 记下移动前的父指针、子列表和 `z_index`，撤销时写回。
+
+隐藏组时，子孙的命中和绘制会被跳过，但不会改写它们自己的 `visible`。锁定会沿着祖先链生效：被锁定的元素不能被点选、框选或拖动。
+
+Demo 的图层面板在 `www/layer-panel.js`。列表按视口虚拟滚动；点击和画布选中双向同步，拖拽走 `reorder_element`。
 
 ## 和 CRDT
 
@@ -41,7 +46,7 @@ Scene
 
 ## 和顶点缓存
 
-组没有三角形。`translate_element`、`set_world_transform` 和 `set_visible` 把子树标脏，缓存只重写这些叶子。成组和解散会改变元素个数，结构版本前进，下一帧整表重排。隐藏的组在重写时不再输出子孙三角形。
+组没有三角形。`translate_element`、`set_world_transform` 和 `set_visible` 把子树标脏，缓存只重写这些叶子。成组、解散和大纲重排会推进结构版本，下一帧整表重排。隐藏的组在重写时不再输出子孙三角形。
 
 ## 和拖拽吸附
 

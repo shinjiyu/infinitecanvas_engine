@@ -11,6 +11,8 @@ pub struct HitTestOptions {
     pub max_results: usize,
     /// Whether to include invisible elements.
     pub include_invisible: bool,
+    /// Whether to include elements that are locked, or sit under a locked ancestor.
+    pub include_locked: bool,
 }
 
 impl Default for HitTestOptions {
@@ -18,6 +20,7 @@ impl Default for HitTestOptions {
         Self {
             max_results: usize::MAX,
             include_invisible: false,
+            include_locked: false,
         }
     }
 }
@@ -42,6 +45,9 @@ pub fn hit_test_point(scene: &Scene, point: Vec2, options: &HitTestOptions) -> V
 
     for element in elements {
         if !options.include_invisible && !scene.is_effectively_visible(element.id()) {
+            continue;
+        }
+        if !options.include_locked && scene.is_effectively_locked(element.id()) {
             continue;
         }
 
@@ -82,6 +88,7 @@ mod tests {
         let options = HitTestOptions {
             max_results: 1,
             include_invisible: false,
+            include_locked: false,
         };
         let hits = hit_test_point(&scene, Vec2::ZERO, &options);
         assert_eq!(hits.len(), 1);
@@ -111,6 +118,7 @@ mod tests {
             Vec2::ZERO,
             &HitTestOptions {
                 include_invisible: true,
+                include_locked: false,
                 max_results: 2,
             },
         );
@@ -203,5 +211,38 @@ mod tests {
         assert!(
             hit_test_point(&scene, Vec2::new(40.0, 0.0), &HitTestOptions::default()).is_empty()
         );
+    }
+
+    #[test]
+    fn skips_locked_elements_unless_requested() {
+        let mut scene = Scene::new();
+        let mut top = Rectangle::new(1, Vec2::ZERO, Vec2::new(20.0, 20.0));
+        top.props_mut().z_index = 5;
+        top.props_mut().locked = true;
+        scene.add_rect(top);
+        let mut below = Rectangle::new(2, Vec2::ZERO, Vec2::new(20.0, 20.0));
+        below.props_mut().z_index = 1;
+        scene.add_rect(below);
+
+        let hits = hit_test_point(&scene, Vec2::ZERO, &HitTestOptions::default());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, 2);
+
+        let hits = hit_test_point(
+            &scene,
+            Vec2::ZERO,
+            &HitTestOptions {
+                max_results: 1,
+                include_invisible: false,
+                include_locked: true,
+            },
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, 1);
+
+        scene.set_locked(1, false);
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene.set_locked(group_id, true);
+        assert!(hit_test_point(&scene, Vec2::ZERO, &HitTestOptions::default()).is_empty());
     }
 }

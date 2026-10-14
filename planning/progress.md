@@ -163,6 +163,15 @@ Scene ── 事务 ──▶ Y.Doc elements ── SyncStep1/2 ──▶ 另一
 
 ---
 
+## 图层面板 (#27)
+
+- [x] `Scene::move_in_outline`：兄弟换序或移入/移出组，重写 `z_index` 并推进 `structure_epoch`
+- [x] `ReorderOutlineCommand` 撤销/重做父指针、子列表和绘制顺序
+- [x] 锁定沿祖先生效：命中、点选、框选和拖动都会跳过
+- [x] WASM：`reorder_element`、`get_structure_epoch`；`set_element_locked` 取消选中子树
+- [x] Demo 图层面板：树列表、选中双向同步、拖拽、显隐/锁定、虚拟滚动
+- [x] Rust 单测覆盖显隐、锁定、重排和重入组
+
 ## M3: 场景管理 (9/9) - ✅ 已完成
 
 - [x] M3.1: 场景图树结构（#13：Group + 场景树；世界变换由组增量传播）

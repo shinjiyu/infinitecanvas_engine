@@ -37,7 +37,7 @@ pub mod viewport;
 // 重导出核心类型
 pub use command::{
     AddElementCommand, Command, CommandHistory, MoveCommand, RemoveElementCommand,
-    TransformElementsCommand, UpdateTextCommand,
+    ReorderOutlineCommand, TransformElementsCommand, UpdateTextCommand,
 };
 pub use element::{
     Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Rectangle,
@@ -53,6 +53,7 @@ pub use persist::{
     export_selection_png, export_viewport_png, PersistError, SceneFile, SCENE_FORMAT_VERSION,
 };
 pub use quadtree::QuadTree;
+pub use scene::OutlineSnapshot;
 pub use scene::{AnyElement, GroupError, Scene};
 pub use scene_tree::{SceneTree, SceneTreeNode};
 pub use selection::SelectionManager;

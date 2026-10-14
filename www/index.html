@@ -109,7 +109,7 @@
     .workspace {
       min-height: 0;
       display: grid;
-      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-columns: 220px minmax(0, 1fr) 260px;
     }
 
     .toolbar {
@@ -296,12 +296,112 @@
     #status.ok { color: var(--mint); }
     #status.err { color: var(--danger); }
 
+    .layers {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      min-width: 0;
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .layers-head {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding: 0.75rem 0.75rem 0.55rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .layers button {
+      padding: 0.35rem 0.45rem;
+      font-size: 0.75rem;
+    }
+
+    .layer-meta {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.4;
+    }
+
+    .layer-list {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      touch-action: pan-y;
+      user-select: none;
+    }
+
+    .layer-spacer { width: 100%; }
+
+    .layer-window {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+    }
+
+    .layer-row {
+      height: 28px;
+      display: flex;
+      align-items: center;
+      gap: 0.15rem;
+      padding-right: 0.25rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+    }
+
+    .layer-row.selected { background: #24344a; }
+    .layer-row.drop-into { outline: 1px solid var(--accent); outline-offset: -1px; }
+    .layer-row.hidden-item { opacity: 0.45; }
+    .layer-row.locked { color: var(--muted); }
+
+    .layer-row .twist,
+    .layer-row .icon {
+      width: 1.35rem;
+      height: 1.35rem;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      text-align: center;
+      flex: 0 0 auto;
+    }
+
+    .layer-row .label {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .layer-drop {
+      position: absolute;
+      left: 0.4rem;
+      right: 0.4rem;
+      height: 2px;
+      background: var(--accent);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .layer-drop[hidden] { display: none; }
+
     @media (max-width: 800px) {
-      .workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+      .workspace {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr) minmax(160px, 32vh);
+      }
       .toolbar {
         border-right: 0;
         border-bottom: 1px solid var(--line);
         max-height: 38vh;
+      }
+      .layers {
+        border-left: 0;
+        border-top: 1px solid var(--line);
       }
       .hint { margin-top: 0.25rem; }
     }
@@ -378,7 +478,7 @@
             <input id="snap-threshold" type="range" min="0" max="32" step="1" value="6">
           </label>
         </div>
-        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件。</p>
+        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。导出 SVG 下载当前场景的矢量文件。右侧图层面板可点选、拖拽排序或拖进分组，眼睛和锁控制显隐与锁定。</p>
       </aside>
 
       <div id="stage">
@@ -394,6 +494,19 @@
           </div>
         </div>
       </div>
+
+      <aside id="layer-panel" class="layers" aria-label="图层">
+        <div class="layers-head">
+          <p class="group-label">图层</p>
+          <div class="row">
+            <button type="button" id="layer-group-btn">成组</button>
+            <button type="button" id="layer-ungroup-btn">解组</button>
+          </div>
+          <button type="button" id="layer-bench-btn" title="用 1 万个矩形替换当前场景，并测量场景树和列表绘制耗时">测 1 万层</button>
+          <p id="layer-meta" class="layer-meta">空场景</p>
+        </div>
+        <div id="layer-list" class="layer-list" tabindex="0" role="tree" aria-label="场景树"></div>
+      </aside>
     </div>
 
     <footer>
