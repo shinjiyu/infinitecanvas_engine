@@ -6,7 +6,7 @@
  * Ctrl / Cmd 不拦截，避免和浏览器的刷新（Cmd+R）以及撤销抢键。
  * 焦点在输入框、下拉框或 contenteditable 时返回 null。按住不重复，避免一次长按堆很多条撤销。
  *
- * #26 的快捷键帮助表面板还没进 master，所以这张表先放在 demo 里。
+ * 首页按键分发读 `www/shortcuts.js` 的 `SHORTCUTS`。这里保留同一套判断，供单测对照。
  * 工具栏和属性面板有同样的四个按钮。
  *
  * @example

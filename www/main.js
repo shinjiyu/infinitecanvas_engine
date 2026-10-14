@@ -6,7 +6,7 @@
  * 键盘操作只读 `www/shortcuts.js`：方向键按世界单位微调（Shift 为 10 倍），
  * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。输入框、下拉框内不触发。
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
- * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，按钮在工具栏和属性面板，进撤销栈。
+ * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，和工具栏、属性面板的按钮一样，进撤销栈。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
@@ -28,7 +28,6 @@ import {
   screenToWorld,
   writeTextClipboard,
 } from './clipboard.js';
-import { orientAction } from './flip-keys.js';
 import { rasterizeText } from './text-raster.js';
 import {
   SHORTCUTS,
@@ -762,6 +761,12 @@ function dispatchShortcut(shortcut, engine) {
     case 'reorder':
       reorderSelection(engine, shortcut.order);
       break;
+    case 'flip':
+      flipSelection(engine, shortcut.axis);
+      break;
+    case 'rotate':
+      rotateSelectionQuarter(engine, shortcut.dir);
+      break;
     case 'escape':
       if (escapeAction(isHelpOpen()) === 'closeHelp') {
         setHelpOpen(false);
@@ -815,6 +820,38 @@ function reorderSelection(engine, order) {
   if (engine.reorder_selection(order)) {
     scheduleAutosave(engine);
     layerPanel?.sync();
+  }
+}
+
+/**
+ * 绕选区中心水平或垂直翻转。按住不重复，避免一次长按堆很多条撤销。
+ *
+ * @param {WasmCanvas} engine
+ * @param {string | undefined} axis `horizontal` 或 `vertical`
+ */
+function flipSelection(engine, axis) {
+  if (axis !== 'horizontal' && axis !== 'vertical') return;
+  if (typeof engine.flip_selection !== 'function') return;
+  if (engine.flip_selection(axis)) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+    setStatus(axis === 'vertical' ? '已垂直翻转' : '已水平翻转');
+  }
+}
+
+/**
+ * 绕选区中心转 90°。`cw` 顺时针，`ccw` 逆时针。
+ *
+ * @param {WasmCanvas} engine
+ * @param {string | undefined} dir `cw` 或 `ccw`
+ */
+function rotateSelectionQuarter(engine, dir) {
+  if (dir !== 'cw' && dir !== 'ccw') return;
+  if (typeof engine.rotate_selection_quarter !== 'function') return;
+  if (engine.rotate_selection_quarter(dir)) {
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+    setStatus(dir === 'ccw' ? '已逆时针旋转 90°' : '已顺时针旋转 90°');
   }
 }
 
@@ -1681,17 +1718,6 @@ function bindInput(canvas, engine) {
       if (shortcut.handler !== 'paste') event.preventDefault();
       if (event.repeat && shortcut.allowRepeat === false) return;
       dispatchShortcut(shortcut, engine);
-      return;
-    }
-    const orient = orientAction(event);
-    if (!orient) return;
-    event.preventDefault();
-    const changed = orient.kind === 'flip'
-      ? engine.flip_selection(orient.axis)
-      : engine.rotate_selection_quarter(orient.dir);
-    if (changed) {
-      scheduleAutosave(engine);
-      syncPropertyPanel(engine);
     }
   });
 

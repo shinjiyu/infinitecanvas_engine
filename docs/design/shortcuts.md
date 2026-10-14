@@ -20,6 +20,8 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 层级也在这张表里：`]` 前移，`[` 后移，`Ctrl/Cmd+]` 置顶，`Ctrl/Cmd+[` 置底。Shift 或 Alt 不触发。图层面板上的四个按钮调用同一个 `reorder_selection`。
 
+翻转和 90° 旋转（#49）也在这张表里：`Shift+H` 水平翻转，`Shift+V` 垂直翻转，`Shift+R` 顺时针 90°，`Shift+Alt+R` 逆时针 90°。按住不重复。不带 Shift 的 H / V / R 仍是平移、选择、矩形。带 Ctrl 或 ⌘ 不触发，避免和刷新、撤销抢键。工具栏和属性面板的四个按钮调用同一个 `flip_selection` / `rotate_selection_quarter`。
+
 ## 引擎补充
 
 删除、全选和缩放在页面里没有现成的一次调用，所以 WASM 增加了四个入口，场景逻辑仍在 engine 里：

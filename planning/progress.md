@@ -10,7 +10,7 @@
 - [x] 图片翻转不改 `size`，绝对缩放比不变
 - [x] WASM：`flip_selection(axis)`、`rotate_selection_quarter(dir)`
 - [x] Demo：工具栏和属性面板按钮；`Shift+H` / `Shift+V` / `Shift+R` / `Shift+Alt+R`
-- [ ] #26 快捷键帮助面板尚未合并，未登记进 `SHORTCUTS`
+- [x] `Shift+H` / `Shift+V` / `Shift+R` / `Shift+Alt+R` 已登记到 `www/shortcuts.js`，帮助面板列出水平翻转、垂直翻转、顺时针 90°、逆时针 90°
 
 ```text
 Shift+H / Shift+V / Shift+R / Shift+Alt+R
@@ -219,6 +219,7 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 - [x] Ctrl/Cmd+V 与图片粘贴共用：剪贴板有 PNG/JPEG 时粘贴图片，否则粘贴元素 JSON
 - [x] 方向键微调选中元素（1 世界单位），Shift+方向键为 10 倍；带 Ctrl / Alt / ⌘ 不触发
 - [x] `]` / `[` 前移 / 后移，Ctrl/Cmd+] / Ctrl/Cmd+[ 置顶 / 置底
+- [x] Shift+H / Shift+V 水平或垂直翻转，Shift+R 顺时针 90°，Shift+Alt+R 逆时针 90°；不带 Shift 的 H / V / R 仍是工具键
 - [x] WASM 只新增 `delete_selection`、`select_all`、`zoom_to_fit`、`set_zoom`
 - [x] #4 文本已合并：`T` 切换文本工具，编辑框里 Enter 确认、Esc 取消
 - [x] #13 已合并：`Ctrl+G` 成组（`group_elements`），`Ctrl+Shift+G` 取消分组（`ungroup`）

@@ -67,7 +67,7 @@ test('tool keys select the tools that exist', () => {
   assert.equal(assertHandler('tool', { key: 't', code: 'KeyT' }).tool, 'text');
   assert.equal(assertHandler('toggleMinimap', { key: 'm', code: 'KeyM' }).id, 'minimap');
   assert.equal(assertHandler('tool', { key: 'V' }).tool, 'select');
-  assert.equal(assertHandler('tool', { key: 'v', shiftKey: true }).tool, 'select');
+  assert.equal(assertHandler('tool', { key: 'l', shiftKey: true }).tool, 'line');
 });
 
 test('modifier letters do not switch tools', () => {
@@ -151,6 +151,34 @@ test('arrow keys nudge, and Shift is the 10x step', () => {
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'ArrowRight', ctrlKey: true, shiftKey: true }), 'down'), null);
 });
 
+test('shift H, V, and R flip or rotate; plain H, V, and R stay tools', () => {
+  const horizontal = assertHandler('flip', { key: 'h', shiftKey: true });
+  assert.equal(horizontal.axis, 'horizontal');
+  assert.equal(horizontal.id, 'flip-horizontal');
+  assert.equal(horizontal.allowRepeat, false);
+  const vertical = assertHandler('flip', { key: 'V', shiftKey: true });
+  assert.equal(vertical.axis, 'vertical');
+  assert.equal(vertical.id, 'flip-vertical');
+  const cw = assertHandler('rotate', { key: 'r', shiftKey: true });
+  assert.equal(cw.dir, 'cw');
+  assert.equal(cw.id, 'rotate-cw');
+  assert.equal(cw.allowRepeat, false);
+  const ccw = assertHandler('rotate', { key: 'R', shiftKey: true, altKey: true });
+  assert.equal(ccw.dir, 'ccw');
+  assert.equal(ccw.id, 'rotate-ccw');
+  assert.equal(ccw.allowRepeat, false);
+  assert.equal(assertHandler('tool', { key: 'h' }).tool, 'pan');
+  assert.equal(assertHandler('tool', { key: 'v' }).tool, 'select');
+  assert.equal(assertHandler('tool', { key: 'r' }).tool, 'rectangle');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'h', shiftKey: true, ctrlKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'v', shiftKey: true, metaKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'r', shiftKey: true, ctrlKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'r', shiftKey: true, metaKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'r', altKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'h', shiftKey: true, altKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'v', ctrlKey: true }), 'down')?.handler, 'paste');
+});
+
 test('bracket keys reorder the selection, and Shift or Alt do not', () => {
   assert.equal(assertHandler('reorder', { key: ']', code: 'BracketRight' }).order, 'forward');
   assert.equal(assertHandler('reorder', { key: '[', code: 'BracketLeft' }).order, 'backward');
@@ -227,6 +255,12 @@ test('help rows are generated from the table and show both chords', () => {
   assert.equal(mac.find((row) => row.id === 'stack-front')?.chords[0], '⌘]');
   assert.equal(other.find((row) => row.id === 'stack-back')?.chords[0], 'Ctrl+[');
   assert.equal(mac.find((row) => row.id === 'stack-back')?.chords[0], '⌘[');
+  assert.equal(other.find((row) => row.id === 'flip-horizontal')?.chords[0], 'Shift+H');
+  assert.equal(mac.find((row) => row.id === 'flip-vertical')?.chords[0], '⇧V');
+  assert.equal(other.find((row) => row.id === 'rotate-cw')?.chords[0], 'Shift+R');
+  assert.equal(mac.find((row) => row.id === 'rotate-cw')?.chords[0], '⇧R');
+  assert.equal(other.find((row) => row.id === 'rotate-ccw')?.chords[0], 'Shift+Alt+R');
+  assert.equal(mac.find((row) => row.id === 'rotate-ccw')?.chords[0], '⇧⌥R');
   assert.equal(other.find((row) => row.id === 'help')?.chords[0], 'Shift+/');
   assert.equal(mac.find((row) => row.id === 'help')?.chords[0], '⇧/');
 

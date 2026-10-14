@@ -31,6 +31,8 @@
  * @property {string} [scope] 作用域。缺省 `canvas`。文本编辑框里的快捷键是 `text-editor`
  * @property {'left' | 'right' | 'up' | 'down'} [direction] 方向键微调的方向。`handler` 为 `nudge` 时使用
  * @property {'front' | 'back' | 'forward' | 'backward'} [order] 层级重排动作。`handler` 为 `reorder` 时使用
+ * @property {'horizontal' | 'vertical'} [axis] 翻转轴。`handler` 为 `flip` 时使用
+ * @property {'cw' | 'ccw'} [dir] 90° 转向。`handler` 为 `rotate` 时使用
  * @property {string} [helpGroup] 合并到同一行帮助的组名。缺省用 `id`
  * @property {boolean} [help] 为 false 时不单独成行，但仍可并进 `helpGroup` 的键帽
  * @property {boolean} [allowRepeat] 按住不放时是否重复触发。默认允许
@@ -56,7 +58,8 @@ export const TOOL_LABELS = {
  * 全部快捷键，顺序即帮助面板的行序。
  *
  * 已有的 V/L/P/R/O/H、空格临时平移、撤销重做、保存打开、复制粘贴克隆和方向键微调都留在这里。
- * 字母工具不要求 Shift 的状态，和原来的 `keydown` 一致：Shift+V 仍然切到选择。
+ * 字母工具不要求 Shift 的状态。Shift+H / Shift+V / Shift+R 比工具键更具体，分别翻转或顺时针转 90°；
+ * Shift+Alt+R 逆时针转 90°。不带 Shift 的 H / V / R 仍是平移、选择、矩形。
  *
  * @type {Shortcut[]}
  */
@@ -410,6 +413,51 @@ export const SHORTCUTS = [
     code: 'BracketLeft',
     ctrl: true,
     shift: false,
+  },
+  {
+    id: 'flip-horizontal',
+    action: '水平翻转',
+    tool: 'canvas',
+    handler: 'flip',
+    axis: 'horizontal',
+    label: 'H',
+    keys: ['h'],
+    shift: true,
+    allowRepeat: false,
+  },
+  {
+    id: 'flip-vertical',
+    action: '垂直翻转',
+    tool: 'canvas',
+    handler: 'flip',
+    axis: 'vertical',
+    label: 'V',
+    keys: ['v'],
+    shift: true,
+    allowRepeat: false,
+  },
+  {
+    id: 'rotate-cw',
+    action: '顺时针旋转 90°',
+    tool: 'canvas',
+    handler: 'rotate',
+    dir: 'cw',
+    label: 'R',
+    keys: ['r'],
+    shift: true,
+    allowRepeat: false,
+  },
+  {
+    id: 'rotate-ccw',
+    action: '逆时针旋转 90°',
+    tool: 'canvas',
+    handler: 'rotate',
+    dir: 'ccw',
+    label: 'R',
+    keys: ['r'],
+    shift: true,
+    alt: true,
+    allowRepeat: false,
   },
   {
     id: 'escape',

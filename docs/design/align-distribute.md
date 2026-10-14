@@ -24,4 +24,4 @@ translate_element（只加 translation）── mark_dirty ── 一条历史
 
 单选、空选、锁定或隐藏后不足数量时不入栈。已经贴齐或间隙已经相等也不入栈。旋转和缩放不动。拖拽吸附仍只在指针拖动里生效。
 
-Demo 在左侧工具栏和右侧属性面板放同一组按钮，`get_selection_count() >= 2` 时才可点。#26 的快捷键表还没进 master，因此没有登记快捷键。
+Demo 在左侧工具栏和右侧属性面板放同一组按钮，`get_selection_count() >= 2` 时才可点。对齐和分布不进 `SHORTCUTS`，只走按钮。
