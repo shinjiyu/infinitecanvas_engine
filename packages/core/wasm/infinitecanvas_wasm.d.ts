@@ -60,6 +60,31 @@ export class InfiniteCanvas {
      */
     add_image(x: number, y: number, width: number, height: number, texture_id: string): bigint;
     /**
+     * 从 PNG 或 JPEG 字节创建图片元素。
+     *
+     * 像素进入场景资源表：同一份字节多次调用只存一份。边长超过 4096 时先降采样。
+     * 显示尺寸默认等于像素尺寸；长边超过 512 世界单位时等比缩小，避免一张照片铺满视口。
+     * 元素进入撤销栈，并成为当前选择。
+     *
+     * # 参数
+     * - `bytes`: 文件字节
+     * - `mime`: `image/png` 或 `image/jpeg`。空字符串时按文件头识别
+     * - `x`, `y`: 左上角（世界坐标）
+     *
+     * # 返回
+     * 元素 ID
+     *
+     * # 错误
+     * 格式不支持或解码失败
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const bytes = new Uint8Array(await file.arrayBuffer());
+     * const id = canvas.add_image_bytes(bytes, file.type, worldX, worldY);
+     * ```
+     */
+    add_image_bytes(bytes: Uint8Array, mime: string, x: number, y: number): bigint;
+    /**
      * 添加直线
      *
      * # 参数
@@ -203,7 +228,8 @@ export class InfiniteCanvas {
      * 把当前选中元素写成剪贴板 JSON。
      *
      * 格式与 [`export_json`](Self::export_json) 相同，只含选中根和它们的子孙。
-     * 组会带上整棵子树，父子 ID 仍指向这份文档里的元素。没有选中元素时返回空字符串。
+     * 组会带上整棵子树，父子 ID 仍指向这份文档里的元素。图片会带上它们的 `assets[]`。
+     * 没有选中元素时返回空字符串。
      *
      * # 示例（JavaScript）
      * ```js
@@ -284,8 +310,8 @@ export class InfiniteCanvas {
      *
      * # 返回
      * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
-     * 没有点阵的字符画方框。图片纹理不在场景文件里，导出为纯色占位。
-     * 分组本身不绘制；隐藏的组会连同子孙一起跳过。
+     * 没有点阵的字符画方框。资源表里有像素的图片按显示矩形采样；只有 GPU 纹理
+     * id 的图片仍是纯色占位。分组本身不绘制；隐藏的组会连同子孙一起跳过。
      *
      * # 错误
      * 没有选中元素、区域为空或编码失败
@@ -294,15 +320,15 @@ export class InfiniteCanvas {
     /**
      * 把场景导出为 SVG 文本。
      *
-     * 矩形、圆、直线（含箭头）、自由路径和文本按绘制顺序写入。变换使用与画布相同的
-     * `matrix`（缩放、旋转、平移）。`viewBox` 默认是全部可见元素的包围盒。
+     * 矩形、圆、直线（含箭头）、自由路径、文本，以及带像素的图片按绘制顺序写入。
+     * 变换使用与画布相同的 `matrix`（缩放、旋转、平移）。`viewBox` 默认是全部可见元素的包围盒。
      *
      * # 参数
-     * - `selected_only`: `true` 时只导出当前选中元素，包围盒也只包住这些元素
+     * - `selected_only`: `true` 时只导出当前选中元素，以及选中组下的可见子孙。包围盒也只包住这些元素
      *
      * # 返回
-     * SVG 文档。图片纹理不在场景里，对应元素会被跳过并在文档中注明。
-     * 文本写成 `<text>`，锚点与对齐方式一致。
+     * SVG 文档。有资源字节的图片写成 `<image>`，`href` 是 data URL。
+     * 没有字节的纹理会被跳过并在文档中注明。文本写成 `<text>`，锚点与对齐方式一致。
      *
      * # 示例（JavaScript）
      * ```js
@@ -389,8 +415,8 @@ export class InfiniteCanvas {
     /**
      * 读取当前选择的公共样式。
      *
-     * 没有选中元素时 `count` 为 0，`hasShape` / `hasText` 为 false。
-     * 组会展开到子孙。字段含义：
+     * 没有选中元素时 `count` 为 0，`hasShape` / `hasText` / `hasImage` 为 false。
+     * 组会展开到子孙。图片只出现在 `opacity` 里。字段含义：
      *
      * - `fill` / `stroke` / `textColor`：`#rrggbbaa`，没有颜色时为 null
      * - `fillMixed` 等：多选不一致
@@ -708,6 +734,13 @@ export class InfiniteCanvas {
      * `{ x, y, width, height }`，或 `null`。
      */
     scene_bounds(): any;
+    /**
+     * 屏幕坐标转世界坐标。拖放和粘贴图片时用它定位左上角。
+     *
+     * # 返回
+     * `[x, y]`
+     */
+    screen_to_world(x: number, y: number): Float32Array;
     select_element(element_id: bigint, additive: boolean): boolean;
     /**
      * 把相机中心移到世界坐标。
@@ -858,6 +891,7 @@ export interface InitOutput {
     readonly infinitecanvas_abandon_text_raster: (a: number, b: bigint) => void;
     readonly infinitecanvas_add_circle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
     readonly infinitecanvas_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
+    readonly infinitecanvas_add_image_bytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [bigint, number, number];
     readonly infinitecanvas_add_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
     readonly infinitecanvas_add_path: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
     readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
@@ -938,6 +972,7 @@ export interface InitOutput {
     readonly infinitecanvas_reorder_element: (a: number, b: bigint, c: bigint, d: number) => number;
     readonly infinitecanvas_reorder_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_scene_bounds: (a: number) => any;
+    readonly infinitecanvas_screen_to_world: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_camera_center: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;

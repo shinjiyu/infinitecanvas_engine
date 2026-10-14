@@ -54,7 +54,7 @@ Scene ◀── from_json ── Y.Doc
 - 光标和选区不进文档。写入前会清掉 `selected`，物化后也是 `false`。撤销栈、脏标记、顶点缓存同样不在文档里。
 - 直接改 `Scene` 不会写进 Y.Doc。要走 `CollabSession`。
 - `allocate_id` 的形式是 `(peer_slot << 32) | seq`。`seq` 占低 32 位，所以 `peer_slot` 只能用剩下的 21 位（`0..=2_097_151`，常量 `MAX_PEER_SLOT`）。`with_client_id` 会断言这个上限。这样元素 id 始终 `<= 2^53 - 1`，放进 JavaScript `Number` 不会丢精度。两端 slot 相同就可能撞 id。不要用引擎的 `Scene::next_id` 给并发的两端发号。`CollabSession::new` 从 client id 推导 slot 时也会掩到这 21 位。
-- 图片像素不在场景 JSON 里，因此也不在 CRDT 里。Text 的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 会同步。`texture_id`、LOD、`revision`、`editing` 是 `#[serde(skip)]`，对端物化后 `texture_id` 为空，按自己的缩放重新光栅化。
+- 图片元素的 `asset_id` 随元素 JSON 同步，但场景文件里的 `assets[]` 像素不在 Y.Doc 里。对端物化后没有字节，PNG 仍是纯色占位，SVG 仍写跳过注释。Text 的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 会同步。`texture_id`、LOD、`revision`、`editing` 是 `#[serde(skip)]`，对端物化后 `texture_id` 为空，按自己的缩放重新光栅化。
 - 未知元素种类会让物化失败，和 JSON 导入一样。失败时文档已经吃进更新，`scene()` 仍留着上一份成功快照。`text` 和 `group` 是场景 JSON v1 的种类。组的 `children`、元素的 `parent` / `locked`，以及组移动后子孙的世界变换，都在这整段 JSON 里同步。
 - 同一个子元素被两端同时放进不同的组时，子元素那一键仍是整份 JSON 的 last-write-wins，不会把两个 `parent` 合并。
 - 每次本地事务或远端更新成功后，都会把整份 `elements` 地图解码成 `Scene`，代价是 O(n)。按元素增量 observe 可以以后再做。

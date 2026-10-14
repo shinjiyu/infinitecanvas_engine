@@ -22,8 +22,8 @@ pub(crate) struct StylePreview {
 impl InfiniteCanvas {
     /// 读取当前选择的公共样式。
     ///
-    /// 没有选中元素时 `count` 为 0，`hasShape` / `hasText` 为 false。
-    /// 组会展开到子孙。字段含义：
+    /// 没有选中元素时 `count` 为 0，`hasShape` / `hasText` / `hasImage` 为 false。
+    /// 组会展开到子孙。图片只出现在 `opacity` 里。字段含义：
     ///
     /// - `fill` / `stroke` / `textColor`：`#rrggbbaa`，没有颜色时为 null
     /// - `fillMixed` 等：多选不一致
@@ -44,6 +44,7 @@ impl InfiniteCanvas {
         js_set(&obj, "count", JsValue::from(ids.len() as u32));
         js_set(&obj, "hasShape", JsValue::from(style.has_shape));
         js_set(&obj, "hasText", JsValue::from(style.has_text));
+        js_set(&obj, "hasImage", JsValue::from(style.has_image));
         write_optional_color(&obj, "fill", &style.fill);
         write_optional_color(&obj, "stroke", &style.stroke);
         write_number(&obj, "strokeWidth", &style.stroke_width);

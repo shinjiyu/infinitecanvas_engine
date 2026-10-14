@@ -16,6 +16,10 @@ fn default_image_alpha() -> f32 {
 
 /// Image 元素
 ///
+/// `asset_id` 指向场景资源表里的一份像素。`intrinsic_width` / `intrinsic_height`
+/// 是这份像素的原始尺寸（降采样之后）。`size` 是画布上的显示尺寸，和变换分开存。
+/// 没有资源、只引用已经上传的 GPU 纹理时，`asset_id` 为空，`texture_id` 仍是采样键。
+///
 /// # 示例
 ///
 /// ```
@@ -46,7 +50,19 @@ pub struct Image {
     /// 图片显示尺寸（像素）
     pub size: Vec2,
     /// 纹理 ID（对应 TextureManager 中的纹理）
+    ///
+    /// 资源图片里它和 [`Self::asset_id`] 相同。JSON 可省略，导入时会从 `asset_id` 补上。
+    #[serde(default)]
     pub texture_id: String,
+    /// 场景资源 ID。空字符串表示像素不在资源表里。
+    #[serde(default)]
+    pub asset_id: String,
+    /// 资源像素宽。没有资源时为 0。
+    #[serde(default)]
+    pub intrinsic_width: u32,
+    /// 资源像素高。没有资源时为 0。
+    #[serde(default)]
+    pub intrinsic_height: u32,
     /// UV 裁剪区域（可选）
     ///
     /// 坐标范围 [0, 1]，表示纹理的归一化坐标：
@@ -82,9 +98,55 @@ impl Image {
             props,
             size,
             texture_id,
+            asset_id: String::new(),
+            intrinsic_width: 0,
+            intrinsic_height: 0,
             uv_rect: None,
             alpha: 1.0,
         }
+    }
+
+    /// 用场景资源创建图片。
+    ///
+    /// 显示尺寸默认等于像素宽高（1 像素 = 1 世界单位）。
+    /// `texture_id` 与 `asset_id` 相同，纹理管线按这个 id 采样。
+    ///
+    /// # 参数
+    /// - `id`: 元素 ID
+    /// - `position`: 左上角（世界坐标）
+    /// - `asset_id`: [`crate::asset::AssetTable`] 里的资源 ID
+    /// - `intrinsic_width`, `intrinsic_height`: 资源像素尺寸
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::element::Image;
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let image = Image::from_asset(1, Vec2::ZERO, "img_abc", 32, 16);
+    /// assert_eq!(image.asset_id, "img_abc");
+    /// assert_eq!(image.size.x, 32.0);
+    /// assert_eq!(image.intrinsic_height, 16);
+    /// ```
+    pub fn from_asset(
+        id: ElementId,
+        position: Vec2,
+        asset_id: &str,
+        intrinsic_width: u32,
+        intrinsic_height: u32,
+    ) -> Self {
+        let mut image = Self::new(
+            id,
+            position,
+            Vec2::new(
+                intrinsic_width.max(1) as f32,
+                intrinsic_height.max(1) as f32,
+            ),
+            asset_id.to_string(),
+        );
+        image.asset_id = asset_id.to_string();
+        image.intrinsic_width = intrinsic_width;
+        image.intrinsic_height = intrinsic_height;
+        image
     }
 
     /// 创建带 UV 裁剪的 Image 元素
@@ -121,9 +183,75 @@ impl Image {
             props,
             size,
             texture_id,
+            asset_id: String::new(),
+            intrinsic_width: 0,
+            intrinsic_height: 0,
             uv_rect: Some(uv_rect),
             alpha: 1.0,
         }
+    }
+
+    /// 导入后把采样键对齐到资源 id。
+    ///
+    /// 旧文件只有 `texture_id`、没有 `asset_id`，这里不会改它。
+    pub fn finish_load(&mut self) {
+        if !self.asset_id.is_empty() {
+            self.texture_id = self.asset_id.clone();
+        }
+    }
+
+    /// 在世界坐标采样资源像素。
+    ///
+    /// 先逆变换到显示矩形，再按 UV 裁剪映射到像素，使用最近邻。
+    /// `pixels` 是 RGBA8，长度应为 `width * height * 4`。完全透明的像素返回 `None`。
+    ///
+    /// # 参数
+    /// - `world`: 世界坐标
+    /// - `width`, `height`: 像素尺寸
+    /// - `pixels`: RGBA8
+    pub fn sample_pixels(
+        &self,
+        world: Vec2,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Option<Color> {
+        if !self.props.visible || width == 0 || height == 0 || !self.contains_point(world) {
+            return None;
+        }
+        if self.size.x.abs() < 1e-6 || self.size.y.abs() < 1e-6 {
+            return None;
+        }
+        let local = self.props.transform.inverse_transform_point(world);
+        let mut u = local.x / self.size.x;
+        let mut v = local.y / self.size.y;
+        if let Some(rect) = self.uv_rect {
+            u = rect.x + u * rect.width;
+            v = rect.y + v * rect.height;
+        }
+        if !u.is_finite() || !v.is_finite() {
+            return None;
+        }
+        let u = u.clamp(0.0, 1.0);
+        let v = v.clamp(0.0, 1.0);
+        let x = (u * width as f32).floor() as u32;
+        let y = (v * height as f32).floor() as u32;
+        let x = x.min(width - 1);
+        let y = y.min(height - 1);
+        let index = ((y * width + x) * 4) as usize;
+        if index + 3 >= pixels.len() {
+            return None;
+        }
+        let alpha = (pixels[index + 3] as f32 / 255.0) * self.alpha.clamp(0.0, 1.0);
+        if alpha <= 0.0 {
+            return None;
+        }
+        Some(Color::new(
+            pixels[index] as f32 / 255.0,
+            pixels[index + 1] as f32 / 255.0,
+            pixels[index + 2] as f32 / 255.0,
+            alpha,
+        ))
     }
 
     /// 设置透明度
@@ -404,6 +532,27 @@ mod tests {
         // 旋转前会命中的 (150, 100) 转到局部 y 为负，不再命中。
         assert!(img.contains_point(Vec2::new(50.0, 200.0)));
         assert!(!img.contains_point(Vec2::new(150.0, 100.0)));
+    }
+
+    #[test]
+    fn hit_test_uses_display_size_not_intrinsic_pixels() {
+        let image = Image::from_asset(7, Vec2::new(10.0, 20.0), "img_a", 4, 2);
+        assert_eq!(image.intrinsic_width, 4);
+        assert_eq!(image.bounding_box().width, 4.0);
+        assert!(image.contains_point(Vec2::new(10.5, 20.5)));
+        assert!(image.contains_point(Vec2::new(13.9, 21.9)));
+        assert!(!image.contains_point(Vec2::new(14.1, 20.5)));
+        assert!(!image.contains_point(Vec2::new(9.0, 20.5)));
+
+        let mut wide = image.clone();
+        wide.size = Vec2::new(40.0, 10.0);
+        assert!(wide.contains_point(Vec2::new(49.0, 29.0)));
+        // 落在原来的 4×2 像素框外面，但还在放大后的显示框里。
+        assert!(wide.contains_point(Vec2::new(30.0, 25.0)));
+        assert!(!wide.contains_point(Vec2::new(60.0, 21.0)));
+        let bounds = wide.bounding_box();
+        assert_eq!(bounds.width, 40.0);
+        assert_eq!(bounds.height, 10.0);
     }
 
     #[test]

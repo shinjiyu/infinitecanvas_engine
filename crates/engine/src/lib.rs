@@ -18,6 +18,7 @@
 //! ```
 
 pub mod align;
+pub mod asset;
 pub mod command;
 pub mod element;
 pub mod event;
@@ -42,6 +43,7 @@ pub use align::{
     apply_align, apply_distribute, AlignElementsCommand, AlignMode, DistributeAxis,
     DistributeElementsCommand,
 };
+pub use asset::{fitted_size, AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
 pub use command::{
     apply_nudge, apply_stack_reorder, AddElementCommand, Command, CommandHistory,
     DuplicateElementsCommand, MoveCommand, NudgeDirection, NudgeElementsCommand,

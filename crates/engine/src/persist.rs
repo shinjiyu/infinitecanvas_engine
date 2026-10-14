@@ -3,9 +3,9 @@
 //! 把场景写成带 `version` 的 JSON，并可以把视口或选中区域栅格化成 PNG。
 //!
 //! ```text
-//! Scene ── to_json ──▶ { version, next_id, elements[] }
-//!                          │  type + data
-//!                          ▼
+//! Scene ── to_json ──▶ { version, next_id, assets[], elements[] }
+//!                          │  type + data          │ data URL，同一张图只写一次
+//!                          ▼                       ▼
 //!                     rectangle / circle / image / line / path / text / group
 //! Scene ◀─ from_json ── 缺省字段用 serde default，未知字段忽略
 //! ```
@@ -13,6 +13,7 @@
 //! 只接受 [`SCENE_FORMAT_VERSION`]。新增可选字段时保持同一版本，并为字段加上
 //! `#[serde(default)]`。新增元素种类时扩展解码分支；未知种类会报错，避免静默丢数据。
 
+use crate::asset::{AssetError, AssetRecord, AssetTable};
 use crate::element::{Circle, Element, Image, Rectangle, Text};
 use crate::scene::{AnyElement, Scene};
 use crate::{ElementId, Viewport};
@@ -30,9 +31,10 @@ const MAX_PNG_DIMENSION: u32 = 2048;
 /// 选区导出在世界包围盒外再留出的边距，避免描边被裁掉。
 const SELECTION_PADDING: f32 = 1.0;
 
-/// 图片元素在 PNG 中的占位色
+/// 没有像素资源的图片在 PNG 中的占位色
 ///
-/// 纹理像素存在 GPU 上，不写入场景 JSON，因此导出时用纯色矩形代替。
+/// 只带 GPU `texture_id`、资源表里没有字节的图片仍用纯色矩形。
+/// 资源表里有像素时，导出直接采样这些像素。
 pub const IMAGE_PNG_PLACEHOLDER: Color = Color::new(0.62, 0.70, 0.86, 1.0);
 
 /// 场景文件
@@ -40,6 +42,7 @@ pub const IMAGE_PNG_PLACEHOLDER: Color = Color::new(0.62, 0.70, 0.86, 1.0);
 /// # 字段
 /// - `version`: 格式版本
 /// - `next_id`: 下一个元素 ID
+/// - `assets`: 图片资源，按 id 排序。同一张图只出现一次
 /// - `elements`: 按 id 升序排列的元素
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct SceneFile {
@@ -47,6 +50,8 @@ pub struct SceneFile {
     pub version: u32,
     /// 下一个可分配的元素 ID
     pub next_id: ElementId,
+    /// 图片资源（data URL）。没有图片时是空数组。
+    pub assets: Vec<AssetRecord>,
     /// 场景元素
     pub elements: Vec<AnyElement>,
 }
@@ -108,6 +113,8 @@ struct RawSceneFile {
     version: u32,
     #[serde(default)]
     next_id: ElementId,
+    #[serde(default)]
+    assets: Vec<AssetRecord>,
     #[serde(default)]
     elements: Vec<Value>,
 }
@@ -201,7 +208,18 @@ impl Scene {
         } else {
             max_id.saturating_add(1)
         };
-        Ok(Scene::from_parts(elements, next_id))
+        let mut assets = AssetTable::from_records(raw.assets).map_err(asset_error)?;
+        let asset_ids: Vec<String> = elements
+            .values()
+            .filter_map(|element| match element {
+                AnyElement::Image(image) if !image.asset_id.is_empty() => {
+                    Some(image.asset_id.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assets.assign_references(asset_ids);
+        Ok(Scene::from_parts(elements, next_id, assets))
     }
 
     /// 场景的内存文档，元素按 id 排序
@@ -211,9 +229,14 @@ impl Scene {
         SceneFile {
             version: SCENE_FORMAT_VERSION,
             next_id: self.peek_next_id(),
+            assets: self.image_asset_records(),
             elements,
         }
     }
+}
+
+fn asset_error(err: AssetError) -> PersistError {
+    PersistError::Json(err.to_string())
 }
 
 fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
@@ -231,9 +254,12 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
         "circle" => serde_json::from_value(data)
             .map(AnyElement::Circle)
             .map_err(|err| PersistError::Json(err.to_string())),
-        "image" => serde_json::from_value(data)
-            .map(AnyElement::Image)
-            .map_err(|err| PersistError::Json(err.to_string())),
+        "image" => {
+            let mut image: Image =
+                serde_json::from_value(data).map_err(|err| PersistError::Json(err.to_string()))?;
+            image.finish_load();
+            Ok(AnyElement::Image(image))
+        }
         "line" => serde_json::from_value(data)
             .map(AnyElement::Line)
             .map_err(|err| PersistError::Json(err.to_string())),
@@ -257,7 +283,7 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
 ///
 /// 一个世界单位对应 `viewport.zoom()` 个像素，并限制在 [`MAX_PNG_DIMENSION`] 以内。
 /// 直线、箭头和自由路径按半线宽上色，不含点选余量。文本用 `font8x8` 点阵上色，
-/// 没有点阵的字符画成方框。图片元素用纯色占位。
+/// 没有点阵的字符画成方框。有资源像素的图片按像素采样；只有 GPU 纹理 id 的图片用纯色占位。
 ///
 /// # 参数
 /// - `scene`: 要导出的场景
@@ -350,7 +376,7 @@ fn export_region_png(
         for y in y0..y1 {
             for x in x0..x1 {
                 let world = pixel_center_world(region, width, height, x, y);
-                if let Some(color) = sample_element(element, world) {
+                if let Some(color) = sample_element(scene, element, world) {
                     let index = ((y as usize) * (width as usize) + (x as usize)) * 4;
                     blend(&mut pixels[index..index + 4], color);
                 }
@@ -440,11 +466,11 @@ fn pixel_center_world(region: Rect, width: u32, height: u32, x: u32, y: u32) -> 
     )
 }
 
-fn sample_element(element: &AnyElement, world: Vec2) -> Option<Color> {
+fn sample_element(scene: &Scene, element: &AnyElement, world: Vec2) -> Option<Color> {
     match element {
         AnyElement::Rectangle(rect) => sample_rectangle(rect, world),
         AnyElement::Circle(circle) => sample_circle(circle, world),
-        AnyElement::Image(image) => sample_image(image, world),
+        AnyElement::Image(image) => sample_image(scene, image, world),
         AnyElement::Line(line) => line.color_at(world),
         AnyElement::Path(path) => path.color_at(world),
         AnyElement::Text(text) => text.color_at(world),
@@ -502,9 +528,12 @@ fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
     None
 }
 
-fn sample_image(image: &Image, world: Vec2) -> Option<Color> {
+fn sample_image(scene: &Scene, image: &Image, world: Vec2) -> Option<Color> {
     if !image.props.visible || !image.contains_point(world) {
         return None;
+    }
+    if let Some(asset) = scene.image_asset(&image.asset_id) {
+        return image.sample_pixels(world, asset.width, asset.height, &asset.rgba);
     }
     let mut color = IMAGE_PNG_PLACEHOLDER;
     color.a *= image.alpha.clamp(0.0, 1.0);
@@ -1084,6 +1113,57 @@ mod tests {
             255,
         ];
         assert_pixel(sample_pixel(&scene, Vec2::new(5.0, 5.0)), placeholder);
+    }
+
+    #[test]
+    fn json_round_trip_stores_image_bytes_once_and_png_samples_them() {
+        let mut pixels = vec![0u8; 2 * 2 * 4];
+        pixels[0..4].copy_from_slice(&[255, 0, 0, 255]);
+        pixels[4..8].copy_from_slice(&[0, 0, 255, 255]);
+        pixels[8..12].copy_from_slice(&[0, 255, 0, 255]);
+        pixels[12..16].copy_from_slice(&[255, 255, 0, 255]);
+        let png = crate::asset::encode_png_rgba(2, 2, &pixels).unwrap();
+
+        let mut scene = Scene::new();
+        let asset_id = scene.insert_image_bytes(&png, "image/png").unwrap();
+        let first = scene.next_id();
+        scene.add_image(Image::from_asset(first, Vec2::ZERO, &asset_id, 2, 2));
+        let second = scene.next_id();
+        let mut shifted = Image::from_asset(second, Vec2::new(20.0, 0.0), &asset_id, 2, 2);
+        shifted.set_alpha(1.0);
+        scene.add_image(shifted);
+
+        let json = scene.to_json().unwrap();
+        assert_eq!(json.matches("data:image/png;base64,").count(), 1);
+        assert!(json.contains(&asset_id));
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(restored, scene);
+        assert_eq!(restored.image_asset_count(), 1);
+        assert_eq!(restored.asset_refcount(&asset_id), 2);
+        let asset = restored.image_asset(&asset_id).unwrap();
+        assert_eq!(asset.width, 2);
+        assert_eq!(asset.height, 2);
+        assert_eq!(asset.rgba, pixels);
+
+        assert_pixel(
+            sample_pixel(&restored, Vec2::new(0.5, 0.5)),
+            [255, 0, 0, 255],
+        );
+        assert_pixel(
+            sample_pixel(&restored, Vec2::new(1.5, 0.5)),
+            [0, 0, 255, 255],
+        );
+        assert_pixel(
+            sample_pixel(&restored, Vec2::new(21.5, 1.5)),
+            [255, 255, 0, 255],
+        );
+        let placeholder = [
+            channel(IMAGE_PNG_PLACEHOLDER.r),
+            channel(IMAGE_PNG_PLACEHOLDER.g),
+            channel(IMAGE_PNG_PLACEHOLDER.b),
+            255,
+        ];
+        assert_ne!(sample_pixel(&restored, Vec2::new(0.5, 0.5)), placeholder);
     }
 
     #[test]

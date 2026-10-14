@@ -15,6 +15,8 @@
 //! 组会连同整棵子树一起复制。副本内部的 `parent` / `children` 改写成新 ID。
 //! 粘贴时，文档里指向外部的父节点会被丢掉，新元素挂在根上。
 //! 原地克隆则保留场景里仍然存在的父组，成为它的新兄弟。
+//! 图片副本增加同一份资源的引用。剪贴板 JSON 带上这些图片的 `assets[]`，
+//! 粘贴到另一场景时缺的像素会并进目标资源表。
 //! 每个新元素都 [`Scene::mark_dirty`](super::Scene::mark_dirty)。
 
 use super::{AnyElement, Scene};
@@ -65,7 +67,8 @@ impl Scene {
     ///
     /// 只包含这些根和它们的子孙。指向文档外的 `parent` 写成 `null`，组的 `children`
     /// 只保留文档内的 ID，这样粘贴到另一场景时父子关系仍然闭合。`selected` 写成 false。
-    /// 元素按 id 升序排列。
+    /// 元素按 id 升序排列。图片元素引用的资源写成 `assets[]`，同一张图只写一次。
+    /// 只有 GPU 纹理 id、资源表里没有字节的图片不写资源记录。
     ///
     /// # 参数
     /// - `ids`: 要写入剪贴板的元素。祖先也在列表里时不单独再写一遍
@@ -112,6 +115,7 @@ impl Scene {
         let file = SceneFile {
             version: SCENE_FORMAT_VERSION,
             next_id,
+            assets: asset_records_for(self, &elements),
             elements,
         };
         serde_json::to_string(&file).map_err(|err| PersistError::Json(err.to_string()))
@@ -121,6 +125,7 @@ impl Scene {
     ///
     /// 格式与 [`Scene::from_json`](super::Scene::from_json) 相同。每个元素分配新 ID，
     /// 组内 `parent` / `children` 按新 ID 重映射。文档外的父节点不会挂到当前场景里同号的组上。
+    /// `assets[]` 里当前场景还没有的图片会并进资源表，新元素再增加引用。
     /// `focus` 有值时，先把叶子包围盒中心移到该世界坐标，再加上 `offset`
     /// （连续粘贴用 `offset` 把后一次往旁边错开）。`focus` 为空时只应用 `offset`。
     /// 新元素的 z 整块高于当前场景。
@@ -160,6 +165,7 @@ impl Scene {
         if elements.is_empty() {
             return Ok(Vec::new());
         }
+        self.adopt_missing_assets(&incoming);
         elements.sort_by_key(|element| element.id());
         let shift = paste_shift(&elements, offset, focus);
         Ok(self.spawn_cloned(elements, shift, false))
@@ -181,6 +187,7 @@ impl Scene {
                 continue;
             }
             self.insert_element(element.clone());
+            self.retain_image_element(element);
             self.mark_dirty(id);
         }
         let mut attachments: Vec<(i32, ElementId, ElementId)> = Vec::new();
@@ -207,6 +214,21 @@ impl Scene {
             self.insert_child(parent, id, usize::MAX);
         }
         self.refresh_copied_bounds(&spawned);
+    }
+
+    /// 把剪贴板场景里有、当前场景还没有的图片放进资源表，引用先置 0。
+    ///
+    /// 随后的 [`Self::insert_copied`] 会按新元素加引用。同 id 已存在时不复制第二份像素。
+    fn adopt_missing_assets(&mut self, incoming: &Scene) {
+        let missing: Vec<crate::asset::ImageAsset> = incoming
+            .image_asset_records()
+            .into_iter()
+            .filter(|record| self.image_asset(&record.id).is_none())
+            .filter_map(|record| incoming.image_asset(&record.id).cloned())
+            .collect();
+        if !missing.is_empty() {
+            self.restore_assets(missing);
+        }
     }
 
     fn duplicate_roots(&self, ids: &[ElementId]) -> Vec<ElementId> {
@@ -351,6 +373,21 @@ impl Scene {
             self.refresh_bounds_upwards(root);
         }
     }
+}
+
+fn asset_records_for(scene: &Scene, elements: &[AnyElement]) -> Vec<crate::asset::AssetRecord> {
+    let mut ids: Vec<&str> = elements
+        .iter()
+        .filter_map(|element| match element {
+            AnyElement::Image(image) if !image.asset_id.is_empty() => Some(image.asset_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .filter_map(|id| scene.image_asset(id).map(|asset| asset.to_record()))
+        .collect()
 }
 
 fn remap_parent(
@@ -726,5 +763,69 @@ mod tests {
         assert_eq!(scene.count(), 6);
         assert!(history.redo(&mut scene));
         assert_eq!(scene.count(), after_paste);
+    }
+
+    #[test]
+    fn duplicate_and_paste_share_image_pixels() {
+        let png = crate::asset::encode_png_rgba(1, 1, &[12, 34, 56, 255]).unwrap();
+        let mut scene = Scene::new();
+        let asset_id = scene.insert_image_bytes(&png, "image/png").unwrap();
+        scene.add_image(Image::from_asset(1, Vec2::ZERO, &asset_id, 1, 1));
+        assert_eq!(scene.asset_refcount(&asset_id), 1);
+
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(DuplicateElementsCommand::new(
+                vec![1],
+                Vec2::new(10.0, 10.0),
+            )),
+            &mut scene,
+        );
+        assert_eq!(scene.asset_refcount(&asset_id), 2);
+        assert_eq!(scene.image_asset_count(), 1);
+        assert!(history.undo(&mut scene));
+        assert_eq!(scene.asset_refcount(&asset_id), 1);
+        assert_eq!(
+            scene.image_asset(&asset_id).unwrap().rgba,
+            vec![12, 34, 56, 255]
+        );
+        assert!(history.redo(&mut scene));
+        assert_eq!(scene.asset_refcount(&asset_id), 2);
+
+        let json = scene.copy_elements_json(&[1]).unwrap();
+        assert!(json.contains("\"assets\""));
+        assert!(json.contains(&asset_id));
+
+        let mut other = Scene::new();
+        let pasted = other.paste_json(&json, Vec2::ZERO, None).unwrap();
+        assert_eq!(pasted.len(), 1);
+        assert_eq!(other.asset_refcount(&asset_id), 1);
+        assert_eq!(other.image_asset_count(), 1);
+        assert_eq!(
+            other.image_asset(&asset_id).unwrap().rgba,
+            vec![12, 34, 56, 255]
+        );
+
+        other.paste_json(&json, Vec2::new(4.0, 0.0), None).unwrap();
+        assert_eq!(other.asset_refcount(&asset_id), 2);
+        assert_eq!(other.image_asset_count(), 1);
+
+        let mut solo = Scene::new();
+        let mut solo_history = CommandHistory::new();
+        solo_history.execute(
+            Box::new(PasteElementsCommand::new(json, Vec2::ZERO, None)),
+            &mut solo,
+        );
+        assert_eq!(solo.image_asset_count(), 1);
+        assert_eq!(solo.asset_refcount(&asset_id), 1);
+        assert!(solo_history.undo(&mut solo));
+        assert_eq!(solo.image_asset_count(), 0);
+        assert!(solo.image_asset(&asset_id).is_none());
+        assert!(solo_history.redo(&mut solo));
+        assert_eq!(
+            solo.image_asset(&asset_id).unwrap().rgba,
+            vec![12, 34, 56, 255]
+        );
+        assert_eq!(solo.asset_refcount(&asset_id), 1);
     }
 }

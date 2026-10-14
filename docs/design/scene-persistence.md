@@ -12,6 +12,7 @@ infinitecanvas-wasm::InfiniteCanvas
     │ export_svg
     ▼
 Scene ── elements: rectangle | circle | image | line | path | text | group
+         assets:   图片像素，data URL，同一张图一份
          PNG 与 SVG 共用 elements_in_paint_order（z_index，再按 id）
 ```
 
@@ -21,6 +22,7 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 | --- | --- |
 | `version` | 必须是 `1`，缺失或其它值都拒绝 |
 | `next_id` | 可省略。小于等于已有最大 ID 时抬到 `max_id + 1` |
+| `assets[]` | 可省略。图片资源 `{ id, mime, width, height, data }`。`data` 是 data URL，同一张图只写一次 |
 | `elements[]` | `{ "type", "data" }`。`type` 为 `rectangle`、`circle`、`image`、`line`、`path`、`text`、`group` |
 
 `data.props.transform` 含 `translation`、`rotation`（弧度，即 `ElementProps::rotation`）、`scale`。直线的 `arrow` 缺省为 `false`。路径的 `points` 缺省为空。文本的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 可省略；对齐缺省为 `left`，字号缺省为 32，尺寸缺省时按内容估算。`texture_id`、LOD、`revision`、`editing` 用 `#[serde(skip)]`，不进文件。PNG 采样先把世界点逆变换回局部空间，所以旋转和非均匀缩放与命中测试一致。
@@ -29,7 +31,7 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 
 ## PNG
 
-视口导出使用视口的世界包围盒和当前缩放。选区导出使用选中元素包围盒并外扩 1 个世界单位。直线、箭头和路径按半线宽上色，不含点选余量。文本用 `font8x8` 点阵画该字体覆盖的字符；没有点阵的字符（包括中文）画成方框，因为屏幕上的 Canvas2D 纹理不在场景文件里。图片纹理同样不在文件里，PNG 中为纯色占位。
+视口导出使用视口的世界包围盒和当前缩放。选区导出使用选中元素包围盒并外扩 1 个世界单位。直线、箭头和路径按半线宽上色，不含点选余量。文本用 `font8x8` 点阵画该字体覆盖的字符；没有点阵的字符（包括中文）画成方框，因为屏幕上的 Canvas2D 纹理不在场景文件里。图片若在资源表里有像素，PNG 按显示矩形采样这些像素；只有 GPU 纹理 id、没有字节的图片仍用纯色占位。
 
 ## SVG
 
@@ -41,23 +43,25 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 | circle | `<circle>` |
 | line | `<line>`，箭头是缩短箭杆后的 `<polygon>`，几何与 `Line::generate_vertices` 相同 |
 | path | `<polyline>`，`stroke-miterlimit="4"` |
-| image | 跳过。像素不在场景里，文件中留 `<!-- image N skipped: ... -->` |
+| image | 资源表里有编码字节时写成 `<image href="data:...">`，局部原点在左上角，宽高是显示尺寸，`preserveAspectRatio="none"`。`alpha` 写在外层 `opacity`。UV 裁剪用嵌套 `<svg viewBox>` 取像素区域。没有字节的旧纹理跳过，文件中留 `<!-- image N skipped: ... -->`，且不计入 viewBox |
 | text | `<text>` + `<tspan>`。锚点与 `TextAlign` 一致，`font-size` 是世界单位字号 |
 | group | 不画几何。子孙已是世界变换，矩阵不再乘组变换。绘制顺序里连成一段时写成不带 `transform` 的 `<g id="eN">`。隐藏组藏住子孙 |
 
-变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。Y 轴向下。
+变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。图片的 `opacity` 来自 `Image::alpha`。Y 轴向下。
 
 ## 剪贴板
 
-复制和粘贴复用上面的 version 1 文档，不另起格式。
+复制和粘贴复用上面的 version 1 文档，不另起格式。选中的图片会带上它们引用的 `assets[]`（同一张图一份 data URL）。
 
 ```text
-选中根 ── Scene::copy_elements_json ──▶ { version, next_id, elements[] }
+选中根 ── Scene::copy_elements_json ──▶ { version, next_id, assets[], elements[] }
                                               │
                                               ▼
-                                    Scene::paste_json（新 ID）
+                                    Scene::paste_json（新 ID，缺的资源并进当前表）
 ```
 
-`copy_elements_json` 只写入选中根和子孙。指向文档外的 `parent` 变成 `null`，组的 `children` 只留文档内的 ID。`paste_json` 为每个元素分配新 ID，并按原来的 z 顺序把整块放到当前最大 z 之上。`focus` 有值时，叶子包围盒中心先对准该世界坐标，再加上 `offset`。
+`copy_elements_json` 只写入选中根和子孙。指向文档外的 `parent` 变成 `null`，组的 `children` 只留文档内的 ID。`paste_json` 为每个元素分配新 ID，并按原来的 z 顺序把整块放到当前最大 z 之上。目标场景里已经有同 id 的资源时不复制第二份像素，只增加引用。`focus` 有值时，叶子包围盒中心先对准该世界坐标，再加上 `offset`。
 
-`Scene::duplicate` 在同一场景里克隆。父组不在副本里时，新根仍挂在那个组下。Ctrl+C / Ctrl+V / Ctrl+D 分别走 `PasteElementsCommand` 和 `DuplicateElementsCommand`，撤销删掉新元素，重做按原 ID 插回。新元素调用 `Scene::mark_dirty`。
+`Scene::duplicate` 在同一场景里克隆。父组不在副本里时，新根仍挂在那个组下。图片克隆增加同一资源的引用。Ctrl+C / Ctrl+V / Ctrl+D 分别走 `PasteElementsCommand` 和 `DuplicateElementsCommand`，撤销删掉新元素，重做按原 ID 插回。引用降到 0 时像素留在命令里，重做再放回。新元素调用 `Scene::mark_dirty`。
+
+删除组的撤销仍只恢复根节点自己的图片像素（`parked_asset_for` 在组上不保留子图片）。复制、粘贴和克隆会带上子树里的图片。

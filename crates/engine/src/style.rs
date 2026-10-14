@@ -1,7 +1,8 @@
 //! 选中元素的样式读取和修改。
 //!
 //! 矩形、圆、直线、路径共用 [`ElementStyle`]。文本另外记录字号、文字颜色、
-//! 不透明度和可选描边。组没有自己的样式：读和写都会展开到子孙叶子。
+//! 不透明度和可选描边。图片只参与不透明度（[`crate::element::Image::alpha`]），
+//! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
 //!
 //! ```text
 //! 选中 id ──► style_target_ids（组展开为子孙）
@@ -9,7 +10,8 @@
 //!                 ├─ selection_style  多选不一致 → StyleField::Mixed
 //!                 └─ StylePatch ──► SetStyleCommand ──► mark_dirty
 //!                                      │
-//!                                      └─ 文本字号 / 颜色 / 描边变化时丢掉光栅
+//!                                      ├─ 文本字号 / 颜色 / 描边变化时丢掉光栅
+//!                                      └─ 图片只改 alpha
 //! ```
 
 use crate::element::{ElementId, ElementStyle};
@@ -49,6 +51,8 @@ pub enum StyleSnapshot {
     Shape(ElementStyle),
     /// 文本。
     Text(TextPaint),
+    /// 图片。只有不透明度，对应 [`crate::element::Image::alpha`]。
+    Image { alpha: f32 },
 }
 
 /// 一次样式修改。`None` 表示这个字段不动。
@@ -62,7 +66,7 @@ pub struct StylePatch {
     pub stroke: Option<Option<Color>>,
     /// 形状或文本的描边宽度。
     pub stroke_width: Option<f32>,
-    /// 形状或文本的不透明度，范围 0 到 1。
+    /// 形状、文本或图片的不透明度，范围 0 到 1。
     pub opacity: Option<f32>,
     /// 文本字号（世界单位）。
     pub font_size: Option<f32>,
@@ -79,7 +83,7 @@ pub struct SelectionStyle {
     pub stroke: StyleField<Option<Color>>,
     /// 形状和文本的描边宽度。
     pub stroke_width: StyleField<f32>,
-    /// 形状 [`ElementStyle::opacity`] 和文本不透明度。
+    /// 形状 [`ElementStyle::opacity`]、文本不透明度和图片 [`crate::element::Image::alpha`]。
     pub opacity: StyleField<f32>,
     /// 文本字号。
     pub font_size: StyleField<f32>,
@@ -89,12 +93,14 @@ pub struct SelectionStyle {
     pub has_shape: bool,
     /// 选择里有文本（含组内的文本）。
     pub has_text: bool,
+    /// 选择里有图片（含组内的图片）。图片只贡献不透明度。
+    pub has_image: bool,
 }
 
 impl SelectionStyle {
     /// 没有任何可编辑样式。
     pub fn is_empty(&self) -> bool {
-        !self.has_shape && !self.has_text
+        !self.has_shape && !self.has_text && !self.has_image
     }
 }
 
@@ -137,6 +143,11 @@ impl StyleSnapshot {
                     text.stroke_width = width;
                 }
             }
+            Self::Image { alpha } => {
+                if let Some(opacity) = finite_opacity(patch.opacity) {
+                    *alpha = opacity;
+                }
+            }
         }
         *self != original
     }
@@ -170,7 +181,7 @@ pub fn style_locked(scene: &Scene, id: ElementId) -> bool {
     false
 }
 
-/// 读取一个元素的样式。图片和组返回 `None`。
+/// 读取一个元素的样式。组返回 `None`，图片只返回不透明度。
 pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
     match scene.get(id)? {
         AnyElement::Rectangle(rect) => Some(StyleSnapshot::Shape(rect.style.clone())),
@@ -184,7 +195,8 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             stroke: text.stroke,
             stroke_width: text.stroke_width,
         })),
-        AnyElement::Image(_) | AnyElement::Group(_) => None,
+        AnyElement::Image(image) => Some(StyleSnapshot::Image { alpha: image.alpha }),
+        AnyElement::Group(_) => None,
     }
 }
 
@@ -211,6 +223,14 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                 false
             }
         }
+        Some(AnyElement::Image(image)) => {
+            if let StyleSnapshot::Image { alpha } = snapshot {
+                image.set_alpha(*alpha);
+                true
+            } else {
+                false
+            }
+        }
         _ => false,
     };
     if applied {
@@ -228,6 +248,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut text_colors = Vec::new();
     let mut has_shape = false;
     let mut has_text = false;
+    let mut has_image = false;
 
     for id in style_target_ids(scene, ids) {
         match capture_style(scene, id) {
@@ -246,6 +267,10 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 font_sizes.push(text.font_size);
                 text_colors.push(text.color);
             }
+            Some(StyleSnapshot::Image { alpha }) => {
+                has_image = true;
+                opacities.push(alpha);
+            }
             None => {}
         }
     }
@@ -259,6 +284,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         text_color: fold(text_colors),
         has_shape,
         has_text,
+        has_image,
     }
 }
 
@@ -333,6 +359,7 @@ mod tests {
         assert_eq!(style.stroke_width, StyleField::Uniform(1.0));
         assert!(style.has_shape);
         assert!(!style.has_text);
+        assert!(!style.has_image);
         assert_eq!(style.font_size, StyleField::Absent);
     }
 
@@ -499,5 +526,83 @@ mod tests {
             .iter()
             .any(|vertex| (vertex.color[3] - 0.25).abs() < 1.0e-5));
         assert!(vertices.iter().any(|vertex| vertex.position[0].abs() > 5.0));
+    }
+
+    #[test]
+    fn image_opacity_follows_other_leaves_and_leaves_the_asset_table_alone() {
+        use crate::asset::encode_png_rgba;
+        use crate::element::Image;
+
+        let mut scene = Scene::new();
+        let png = encode_png_rgba(1, 1, &[255, 0, 0, 255]).unwrap();
+        let asset_id = scene.insert_image_bytes(&png, "image/png").unwrap();
+        scene.add_image(Image::from_asset(1, Vec2::ZERO, &asset_id, 1, 1));
+        scene.add_rect(
+            Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::new(10.0, 10.0))
+                .with_style(ElementStyle::fill_only(Color::RED)),
+        );
+        if let Some(AnyElement::Image(image)) = scene.get_mut(1) {
+            image.set_alpha(0.8);
+        }
+        let group_id = scene.group(&[1, 2]).unwrap();
+
+        let image_only = selection_style(&scene, &[1]);
+        assert!(image_only.has_image);
+        assert!(!image_only.has_shape);
+        assert!(!image_only.has_text);
+        assert_eq!(image_only.opacity, StyleField::Uniform(0.8));
+        assert_eq!(image_only.fill, StyleField::Absent);
+        assert_eq!(image_only.stroke_width, StyleField::Absent);
+        assert!(!image_only.is_empty());
+
+        let together = selection_style(&scene, &[group_id]);
+        assert!(together.has_image && together.has_shape);
+        assert_eq!(together.opacity, StyleField::Mixed);
+        assert_eq!(together.fill, StyleField::Uniform(Some(Color::RED)));
+
+        let fill_only = StylePatch {
+            fill: Some(Some(Color::BLUE)),
+            ..StylePatch::default()
+        };
+        assert!(SetStyleCommand::from_patch(&scene, &[1], &fill_only).is_none());
+
+        let patch = StylePatch {
+            opacity: Some(0.3),
+            fill: Some(Some(Color::BLUE)),
+            ..StylePatch::default()
+        };
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[group_id], &patch).unwrap()),
+            &mut scene,
+        );
+        match scene.get(1).unwrap() {
+            AnyElement::Image(image) => {
+                assert_eq!(image.alpha, 0.3);
+                assert_eq!(image.asset_id, asset_id);
+            }
+            other => panic!("image, got {other:?}"),
+        }
+        assert_eq!(scene.asset_refcount(&asset_id), 1);
+        assert_eq!(scene.image_asset_count(), 1);
+        assert_eq!(shape_fill(&scene, 2), Some(Color::BLUE));
+
+        let mut cache = VertexCache::new();
+        let _ = cache.sync(&mut scene);
+        let vertices = cache.textured_slice(1).unwrap();
+        assert!(vertices
+            .iter()
+            .all(|vertex| (vertex.color[3] - 0.3).abs() < 1.0e-5));
+
+        assert!(history.undo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Image(image) => {
+                assert_eq!(image.alpha, 0.8);
+                assert_eq!(image.asset_id, asset_id);
+            }
+            other => panic!("image, got {other:?}"),
+        }
+        assert_eq!(scene.asset_refcount(&asset_id), 1);
+        assert_eq!(shape_fill(&scene, 2), Some(Color::RED));
     }
 }

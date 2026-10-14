@@ -5,7 +5,7 @@
 //!   │ elements_in_paint_order   ← 与 PNG 同一套遍历
 //!   ▼
 //! rect | circle | line+arrow | polyline | text
-//! image → 注释（像素不在场景里）
+//! image → <image href=data URL>（无字节的纹理仍是注释）
 //! group → <g id> 包住子孙，不再套一层组变换
 //!         隐藏组：子孙不导出，也不计入 viewBox
 //!   │
@@ -18,7 +18,9 @@
 //!
 //! 文本写成 `<text>` / `<tspan>`。锚点与 [`TextAlign`] 相同：左上、上边中点或右上角。
 
-use crate::element::{Circle, ElementId, ElementStyle, Line, Path, Rectangle, Text, TextAlign};
+use crate::element::{
+    Circle, ElementId, ElementStyle, Image, Line, Path, Rectangle, Text, TextAlign,
+};
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};
@@ -35,9 +37,9 @@ const VIEW_PADDING: f32 = 2.0;
 /// `selected_only` 为 true 时导出自身 `selected` 的叶子，以及选中组下的全部可见子孙叶子。
 /// viewBox 取这些叶子的包围盒；没有叶子时用 1×1，避免 `0 0 0 0`。
 ///
-/// 矩形、圆、直线（含箭头）、自由路径和文本写成对应的 SVG 图元，矩阵是叶子自己的世界变换。
-/// 组不画几何。子孙在绘制顺序里连成一段时，组写成不带 `transform` 的 `<g id="eN">`。
-/// 图片的像素不在场景里，导出时跳过，并在 SVG 里留下注释。
+/// 矩形、圆、直线（含箭头）、自由路径、文本，以及带资源字节的图片写成对应的 SVG 图元，
+/// 矩阵是叶子自己的世界变换。组不画几何。子孙在绘制顺序里连成一段时，组写成不带
+/// `transform` 的 `<g id="eN">`。没有资源字节的图片跳过，并在 SVG 里留下注释，不计入 viewBox。
 ///
 /// # 参数
 /// - `scene`: 要导出的场景
@@ -67,11 +69,11 @@ pub fn export_svg(scene: &Scene, selected_only: bool) -> String {
         if !export_this_leaf(scene, element, selected_only) {
             continue;
         }
-        let Some(fragment) = leaf_fragment(element) else {
+        let Some(leaf) = leaf_fragment(scene, element) else {
             continue;
         };
-        // 图片只有注释，没有像素，不把占位包围盒算进 viewBox。
-        if !matches!(element, AnyElement::Image(_)) {
+        // 没有像素的图片只留注释，不把占位包围盒算进 viewBox。
+        if leaf.counts_toward_view_box {
             if let Some(element_bounds) = export_bounds(element) {
                 bounds = Some(match bounds {
                     Some(existing) => existing.union(&element_bounds),
@@ -79,7 +81,7 @@ pub fn export_svg(scene: &Scene, selected_only: bool) -> String {
                 });
             }
         }
-        items.push((ancestor_group_chain(scene, element), fragment));
+        items.push((ancestor_group_chain(scene, element), leaf.fragment));
     }
 
     let mut body = String::new();
@@ -157,15 +159,104 @@ fn ancestor_group_chain(scene: &Scene, element: &AnyElement) -> Vec<ElementId> {
     chain
 }
 
-fn leaf_fragment(element: &AnyElement) -> Option<String> {
+/// 一条叶子的 SVG 片段。`counts_toward_view_box` 为 false 时是说明注释，不占包围盒。
+struct ExportedLeaf {
+    fragment: String,
+    counts_toward_view_box: bool,
+}
+
+fn leaf_fragment(scene: &Scene, element: &AnyElement) -> Option<ExportedLeaf> {
     match element {
-        // 纹理像素在 GPU 上，场景里只有 texture_id，无法嵌成 data URL。
-        AnyElement::Image(image) => Some(format!(
+        AnyElement::Image(image) => Some(export_image(scene, image)),
+        other => write_element(other).map(|fragment| ExportedLeaf {
+            fragment,
+            counts_toward_view_box: true,
+        }),
+    }
+}
+
+/// 有编码字节时嵌 `<image>`；否则留注释。可见性和选区由调用方按叶子规则处理。
+fn export_image(scene: &Scene, image: &Image) -> ExportedLeaf {
+    if let Some(fragment) = embedded_image(scene, image) {
+        return ExportedLeaf {
+            fragment,
+            counts_toward_view_box: true,
+        };
+    }
+    ExportedLeaf {
+        fragment: format!(
             "  <!-- image {} skipped: texture pixels are not stored in the scene -->\n",
             image.props.id
-        )),
-        other => write_element(other),
+        ),
+        counts_toward_view_box: false,
     }
+}
+
+/// 把资源 data URL 写成 `<image>`。局部原点在左上角，宽高是显示尺寸。
+///
+/// UV 裁剪用嵌套 `<svg viewBox>` 取出像素区域，再拉伸到显示尺寸，和纹理四边形一致。
+fn embedded_image(scene: &Scene, image: &Image) -> Option<String> {
+    if image.asset_id.is_empty() {
+        return None;
+    }
+    let asset = scene.image_asset(&image.asset_id)?;
+    if asset.encoded.is_empty() || asset.width == 0 || asset.height == 0 {
+        return None;
+    }
+    let href = xml_escape(&asset.to_data_url());
+    let width = image.size.x.abs();
+    let height = image.size.y.abs();
+    let body = if let Some(crop) = pixel_crop(image, asset.width, asset.height) {
+        format!(
+            "    <svg x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\" preserveAspectRatio=\"none\">\n      <image href=\"{}\" x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\"/>\n    </svg>\n",
+            fmt_num(width),
+            fmt_num(height),
+            fmt_num(crop.x),
+            fmt_num(crop.y),
+            fmt_num(crop.width),
+            fmt_num(crop.height),
+            href,
+            asset.width,
+            asset.height,
+        )
+    } else {
+        format!(
+            "    <image href=\"{}\" x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\"/>\n",
+            href,
+            fmt_num(width),
+            fmt_num(height),
+        )
+    };
+    Some(wrap_group(
+        image.props.id,
+        &image.props.transform,
+        image.alpha,
+        &body,
+    ))
+}
+
+/// UV 矩形换成像素 viewBox。整张图或非正尺寸返回 `None`，调用方直接画满显示矩形。
+fn pixel_crop(image: &Image, width: u32, height: u32) -> Option<Rect> {
+    let rect = image.uv_rect?;
+    if ![rect.x, rect.y, rect.width, rect.height]
+        .into_iter()
+        .all(f32::is_finite)
+    {
+        return None;
+    }
+    let full = rect.x.abs() <= 1.0e-4
+        && rect.y.abs() <= 1.0e-4
+        && (rect.width - 1.0).abs() <= 1.0e-4
+        && (rect.height - 1.0).abs() <= 1.0e-4;
+    if full || rect.width <= 0.0 || rect.height <= 0.0 {
+        return None;
+    }
+    Some(Rect::new(
+        rect.x * width as f32,
+        rect.y * height as f32,
+        rect.width * width as f32,
+        rect.height * height as f32,
+    ))
 }
 
 /// 子孙在绘制顺序里连成一段的组才包 `<g>`。中间夹了别的叶子时不包，以免打乱 z 顺序或写出重复 id。
@@ -846,6 +937,116 @@ mod tests {
         );
         assert!(!svg.contains("<image"));
         assert!(svg.contains("viewBox=\"0 0 1 1\""));
+    }
+
+    #[test]
+    fn image_asset_is_embedded_as_data_url_with_transform() {
+        use crate::element::Image;
+
+        let mut scene = Scene::new();
+        let png = crate::asset::encode_png_rgba(2, 2, &[255, 0, 0, 255].repeat(4)).unwrap();
+        let asset_id = scene.insert_image_bytes(&png, "image/png").unwrap();
+        let data_url = scene.image_asset(&asset_id).unwrap().to_data_url();
+        let mut image = Image::from_asset(7, Vec2::new(10.0, 20.0), &asset_id, 2, 2);
+        image.size = Vec2::new(8.0, 4.0);
+        image.set_rotation(FRAC_PI_2);
+        image.set_alpha(0.5);
+        scene.add_image(image);
+        scene.add_image(Image::new(
+            8,
+            Vec2::new(500.0, 500.0),
+            Vec2::new(32.0, 32.0),
+            "badge".to_string(),
+        ));
+
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains(&format!("href=\"{data_url}\"")));
+        assert!(svg.contains("data:image/png;base64,"));
+        assert!(svg.contains("<image href=\""));
+        assert!(svg.contains("width=\"8\" height=\"4\" preserveAspectRatio=\"none\""));
+        assert!(svg.contains("transform=\"matrix(0 1 -1 0 10 20)\""));
+        assert!(svg.contains("opacity=\"0.5\""));
+        assert!(svg.contains("id=\"e7\""));
+        assert!(
+            svg.contains("<!-- image 8 skipped: texture pixels are not stored in the scene -->")
+        );
+        assert!(point_in_view_box(&svg, Vec2::new(10.0, 20.0)));
+        assert!(point_in_view_box(&svg, Vec2::new(6.0, 28.0)));
+        assert!(!point_in_view_box(&svg, Vec2::new(500.0, 500.0)));
+        assert!(!svg.contains("viewBox=\"0 0 1 1\""));
+    }
+
+    #[test]
+    fn image_uv_crop_uses_nested_view_box() {
+        use crate::element::Image;
+
+        let mut scene = Scene::new();
+        let png = crate::asset::encode_png_rgba(2, 2, &[0, 0, 255, 255].repeat(4)).unwrap();
+        let asset_id = scene.insert_image_bytes(&png, "image/png").unwrap();
+        let mut image = Image::from_asset(3, Vec2::new(1.0, 2.0), &asset_id, 2, 2);
+        image.size = Vec2::new(8.0, 4.0);
+        image.set_uv_rect(Some(Rect::new(0.0, 0.0, 0.5, 1.0)));
+        scene.add_image(image);
+
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains(
+            "<svg x=\"0\" y=\"0\" width=\"8\" height=\"4\" viewBox=\"0 0 1 2\" preserveAspectRatio=\"none\">"
+        ));
+        assert!(svg.contains("<image href=\"data:image/png;base64,"));
+        assert!(svg.contains("width=\"2\" height=\"2\" preserveAspectRatio=\"none\""));
+        assert!(svg.contains("transform=\"matrix(1 0 0 1 1 2)\""));
+    }
+
+    #[test]
+    fn image_in_group_follows_visibility_and_selection() {
+        use crate::element::Image;
+
+        let mut scene = Scene::new();
+        let png = crate::asset::encode_png_rgba(1, 1, &[0, 255, 0, 255]).unwrap();
+        let asset_id = scene.insert_image_bytes(&png, "image/png").unwrap();
+        scene.add_image(Image::from_asset(1, Vec2::ZERO, &asset_id, 1, 1));
+        scene.add_image(Image::new(
+            3,
+            Vec2::new(400.0, 400.0),
+            Vec2::new(8.0, 8.0),
+            "badge".to_string(),
+        ));
+        scene.add_rect(rect(
+            2,
+            Vec2::new(100.0, 100.0),
+            Vec2::new(10.0, 10.0),
+            ElementStyle::fill_only(Color::BLUE),
+        ));
+        let group_id = scene.group(&[1, 3]).unwrap();
+        scene
+            .get_mut(group_id)
+            .unwrap()
+            .as_element_mut()
+            .props_mut()
+            .selected = true;
+
+        let selected = export_svg(&scene, true);
+        assert!(selected.contains("<image"));
+        assert!(selected.contains("data:image/png;base64,"));
+        assert!(selected.contains("id=\"e1\""));
+        assert!(selected
+            .contains("<!-- image 3 skipped: texture pixels are not stored in the scene -->"));
+        assert!(selected.contains(&format!("<g id=\"e{group_id}\">")));
+        assert!(!selected.contains(&format!("<g id=\"e{group_id}\" transform=")));
+        assert!(!selected.contains("id=\"e2\""));
+        assert!(point_in_view_box(&selected, Vec2::ZERO));
+        assert!(!point_in_view_box(&selected, Vec2::new(400.0, 400.0)));
+        assert!(!point_in_view_box(&selected, Vec2::new(100.0, 100.0)));
+
+        scene.set_visible(group_id, false);
+        let hidden = export_svg(&scene, false);
+        assert!(!hidden.contains("<image"));
+        assert!(!hidden.contains("image 3 skipped"));
+        assert!(!hidden.contains("id=\"e1\""));
+        assert!(!hidden.contains(&format!("id=\"e{group_id}\"")));
+        assert!(hidden.contains("id=\"e2\""));
+        assert!(!point_in_view_box(&hidden, Vec2::ZERO));
+        assert!(point_in_view_box(&hidden, Vec2::new(100.0, 100.0)));
     }
 
     #[test]
