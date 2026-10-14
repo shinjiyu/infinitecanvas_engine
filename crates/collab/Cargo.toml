@@ -1,0 +1,12 @@
+[package]
+name = "infinitecanvas-collab"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Yjs-compatible CRDT binding for the infinite canvas scene"
+
+[dependencies]
+infinitecanvas-engine = { path = "../engine" }
+yrs = "0.28"
+serde_json = { workspace = true }

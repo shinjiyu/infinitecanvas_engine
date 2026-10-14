@@ -49,21 +49,26 @@
 
 ## M4.3: CRDT 集成 - Yjs (2天)
 
+### 现状（#15）
+
+骨架在 `crates/collab`（yrs），不在 `packages/core/src/crdt.ts`，也没有 `server/src/yjs.rs`。本地双连接和 v1 更新回放有测试。房间服务和断线重连还没做。冲突策略见 `docs/design/crdt.md`。
+
 ### 输出
-- `packages/core/src/crdt.ts` - CRDT 封装
-- `server/src/yjs.rs` - Yjs 服务端
+- `crates/collab` - 场景 Y.Doc、`CollabSession`、`MemoryProvider`
+- `packages/core/src/crdt.ts` - 原计划的 JS 封装，尚未落地
+- `server/src/yjs.rs` - 原计划的 Yjs 服务端，尚未落地
 
 ### 功能
-- Yjs Doc 初始化
+- Yjs Doc 初始化（yrs，二进制与 Yjs v1 更新兼容）
 - 元素增删改同步
-- 冲突自动解决
+- 冲突自动解决（整元素 last-write-wins）
 - 更新合并
 
 ### 测试点
-- [ ] 并发编辑无冲突
-- [ ] 操作顺序一致
+- [x] 并发编辑收敛到同一场景
+- [x] 两种 apply 顺序结果一致
 - [ ] 断线重连数据同步
-- [ ] 冲突解决符合预期
+- [x] 冲突解决符合 `docs/design/crdt.md`（同一键 LWW，删除并不必然压过更新）
 
 ---
 

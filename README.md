@@ -58,12 +58,40 @@ Only behavior that exists in this repository is listed here.
 
 ### Collaboration
 
-This path is partial.
+Two paths. They do not talk to each other.
+
+Presence is partial:
 
 - `@infinitecanvas/server` is a Node.js WebSocket server with rooms and user sessions.
 - The collaboration client in `@infinitecanvas/core` connects, reconnects, and sends cursor, selection, and operation messages.
 - `www/test-collab-canvas.html` broadcasts a newly created element and applies a remote add (rectangle or circle) or remove. A remote move is logged and not applied.
-- Message types for move and update exist. There is no CRDT, permission check, conflict UI, or history replay.
+- Message types for move and update exist. There is no permission check, conflict UI, or history replay.
+
+Scene CRDT is a host-side skeleton in `infinitecanvas-collab` ([yrs](https://docs.rs/yrs), the Rust port of Yjs). It is not linked into the WASM crate, and the browser demo does not load it. Edits go through `CollabSession::insert`, `update`, and `delete`. Two sessions catch up with `MemoryProvider::sync` (in-memory y-sync, no room server). `encode_state_v1` / `apply_update` are Yjs v1 bytes, so a later JavaScript provider can carry the same payload. Give each peer its own `client_id` and `peer_slot`; `allocate_id` puts the slot in the high 32 bits. Conflict rules and limits: [docs/design/crdt.md](./docs/design/crdt.md).
+
+```bash
+cargo test -p infinitecanvas-collab
+```
+
+```rust
+use infinitecanvas_collab::{CollabSession, MemoryProvider};
+use infinitecanvas_engine::math::Vec2;
+use infinitecanvas_engine::{AnyElement, Rectangle};
+
+fn enable() -> Result<(), infinitecanvas_collab::CollabError> {
+    let mut local = CollabSession::with_client_id(1, 1);
+    let mut remote = CollabSession::with_client_id(2, 2);
+    let id = local.allocate_id();
+    local.insert(AnyElement::Rectangle(Rectangle::new(
+        id,
+        Vec2::new(1.0, 2.0),
+        Vec2::new(3.0, 4.0),
+    )))?;
+    MemoryProvider::sync(&mut local, &mut remote)?;
+    assert_eq!(local.scene(), remote.scene());
+    Ok(())
+}
+```
 
 `@infinitecanvas/core` also has a thin canvas wrapper (`init`, `render`, `startRenderLoop`, `destroy`). The demos talk to the WASM `InfiniteCanvas` directly.
 
@@ -82,6 +110,7 @@ flowchart TB
     wasm["infinitecanvas-wasm<br/>InfiniteCanvas and WebGPURenderer"]
     engine["infinitecanvas-engine<br/>scene, viewport, tools, commands"]
     math["infinitecanvas-math"]
+    collab["infinitecanvas-collab<br/>yrs scene document"]
   end
   gpu[WebGPU]
 
@@ -90,6 +119,7 @@ flowchart TB
   www -. "cursor, selection, operations" .-> server
   wasm --> engine
   engine --> math
+  collab --> engine
   wasm --> gpu
 ```
 
@@ -121,7 +151,7 @@ The binary size is from `wasm-pack build --target web --out-dir ../../packages/c
 | M1 Core rendering | Done: WebGPU rectangles, circles, lines, freehand paths, images, viewport |
 | M2 Interaction | Done: hit test, selection, marquee, drag, undo/redo, tools |
 | M3 Scene management | Viewport culling, batched solid draws, a persistent vertex cache with per-element dirty flags, performance counters, and a QuadTree module. No scene graph |
-| M4 Collaboration | Rooms, cursors, selection sync, and create-element broadcast. No CRDT, permissions, conflict handling, or replay |
+| M4 Collaboration | Rooms, cursors, selection sync, create-element broadcast, and a yrs CRDT skeleton (`infinitecanvas-collab`) for scene elements. The CRDT is not wired to the WebSocket server, WASM, or the browser demo. No permissions, conflict UI, or history replay |
 
 ## Quick start
 
@@ -167,6 +197,7 @@ npm run dev --workspace=@infinitecanvas/server
 ```
 crates/math/          Vec2, color, rect, transform, vertex
 crates/engine/        scene, viewport, hit test, tools, commands, QuadTree
+crates/collab/        Yjs/yrs scene document (not linked into WASM)
 crates/wasm/          WebGPU renderer and the JS API
 packages/core/        TypeScript wrapper and collaboration client
 packages/server/      WebSocket room server
