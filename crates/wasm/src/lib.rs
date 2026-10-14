@@ -28,7 +28,8 @@ mod texture_manager;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
-    apply_align, apply_distribute, apply_nudge, apply_stack_reorder,
+    apply_align, apply_distribute, apply_flip, apply_nudge, apply_rotate_quarter,
+    apply_stack_reorder,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
@@ -42,11 +43,12 @@ use infinitecanvas_engine::{
         SelectionFrame,
     },
     AddElementCommand, AlignMode, AnyElement, Circle, CommandHistory, DistributeAxis,
-    DuplicateElementsCommand, Element, ElementId, ElementStyle, Event, EventQueue, Image, Line,
-    MoveCommand, NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton,
-    PointerEvent, Rectangle, RemoveElementCommand, ReorderOutlineCommand, Scene, SceneTreeNode,
-    SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign, TextClickResolver,
-    TextPlacement, Tool, ToolManager, TransformElementsCommand, UpdateTextCommand, Viewport,
+    DuplicateElementsCommand, Element, ElementId, ElementStyle, Event, EventQueue, FlipAxis, Image,
+    Line, MoveCommand, NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton,
+    PointerEvent, QuarterTurn, Rectangle, RemoveElementCommand, ReorderOutlineCommand, Scene,
+    SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign,
+    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
+    UpdateTextCommand, Viewport,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -552,6 +554,68 @@ impl InfiniteCanvas {
             direction,
             shift,
         )
+    }
+
+    /// 水平或垂直翻转当前选中元素，并记入一条撤销记录。
+    ///
+    /// 绕选区中心镜像。只有一个目标时，中心是该元素的世界包围盒中心。
+    /// 选中组时翻转组根，子孙跟着走，不拆组。只改平移、旋转和缩放符号。
+    /// 空选、锁定或无法识别的轴不入栈。
+    ///
+    /// 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次翻转。
+    ///
+    /// # 参数
+    /// - `axis`: `"horizontal"` / `"h"` / `"x"`，或 `"vertical"` / `"v"` / `"y"`
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.flip_selection("horizontal");
+    /// ```
+    #[wasm_bindgen]
+    pub fn flip_selection(&mut self, axis: &str) -> bool {
+        let Some(axis) = FlipAxis::parse(axis) else {
+            return false;
+        };
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        apply_flip(&mut self.command_history, &mut self.scene, &selected, axis)
+    }
+
+    /// 把当前选中元素顺时针或逆时针转 90°，并记入一条撤销记录。
+    ///
+    /// 绕选区中心旋转。屏幕 Y 向下，顺时针是正角度。缩放（含符号）保持不变。
+    /// 选中组时旋转组根。空选、锁定或无法识别的方向不入栈。
+    ///
+    /// # 参数
+    /// - `dir`: `"cw"` / `"clockwise"`，或 `"ccw"` / `"counterclockwise"`
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.rotate_selection_quarter("cw");
+    /// ```
+    #[wasm_bindgen]
+    pub fn rotate_selection_quarter(&mut self, dir: &str) -> bool {
+        let Some(turn) = QuarterTurn::parse(dir) else {
+            return false;
+        };
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        apply_rotate_quarter(&mut self.command_history, &mut self.scene, &selected, turn)
+    }
+
+    /// 把进行中的拖动、手柄和样式预览收进撤销栈，避免和翻转/旋转叠在同一次指针手势上。
+    fn finish_active_gesture(&mut self) {
+        if self.drag_state.is_dragging {
+            self.finish_drag();
+        }
+        self.commit_handle_gesture();
+        self.commit_style_preview();
     }
 
     /// 按包围盒对齐当前选择，并记入一条撤销记录。
@@ -3704,6 +3768,76 @@ mod tests {
         canvas.clear_selection();
         assert!(!canvas.nudge_selection("down", false));
         assert_eq!(canvas.get_undo_count(), undo_count);
+    }
+
+    /// 翻转和 90° 旋转走当前选择。空选和未知参数不入栈，撤销恢复变换。
+    #[test]
+    fn flip_and_rotate_selection_round_trip() {
+        let mut canvas = blank_canvas();
+        canvas.scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(10.0, 20.0),
+            Vec2::new(8.0, 4.0),
+        ));
+        canvas.scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(50.0, 20.0),
+            Vec2::new(8.0, 4.0),
+        ));
+        assert!(canvas.select_element(1, false));
+
+        assert!(!canvas.flip_selection("spin"));
+        assert!(!canvas.rotate_selection_quarter("180"));
+        assert_eq!(canvas.get_undo_count(), 0);
+
+        assert!(canvas.flip_selection("horizontal"));
+        assert!(translation(&canvas.scene, 1).x.abs() - 10.0 < 1e-3);
+        assert!(
+            canvas
+                .scene
+                .get(1)
+                .unwrap()
+                .as_element()
+                .props()
+                .transform
+                .scale
+                .x
+                < 0.0
+        );
+        assert_eq!(translation(&canvas.scene, 2), Vec2::new(50.0, 20.0));
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.undo());
+        assert!(
+            canvas
+                .scene
+                .get(1)
+                .unwrap()
+                .as_element()
+                .props()
+                .transform
+                .scale
+                .x
+                > 0.0
+        );
+
+        assert!(canvas.rotate_selection_quarter("ccw"));
+        let rotation = canvas
+            .scene
+            .get(1)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform
+            .rotation;
+        assert!((rotation + std::f32::consts::FRAC_PI_2).abs() < 1e-3);
+        assert!(canvas.undo());
+        assert!(canvas.redo());
+        assert!(canvas.undo());
+
+        canvas.clear_selection();
+        assert!(!canvas.flip_selection("vertical"));
+        assert!(!canvas.rotate_selection_quarter("cw"));
+        assert_eq!(canvas.get_undo_count(), 0);
     }
 
     /// 对齐和分布走当前选择。空选、单选和未知参数不入栈，撤销恢复平移。

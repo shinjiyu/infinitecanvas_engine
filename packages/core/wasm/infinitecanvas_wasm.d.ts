@@ -337,6 +337,27 @@ export class InfiniteCanvas {
      */
     export_svg(selected_only: boolean): string;
     /**
+     * 水平或垂直翻转当前选中元素，并记入一条撤销记录。
+     *
+     * 绕选区中心镜像。只有一个目标时，中心是该元素的世界包围盒中心。
+     * 选中组时翻转组根，子孙跟着走，不拆组。只改平移、旋转和缩放符号。
+     * 空选、锁定或无法识别的轴不入栈。
+     *
+     * 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次翻转。
+     *
+     * # 参数
+     * - `axis`: `"horizontal"` / `"h"` / `"x"`，或 `"vertical"` / `"v"` / `"y"`
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.flip_selection("horizontal");
+     * ```
+     */
+    flip_selection(axis: string): boolean;
+    /**
      * 当前生效的对齐参考线。
      *
      * 只在吸附开启且正在拖拽、并且选区进入阈值时非空。
@@ -423,6 +444,8 @@ export class InfiniteCanvas {
      * - `fillNone`：大家都没有填充或描边
      * - `fillSupported`：选择里有这个字段
      * - `strokeWidth` / `opacity` / `fontSize`：统一数值，混合或不支持时为 null
+     * - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
+     *   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
      *
      * # 示例（JavaScript）
      * ```js
@@ -726,6 +749,24 @@ export class InfiniteCanvas {
      */
     reorder_selection(action: string): boolean;
     /**
+     * 把当前选中元素顺时针或逆时针转 90°，并记入一条撤销记录。
+     *
+     * 绕选区中心旋转。屏幕 Y 向下，顺时针是正角度。缩放（含符号）保持不变。
+     * 选中组时旋转组根。空选、锁定或无法识别的方向不入栈。
+     *
+     * # 参数
+     * - `dir`: `"cw"` / `"clockwise"`，或 `"ccw"` / `"counterclockwise"`
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.rotate_selection_quarter("cw");
+     * ```
+     */
+    rotate_selection_quarter(dir: string): boolean;
+    /**
      * 可见叶子的世界包围盒。
      *
      * 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
@@ -784,6 +825,8 @@ export class InfiniteCanvas {
      *
      * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
      * `strokeWidth`、`opacity`、`fontSize` 是数字。`textColor` 是十六进制颜色。
+     * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
+     * 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
      * 没有任何变化时返回 false，也不入栈。
      */
     set_selection_style(patch: any): boolean;
@@ -917,6 +960,7 @@ export interface InitOutput {
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
     readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
     readonly infinitecanvas_export_svg: (a: number, b: number) => [number, number];
+    readonly infinitecanvas_flip_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_get_alignment_guides: (a: number) => any;
     readonly infinitecanvas_get_current_tool: (a: number) => [number, number];
     readonly infinitecanvas_get_element_count: (a: number) => number;
@@ -971,6 +1015,7 @@ export interface InitOutput {
     readonly infinitecanvas_render: (a: number) => [number, number];
     readonly infinitecanvas_reorder_element: (a: number, b: bigint, c: bigint, d: number) => number;
     readonly infinitecanvas_reorder_selection: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_rotate_selection_quarter: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_scene_bounds: (a: number) => any;
     readonly infinitecanvas_screen_to_world: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;

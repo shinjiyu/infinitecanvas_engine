@@ -600,6 +600,34 @@ export class InfiniteCanvas {
         }
     }
     /**
+     * 水平或垂直翻转当前选中元素，并记入一条撤销记录。
+     *
+     * 绕选区中心镜像。只有一个目标时，中心是该元素的世界包围盒中心。
+     * 选中组时翻转组根，子孙跟着走，不拆组。只改平移、旋转和缩放符号。
+     * 空选、锁定或无法识别的轴不入栈。
+     *
+     * 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次翻转。
+     *
+     * # 参数
+     * - `axis`: `"horizontal"` / `"h"` / `"x"`，或 `"vertical"` / `"v"` / `"y"`
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.flip_selection("horizontal");
+     * ```
+     * @param {string} axis
+     * @returns {boolean}
+     */
+    flip_selection(axis) {
+        const ptr0 = passStringToWasm0(axis, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_flip_selection(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
      * 当前生效的对齐参考线。
      *
      * 只在吸附开启且正在拖拽、并且选区进入阈值时非空。
@@ -755,6 +783,8 @@ export class InfiniteCanvas {
      * - `fillNone`：大家都没有填充或描边
      * - `fillSupported`：选择里有这个字段
      * - `strokeWidth` / `opacity` / `fontSize`：统一数值，混合或不支持时为 null
+     * - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
+     *   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
      *
      * # 示例（JavaScript）
      * ```js
@@ -1312,6 +1342,31 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 把当前选中元素顺时针或逆时针转 90°，并记入一条撤销记录。
+     *
+     * 绕选区中心旋转。屏幕 Y 向下，顺时针是正角度。缩放（含符号）保持不变。
+     * 选中组时旋转组根。空选、锁定或无法识别的方向不入栈。
+     *
+     * # 参数
+     * - `dir`: `"cw"` / `"clockwise"`，或 `"ccw"` / `"counterclockwise"`
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.rotate_selection_quarter("cw");
+     * ```
+     * @param {string} dir
+     * @returns {boolean}
+     */
+    rotate_selection_quarter(dir) {
+        const ptr0 = passStringToWasm0(dir, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_rotate_selection_quarter(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
      * 可见叶子的世界包围盒。
      *
      * 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
@@ -1412,6 +1467,8 @@ export class InfiniteCanvas {
      *
      * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
      * `strokeWidth`、`opacity`、`fontSize` 是数字。`textColor` 是十六进制颜色。
+     * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
+     * 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
      * 没有任何变化时返回 false，也不入栈。
      * @param {any} patch
      * @returns {boolean}
@@ -2130,6 +2187,10 @@ function __wbg_get_imports() {
         __wbg_framebufferTextureMultiviewOVR_77f19224ff7be6ef: function(arg0, arg1, arg2, arg3, arg4, arg5, arg6) {
             arg0.framebufferTextureMultiviewOVR(arg1 >>> 0, arg2 >>> 0, arg3, arg4, arg5, arg6);
         },
+        __wbg_from_296ca31f8d0f1c52: function(arg0) {
+            const ret = Array.from(arg0);
+            return ret;
+        },
         __wbg_frontFace_6751b4b97f997aeb: function(arg0, arg1) {
             arg0.frontFace(arg1 >>> 0);
         },
@@ -2347,6 +2408,10 @@ function __wbg_get_imports() {
         __wbg_invalidateFramebuffer_4f576db65bb37d6a: function() { return handleError(function (arg0, arg1, arg2) {
             arg0.invalidateFramebuffer(arg1 >>> 0, arg2);
         }, arguments); },
+        __wbg_isArray_e15a2ff68ffdbef2: function(arg0) {
+            const ret = Array.isArray(arg0);
+            return ret;
+        },
         __wbg_is_4b278c0bd3caba97: function(arg0, arg1) {
             const ret = Object.is(arg0, arg1);
             return ret;
@@ -3336,12 +3401,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2656, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2690, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 419, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 434, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

@@ -5,6 +5,7 @@
  * 选中元素后右侧属性面板可改填充、描边、线宽、线型、线帽、线结和不透明度，文本还可改字号和颜色。文本描边暂不支持线型。
  * 方向键按世界单位微调选中元素（Shift 为 10 倍）；输入框内不触发。
  * 多选时工具栏和属性面板可对齐或均匀分布，只改平移，进撤销栈。
+ * 选中后 Shift+H / Shift+V 翻转，Shift+R / Shift+Alt+R 转 90°，按钮在工具栏和属性面板，进撤销栈。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，面板上有同样的四个按钮。
@@ -27,6 +28,7 @@ import {
   screenToWorld,
   writeTextClipboard,
 } from './clipboard.js';
+import { orientAction } from './flip-keys.js';
 import { arrowNudge } from './nudge-keys.js';
 import { stackOrderAction } from './stack-order-keys.js';
 import { rasterizeText } from './text-raster.js';
@@ -973,6 +975,18 @@ function syncAlignControls(engine) {
 }
 
 /**
+ * 有选中元素时才允许翻转和 90° 旋转。空选保持禁用。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncOrientControls(engine) {
+  const enabled = engine.get_selection_count() >= 1;
+  document.querySelectorAll('[data-flip], [data-rotate]').forEach((button) => {
+    if (button instanceof HTMLButtonElement) button.disabled = !enabled;
+  });
+}
+
+/**
  * 对齐和分布各记一条撤销记录。拖拽吸附不受这些按钮影响。
  *
  * @param {WasmCanvas} engine
@@ -995,6 +1009,36 @@ function bindAlignControls(engine) {
       if (engine.distribute_selection(axis)) {
         scheduleAutosave(engine);
         setStatus('已分布');
+      }
+    });
+  });
+}
+
+/**
+ * 翻转和 90° 旋转各记一条撤销记录。不改组的父子关系。
+ *
+ * @param {WasmCanvas} engine
+ */
+function bindOrientControls(engine) {
+  document.querySelectorAll('[data-flip]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const axis = button.getAttribute('data-flip');
+      if (!axis || typeof engine.flip_selection !== 'function') return;
+      if (engine.flip_selection(axis)) {
+        scheduleAutosave(engine);
+        syncPropertyPanel(engine);
+        setStatus(axis === 'vertical' ? '已垂直翻转' : '已水平翻转');
+      }
+    });
+  });
+  document.querySelectorAll('[data-rotate]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const dir = button.getAttribute('data-rotate');
+      if (!dir || typeof engine.rotate_selection_quarter !== 'function') return;
+      if (engine.rotate_selection_quarter(dir)) {
+        scheduleAutosave(engine);
+        syncPropertyPanel(engine);
+        setStatus(dir === 'ccw' ? '已逆时针旋转 90°' : '已顺时针旋转 90°');
       }
     });
   });
@@ -1080,6 +1124,7 @@ function bindPropertyPanel(engine) {
 function bindInput(canvas, engine) {
   bindPropertyPanel(engine);
   bindAlignControls(engine);
+  bindOrientControls(engine);
   canvas.addEventListener('pointerdown', (event) => {
     const point = canvasPoint(event, canvas);
     engine.handle_pointer_event(
@@ -1373,6 +1418,18 @@ function bindInput(canvas, engine) {
       engine.push_hand_tool();
       return;
     }
+    const orient = orientAction(event);
+    if (orient) {
+      event.preventDefault();
+      const changed = orient.kind === 'flip'
+        ? engine.flip_selection(orient.axis)
+        : engine.rotate_selection_quarter(orient.dir);
+      if (changed) {
+        scheduleAutosave(engine);
+        syncPropertyPanel(engine);
+      }
+      return;
+    }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const nudge = arrowNudge(event);
     if (nudge) {
@@ -1458,6 +1515,7 @@ function updateHud(engine) {
   if (redoBtn) redoBtn.disabled = !engine.can_redo();
   syncPropertyPanel(engine);
   syncAlignControls(engine);
+  syncOrientControls(engine);
   syncSnapControls(engine);
   drawAlignmentGuides(engine);
   layerPanel?.sync();
