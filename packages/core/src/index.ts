@@ -133,6 +133,26 @@ export class InfiniteCanvas {
   }
 
   /**
+   * 把 SVG 文本解析成场景元素，并记一条撤销记录。
+   *
+   * `x` / `y` 是 viewBox 原点落到的世界坐标。没有 viewBox 时是用户坐标原点。
+   * 支持矩形、圆、椭圆、直线、折线、多边形、路径和文本。嵌套 `g` 的变换会压进子元素。
+   *
+   * @param svg - SVG 文档
+   * @param x - 锚点世界坐标 x
+   * @param y - 锚点世界坐标 y
+   * @returns 新元素 ID
+   *
+   * @example
+   * ```ts
+   * const ids = canvas.importSvg('<svg><rect width="10" height="10"/></svg>', 24, 24);
+   * ```
+   */
+  importSvg(svg: string, x: number, y: number): number[] {
+    return Array.from(this.requireWasm().import_svg(svg, x, y));
+  }
+
+  /**
    * 读取当前选择的公共样式。多选不一致时对应字段为 mixed。
    *
    * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape`、`hasText`、`hasImage` 都是 false。图片只参与 `opacity`。矩形另有 `cornerRadius`（多选不一致时 `cornerRadiusMixed`）

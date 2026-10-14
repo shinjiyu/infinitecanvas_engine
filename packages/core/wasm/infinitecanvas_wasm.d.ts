@@ -672,6 +672,29 @@ export class InfiniteCanvas {
      */
     import_json(json: string): void;
     /**
+     * 把 SVG 文本解析成场景元素，并记一条撤销记录。
+     *
+     * 支持 `rect`、`circle`、`ellipse`、`line`、`polyline`、`polygon`、`path`、
+     * `text`，以及 `translate` / `scale` / `rotate` / `matrix` 的嵌套 `g`。
+     * `image` 只接受 PNG/JPEG 的 data URL。一次导入是一条历史，Ctrl+Z 删掉整批。
+     *
+     * # 参数
+     * - `svg`: SVG 文档
+     * - `x`, `y`: viewBox 原点（没有 viewBox 时是用户坐标原点）的世界坐标
+     *
+     * # 返回
+     * 新元素 ID，文档顺序。这些元素成为当前选择。
+     *
+     * # 错误
+     * 空文本、非法 XML、根节点不是 `svg`，或没有可识别图元。失败时场景不变。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const ids = canvas.import_svg('<svg><rect width="10" height="10"/></svg>', worldX, worldY);
+     * ```
+     */
+    import_svg(svg: string, x: number, y: number): Array<any>;
+    /**
      * 初始化画布（异步，因为 WebGPU 初始化需要异步）
      *
      * # 参数
@@ -1328,6 +1351,7 @@ export interface InitOutput {
     readonly infinitecanvas_hit_test_screen_point: (a: number, b: number, c: number, d: number) => any;
     readonly infinitecanvas_hit_test_world_point: (a: number, b: number, c: number, d: number) => any;
     readonly infinitecanvas_import_json: (a: number, b: number, c: number) => [number, number];
+    readonly infinitecanvas_import_svg: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly infinitecanvas_init: (a: number, b: any) => any;
     readonly infinitecanvas_is_dragging: (a: number) => number;
     readonly infinitecanvas_is_selection_box_active: (a: number) => number;

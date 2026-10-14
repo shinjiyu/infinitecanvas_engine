@@ -4,12 +4,13 @@
 
 ```text
 www/main.js
-    │ export_json / import_json / export_png / export_svg
+    │ export_json / import_json / export_png / export_svg / import_svg
     ▼
 infinitecanvas-wasm::InfiniteCanvas
     │ Scene::to_json / from_json
     │ export_viewport_png / export_selection_png
     │ export_svg
+    │ import_svg ── 一条 ImportSvgCommand
     ▼
 Scene ── elements: rectangle | circle | polygon | image | line | path | text | group
          assets:   图片像素，data URL，同一张图一份
@@ -49,6 +50,23 @@ Scene ── elements: rectangle | circle | polygon | image | line | path | text
 | group | 不画几何。子孙已是世界变换，矩阵不再乘组变换。绘制顺序里连成一段时写成不带 `transform` 的 `<g id="eN">`。隐藏组藏住子孙 |
 
 变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。直线和路径的缺省线帽线结仍是 `butt` / `miter`。非默认线帽、线结，以及非空虚线，额外写成 `stroke-linecap`、`stroke-linejoin`、`stroke-dasharray`。图片的 `opacity` 来自 `Image::alpha`。Y 轴向下。文本描边不写虚线、线帽和线结。
+
+## 导入 SVG
+
+`import_svg(svg, anchor)` 把常见子集写进当前场景，整批是一条 `ImportSvgCommand`。`anchor` 是 viewBox 原点的世界坐标；没有 viewBox 时是用户坐标原点。Demo 的「导入 SVG」和拖放 `.svg` 用指针位置；指针还没进入画布时用世界坐标 `(24, 24)`。
+
+| SVG | 场景 |
+| --- | --- |
+| `rect` | 矩形。`rx` / `ry` 不同时取较小的圆角 |
+| `circle` | 圆 |
+| `ellipse` | 圆，半径放进非均匀缩放 |
+| `line` | 直线，不带箭头 |
+| `polyline` / `polygon` / `path` | 自由路径。曲线会折线化。填充改成沿轮廓描边。这不是 N / K 创建的正多边形或星形 |
+| `text` | 文本。`tspan` 按行 |
+| `image` | 只收 PNG/JPEG data URL |
+| `g` / 嵌套 `svg` | 变换压进子元素，不建组 |
+
+空文本、非法 XML、根节点不是 `svg`、没有可识别图元都返回错误，场景不变。滤镜、动画、CSS 类、`<use>`、渐变、裁剪、`preserveAspectRatio`，以及百分比 / `em` 长度都不映射。参考线不参与导入。
 
 ## 剪贴板
 

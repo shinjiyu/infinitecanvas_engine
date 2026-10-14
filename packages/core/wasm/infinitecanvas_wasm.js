@@ -1224,6 +1224,41 @@ export class InfiniteCanvas {
         }
     }
     /**
+     * 把 SVG 文本解析成场景元素，并记一条撤销记录。
+     *
+     * 支持 `rect`、`circle`、`ellipse`、`line`、`polyline`、`polygon`、`path`、
+     * `text`，以及 `translate` / `scale` / `rotate` / `matrix` 的嵌套 `g`。
+     * `image` 只接受 PNG/JPEG 的 data URL。一次导入是一条历史，Ctrl+Z 删掉整批。
+     *
+     * # 参数
+     * - `svg`: SVG 文档
+     * - `x`, `y`: viewBox 原点（没有 viewBox 时是用户坐标原点）的世界坐标
+     *
+     * # 返回
+     * 新元素 ID，文档顺序。这些元素成为当前选择。
+     *
+     * # 错误
+     * 空文本、非法 XML、根节点不是 `svg`，或没有可识别图元。失败时场景不变。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const ids = canvas.import_svg('<svg><rect width="10" height="10"/></svg>', worldX, worldY);
+     * ```
+     * @param {string} svg
+     * @param {number} x
+     * @param {number} y
+     * @returns {Array<any>}
+     */
+    import_svg(svg, x, y) {
+        const ptr0 = passStringToWasm0(svg, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_import_svg(this.__wbg_ptr, ptr0, len0, x, y);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * 初始化画布（异步，因为 WebGPU 初始化需要异步）
      *
      * # 参数
@@ -3855,7 +3890,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2764, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2814, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },

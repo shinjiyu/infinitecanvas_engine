@@ -2,6 +2,24 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #63: 导入 SVG
+
+- [x] `import_svg`：rect / circle / ellipse / line / polyline / polygon / path / text，嵌套 `g` 的变换压进子元素
+- [x] 一次导入一条 `ImportSvgCommand`，撤销删掉整批
+- [x] fill / stroke / stroke-width / opacity，以及线帽、线结、虚线、圆角（能映射时）
+- [x] 空文本、非法 XML、没有可识别图元返回错误，不改场景
+- [x] Demo：「导入 SVG」和拖放 `.svg`。viewBox 原点落在指针；没有指针时用 (24, 24)。PNG/JPG 拖放和粘贴仍走图片
+- [x] SVG 的 `polygon` 写成自由路径，不占用 N / K 的正多边形和星形
+
+```text
+.svg / 导入 SVG
+    │ anchor = 指针世界坐标，或 (24, 24)
+    ▼
+import_svg ── ImportSvgCommand（一条历史）
+    ├─ rect / circle / ellipse / line / text / image(data URL)
+    └─ path / polygon / polyline → Path
+```
+
 ## Issue #65: 多边形与星形
 
 - [x] `Polygon`：`kind` 为正多边形或星形。默认六边形（6）和五角星（5）。边数钳到 3–64
