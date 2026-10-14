@@ -13,14 +13,10 @@
     "test:ts": "pnpm --recursive test",
     "bench": "node scripts/bench.mjs",
     "bench:smoke": "node scripts/bench.mjs --smoke",
-    "test:bench-stats": "node --test scripts/bench-stats.test.mjs"
+    "test:bench-stats": "node --test scripts/bench-stats.test.mjs scripts/cdp.test.mjs"
+  },
+  "devDependencies": {
+    "undici": "^6.29.0"
   },
   "packageManager": "pnpm@8.15.0"
 }
-
-
-
-
-
-
-

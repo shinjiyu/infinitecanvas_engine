@@ -58,6 +58,8 @@ jobs:
       - name: Install Node
         uses: actions/setup-node@v4
         with:
+          # Node 20 没有全局 WebSocket（22 起才内置）。压测 CDP 客户端在
+          # scripts/cdp.mjs 里回退到 undici，所以这里继续用 20，让 CI 覆盖这条路径。
           node-version: 20
           cache: npm
 
@@ -69,7 +71,7 @@ jobs:
         run: npm run build
 
       - name: Benchmark stats tests
-        run: node --test scripts/bench-stats.test.mjs
+        run: node --test scripts/bench-stats.test.mjs scripts/cdp.test.mjs
 
       - name: Ensure Chrome for the performance smoke
         run: |

@@ -3,15 +3,45 @@
  *
  * 压测脚本用它驱动本机 Chrome，不额外依赖 Puppeteer。
  * 只覆盖导航、执行表达式、读取控制台这三件事。
+ *
+ * Node 22 起才有全局 `WebSocket`。CI 和本地文档用的是 Node 20，
+ * 直接 `new WebSocket(url)` 会抛 `ReferenceError: WebSocket is not defined`。
+ * 没有全局对象时改用 undici 6 的客户端。两边都有 `addEventListener`、`send`、`close`，
+ * 文本帧的 `message` 事件把载荷放在 `data` 上。
  */
+import { WebSocket as UndiciWebSocket } from 'undici';
+
+/**
+ * 选出 CDP 用的 WebSocket 构造器。
+ *
+ * @param {{ WebSocket?: typeof globalThis.WebSocket }} [scope] 默认 `globalThis`。测试可传入没有 `WebSocket` 的对象，模拟 Node 20。
+ * @returns {typeof globalThis.WebSocket}
+ *
+ * @example
+ * ```js
+ * const WS = resolveCdpWebSocket();
+ * const ws = new WS('ws://127.0.0.1:9222/devtools/page/1');
+ * ```
+ */
+export function resolveCdpWebSocket(scope = globalThis) {
+    return scope.WebSocket ?? UndiciWebSocket;
+}
+
+/**
+ * 当前进程实际使用的构造器。Node 22+ 是全局 `WebSocket`，Node 20 是 undici。
+ *
+ * @type {typeof globalThis.WebSocket}
+ */
+export const cdpWebSocket = resolveCdpWebSocket();
 
 /**
  * @param {string} url
+ * @param {typeof globalThis.WebSocket} [WebSocketImpl] 默认 {@link cdpWebSocket}。测试注入 undici，用来在 Node 22 上覆盖 Node 20 的路径。
  * @returns {Promise<WebSocket>}
  */
-export function openWebSocket(url) {
+export function openWebSocket(url, WebSocketImpl = cdpWebSocket) {
     return new Promise((resolve, reject) => {
-        const ws = new WebSocket(url);
+        const ws = new WebSocketImpl(url);
         const timer = setTimeout(() => {
             ws.close();
             reject(new Error(`WebSocket 连接超时: ${url}`));
