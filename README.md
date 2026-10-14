@@ -128,20 +128,37 @@ flowchart TB
 
 ## Performance
 
-No benchmark log is checked in. Published numbers are **TBD** until a run is recorded.
+Measured on **2026-10-14** at `73f087a` (`73f087a1435645feeeaf1278a3f2a016873ecfcb`), rebased onto `49c47af`. This harness does not change the renderer. Raw log: [docs/perf/2026-10-14.md](./docs/perf/2026-10-14.md) and [docs/perf/2026-10-14.json](./docs/perf/2026-10-14.json).
 
-| Metric | Result |
-| --- | --- |
-| Elements sustained at 60 FPS | TBD |
-| Frame time | TBD |
-| Memory | TBD |
-| Release WASM binary (`infinitecanvas_wasm_bg.wasm`) | 2,971,270 bytes |
+Environment: Linux 6.12.94+ x64, 4 logical CPUs (Intel Xeon), 16 GB RAM, no `/dev/dri`. Headless Chrome 154.0.8037.92. WebGPU adapter: SwiftShader Device (Subzero), not a fallback adapter. Canvas 1280×720. rustc 1.99.0, wasm-pack 0.13.1 with wasm-opt. Release `infinitecanvas_wasm_bg.wasm` is **3,177,340 bytes**.
 
-The binary size is from `wasm-pack build --target web --out-dir ../../packages/core/wasm` on 2026-10-14 (rustc 1.99.0, wasm-pack 0.13.1, wasm-opt). It is the optimized release artifact, not a frame-rate measurement.
+The scene is `load_stress_scene`: filled rectangles, 400 columns, 24 px spacing, 16×12. Steady samples are 119 frame intervals (120 `render()` calls after 30 warmup frames). The first interval is dropped. About 60 FPS means average FPS ≥ 55 and P95 frame interval ≤ 20 ms. Dirty flags stayed on: after the steady sample and after `pan(24, 16)`, `geometryUnchanged` was true and regenerated elements were 0. The draw path submits the whole vertex cache (one draw of `count * 6` vertices). Culling was not turned off.
 
-`get_performance_stats` exposes a frame counter. Its vertex count is `element_count * 50` and its draw-call count is the constant `3`, so those two fields are estimates, not measurements.
+Frame interval is the animation-frame period, so a 60 Hz headless Chrome sits near 16.7 ms even when `render()` returns sooner. Submit time is `performance.now()` around `render()` only. That call returns after `queue.submit` and `present`. It does **not** include a GPU timestamp. On this SwiftShader host, `present` did not add raster time, so submit time stays about 0.12–0.14 ms from 1k through 100k. Cold frame time is the first `render()` after the scene load (vertex-cache build plus full upload) and does grow with the scene.
 
-`planning/progress.md` (2025-12-21) notes one manual `www/test-stress.html` session at about 1100 elements and 60 FPS. That note is not a captured log, and it is not a current result. `www/test-performance.html` can create a 10k-element scene; no result from that page is recorded here.
+| Elements | Avg frame | P95 frame | Avg FPS | ~60 FPS | Avg submit | P95 submit | Cold frame | WASM heap | JS heap used |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 16.67 ms | 17.00 ms | 60.0 | yes | 0.12 ms | 0.20 ms | 7.60 ms | 2,686,976 | 1,715,643 |
+| 10,000 | 16.66 ms | 17.00 ms | 60.0 | yes | 0.14 ms | 0.20 ms | 15.60 ms | 11,796,480 | 1,743,244 |
+| 100,000 | 16.67 ms | 17.10 ms | 60.0 | yes | 0.13 ms | 0.20 ms | 101.10 ms | 89,980,928 | 20,954,327 |
+
+100k ran on this machine (load 30.1 ms, cold upload 19,200,000 bytes, 600,000 vertices, 1 draw call). Heap figures are `WebAssembly.Memory.buffer.byteLength` and Chromium `performance.memory.usedJSHeapSize` after that scene was resident. Cold frame time is a single sample; earlier runs on the same host put the 100k cold frame between about 76 ms and 99 ms, and this run was 101.10 ms. Steady frame interval and submit time stayed on the figures above.
+
+Reproduce (Chrome required; the script adds headless WebGPU / SwiftShader flags):
+
+```bash
+cd crates/wasm
+wasm-pack build --target web --out-dir ../../packages/core/wasm
+cd ../..
+
+npm run bench:smoke          # 1k only, exits 0 even if 60 FPS is missed
+npm run bench                # 1k, 10k, and 100k
+node scripts/bench.mjs --out docs/perf/run.json --markdown docs/perf/run.md
+```
+
+CI runs `node --test scripts/bench-stats.test.mjs scripts/cdp.test.mjs` and `npm run bench:smoke` after the wasm build. The smoke path does not gate on 60 FPS. `www/test-stress.html` and `www/bench.html` are the same scene for a manual session.
+
+The bench script drives Chrome through the DevTools protocol. Node 22+ uses the built-in `WebSocket`. Node 20, which CI and the quick start install, has no global `WebSocket`, so `scripts/cdp.mjs` uses the `undici` client (`addEventListener` / `send` / `close`).
 
 ## Roadmap
 

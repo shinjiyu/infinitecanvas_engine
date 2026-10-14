@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InfiniteCanvas bench</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, sans-serif;
+            background: #111;
+            color: #eee;
+        }
+        #canvas { display: block; background: #222; }
+        .panel {
+            padding: 16px 20px 32px;
+            max-width: 960px;
+        }
+        button {
+            margin-right: 8px;
+            padding: 8px 12px;
+        }
+        table { border-collapse: collapse; margin-top: 16px; }
+        th, td { border: 1px solid #444; padding: 6px 10px; text-align: right; }
+        th { text-align: left; }
+        #status { margin-top: 12px; color: #9cf; }
+        p { color: #aaa; max-width: 720px; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="1280" height="720"></canvas>
+    <div class="panel">
+        <h1>帧时间压测</h1>
+        <p>
+            矩形网格来自 <code>load_stress_scene</code>。数字是稳态帧：顶点缓存已经建好，
+            平移不应重生成几何。命令行复现见 README 的 Performance 一节。
+        </p>
+        <button type="button" onclick="runBench([1000])">1k</button>
+        <button type="button" onclick="runBench([10000])">10k</button>
+        <button type="button" onclick="runBench([100000])">100k</button>
+        <button type="button" onclick="runBench([1000, 10000, 100000])">1k / 10k / 100k</button>
+        <div id="status">等待开始</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>元素</th>
+                    <th>平均帧间隔 ms</th>
+                    <th>P95 帧间隔 ms</th>
+                    <th>平均 FPS</th>
+                    <th>~60 FPS</th>
+                    <th>平均提交 ms</th>
+                    <th>WASM 堆 bytes</th>
+                </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+        </table>
+    </div>
+    <script type="module" src="./bench.js"></script>
+</body>
+</html>

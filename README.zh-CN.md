@@ -10,7 +10,7 @@
 
 ![InfiniteCanvas 首页 Demo](./docs/assets/demo.png)
 
-当前能力说明、性能数字和路线图以英文主文档 [README.md](./README.md) 为准。构建命令与 [BUILD_GUIDE.md](./BUILD_GUIDE.md) 一致。本文件保留原先的中文介绍。
+构建命令与 [BUILD_GUIDE.md](./BUILD_GUIDE.md) 一致。性能数字在下面的表里，和英文 [README.md](./README.md) 是同一次测量。
 
 ## 🎯 项目介绍
 
@@ -18,7 +18,7 @@ InfiniteCanvas 是一个使用 Rust 和 WebGPU 构建的高性能无限画布引
 
 ### 核心特性
 
-- ✅ **高性能渲染**：支持 100,000+ 元素流畅运行
+- ✅ **高性能渲染**：2026-10-14 在 SwiftShader 上，1k / 10k / 100k 填充矩形的稳态动画帧维持约 60 FPS（见下方性能表）
 - ✅ **WebGPU 加速**：GPU 并行渲染
 - ✅ **WASM 编译**：接近原生性能
 - ✅ **内存安全**：Rust 零成本抽象
@@ -38,6 +38,30 @@ infinitecanvas_engine/
 ├── www/                 # Vite Demo
 └── docs/                # 设计文档
 ```
+
+## 性能
+
+数字与英文 [README.md](./README.md) 的 Performance 一节相同，测量日 **2026-10-14**，commit `73f087a`（已变基到 `49c47af`）。原始记录在 [docs/perf/2026-10-14.md](./docs/perf/2026-10-14.md)。
+
+环境：Linux 6.12.94+，4 个逻辑 CPU（Intel Xeon），16 GB 内存，无 `/dev/dri`。Headless Chrome 154.0.8037.92，WebGPU 适配器 SwiftShader Device (Subzero)。画布 1280×720。发布版 `infinitecanvas_wasm_bg.wasm` **3,177,340** 字节（rustc 1.99.0，wasm-pack 0.13.1，wasm-opt）。
+
+场景是 `load_stress_scene` 的填充矩形。稳态帧间隔约 16.7 ms，是 60 Hz 动画帧节拍。`render()` 的 CPU 提交约 0.12–0.14 ms，且不随元素数上升，因为顶点缓存未脏、只更新了视口 uniform。这个时间不含 GPU 时间戳。冷启动帧包含建缓存和全量上传，会随规模变长。约 60 FPS 的判据：平均 FPS ≥ 55 且 P95 帧间隔 ≤ 20 ms。没有关闭脏标记。
+
+| 元素 | 平均帧 | P95 帧 | 平均 FPS | ~60 FPS | 平均提交 | P95 提交 | 冷启动帧 | WASM 堆 | JS 堆 |
+| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 16.67 ms | 17.00 ms | 60.0 | 是 | 0.12 ms | 0.20 ms | 7.60 ms | 2,686,976 | 1,715,643 |
+| 10,000 | 16.66 ms | 17.00 ms | 60.0 | 是 | 0.14 ms | 0.20 ms | 15.60 ms | 11,796,480 | 1,743,244 |
+| 100,000 | 16.67 ms | 17.10 ms | 60.0 | 是 | 0.13 ms | 0.20 ms | 101.10 ms | 89,980,928 | 20,954,327 |
+
+100k 在这台机器上跑完了（加载 30.1 ms，冷启动上传 19,200,000 字节，600,000 顶点，1 次绘制）。冷启动帧只有一次采样，同机另几次大约在 76 ms 到 99 ms，这次是 101.10 ms。稳态帧间隔和提交时间保持在上表。复现：
+
+```bash
+cd crates/wasm && wasm-pack build --target web --out-dir ../../packages/core/wasm && cd ../..
+npm run bench:smoke    # CI：只跑 1k，不要求 60 FPS
+npm run bench          # 1k / 10k / 100k
+```
+
+压测通过 Chrome DevTools 协议驱动浏览器。Node 22+ 用内置 `WebSocket`。CI 和上面的快速开始安装的是 Node 20，没有全局 `WebSocket`，`scripts/cdp.mjs` 改用 `undici` 的客户端（`addEventListener` / `send` / `close`）。
 
 ## 🚀 快速开始
 
