@@ -27,6 +27,8 @@ pub enum CollabError {
     Missing(ElementId),
     /// [`crate::CollabSession::insert`] 的 id 已经在本地场景里。
     Duplicate(ElementId),
+    /// 成组、解散、锁定或世界变换被场景拒绝（不存在、已锁定、会成环等）。
+    Group(String),
 }
 
 impl std::fmt::Display for CollabError {
@@ -45,6 +47,7 @@ impl std::fmt::Display for CollabError {
             }
             CollabError::Missing(id) => write!(f, "element {id} is not in the local scene"),
             CollabError::Duplicate(id) => write!(f, "element {id} is already in the local scene"),
+            CollabError::Group(message) => write!(f, "group operation failed: {message}"),
         }
     }
 }

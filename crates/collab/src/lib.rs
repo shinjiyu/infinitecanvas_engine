@@ -6,14 +6,16 @@
 //!
 //! ```text
 //! CollabSession A                         MemoryProvider                        CollabSession B
-//! Scene ── insert/update/delete ──▶ Y.Doc ── SyncStep1/SyncStep2 ──▶ Y.Doc ──▶ Scene
+//! Scene ── insert/update/delete/group/ungroup ──▶ Y.Doc ── SyncStep1/SyncStep2 ──▶ Y.Doc ──▶ Scene
 //!                                         │
 //!                                         └── encode_state_v1 / apply_update
 //!                                              （Yjs v1 字节，可交给以后的 JS provider）
 //! ```
 //!
 //! 直接改 [`infinitecanvas_engine::Scene`] 不会进文档。本地编辑要走
-//! [`CollabSession::insert`]、[`CollabSession::update`]、[`CollabSession::delete`]。
+//! [`CollabSession::insert`]、[`CollabSession::update`]、[`CollabSession::delete`]，
+//! 以及 [`CollabSession::group`]、[`CollabSession::ungroup`]、
+//! [`CollabSession::set_locked`]、[`CollabSession::set_world_transform`]。
 //! 远端字节走 [`CollabSession::apply_update`] 或 [`MemoryProvider::sync`]。
 //!
 //! 冲突策略和限制见 `docs/design/crdt.md`。

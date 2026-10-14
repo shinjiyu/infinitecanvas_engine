@@ -71,6 +71,7 @@
 - [x] 冲突解决符合 `docs/design/crdt.md`（同一键 LWW，删除并不必然压过更新）
 - [x] Text 经 `MemoryProvider` 同步后内容、字号、颜色一致，`texture_id` 为空
 - [x] `peer_slot` 超过 21 位会被拒绝，分配的 id 落在 `2^53-1` 以内
+- [x] Group 经 `MemoryProvider` 同步：矩形和文本成组后 `scene_tree` / `parent` / `children` / `locked` / 世界变换一致，解散后组消失且子元素世界坐标保留
 
 ---
 

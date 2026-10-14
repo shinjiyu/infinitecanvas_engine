@@ -153,12 +153,13 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 - [x] 冲突策略见 `docs/design/crdt.md`（整元素 LWW；选区 / 光标 / 房间服务不在这次）
 - [x] Text 经 `MemoryProvider` 同步（内容、字号、颜色），对端 `texture_id` 为空
 - [x] `peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`
+- [x] Group 经 `MemoryProvider` 同步：`children` / `parent` / `locked`，场景树一致；组的世界变换写到子孙；`ungroup` 后组消失、子元素世界坐标保留
 
 ```text
 Scene ── 事务 ──▶ Y.Doc elements ── SyncStep1/2 ──▶ 另一份 Y.Doc ──▶ Scene
 ```
 
-未接到 WASM、`www` 和 `packages/server`。Text 随场景 JSON v1 同步（内容、字号、颜色）；`texture_id` 不进文档，对端物化后为空。`group` 也走同一条整段 JSON。`peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`。未知种类仍会使物化失败。整场景重物化是 O(n)。
+未接到 WASM、`www` 和 `packages/server`。Text 随场景 JSON v1 同步（内容、字号、颜色）；`texture_id` 不进文档，对端物化后为空。`CollabSession::group` / `ungroup` / `set_locked` / `set_world_transform` 把组的 `children`、元素的 `parent` / `locked` 和世界变换写进同一条整段 JSON。组 id 用 `allocate_id`。`peer_slot` 限制在 21 位，元素 id 不超过 JS 安全整数 `2^53-1`。未知种类仍会使物化失败。整场景重物化是 O(n)。
 
 ---
 

@@ -3,7 +3,8 @@
 //! 本地增删改走 yrs 事务，物化回 [`Scene`] 时复用场景 JSON（#6）的解码。
 
 use crate::error::CollabError;
-use infinitecanvas_engine::{AnyElement, ElementId, Scene, SCENE_FORMAT_VERSION};
+use infinitecanvas_engine::math::Transform;
+use infinitecanvas_engine::{AnyElement, ElementId, GroupError, Scene, SCENE_FORMAT_VERSION};
 use serde_json::Value;
 use yrs::sync::Awareness;
 use yrs::updates::decoder::Decode;
@@ -222,6 +223,206 @@ impl CollabSession {
         self.write_element(element)
     }
 
+    /// 把已有元素收成一组，并把组、`parent`、`children` 和世界变换写进文档。
+    ///
+    /// 组 id 来自 [`Self::allocate_id`]，不用 `Scene::next_id`。这样两个对等端同时成组
+    /// 不会抢到同一个 `max_id + 1`。子元素的 `transform` 仍是世界变换；组自己的平移落在
+    /// 子内容中心。这些字段和场景 JSON 里的 `group` 是同一份。
+    ///
+    /// # 参数
+    /// - `ids`: 要成组的元素，顺序变成组内顺序。至少两个，且当前父节点相同。
+    ///
+    /// # 返回
+    /// 新组的元素 id。
+    ///
+    /// # 错误
+    /// 场景拒绝成组（不足两个、未知元素、不同父节点、会成环、已锁定）时返回
+    /// [`CollabError::Group`]。文档保持原样。组 id 和已有元素冲突时返回
+    /// [`CollabError::Duplicate`]。
+    ///
+    /// # 示例
+    ///
+    /// ```
+    /// use infinitecanvas_collab::{CollabSession, MemoryProvider};
+    /// use infinitecanvas_engine::math::Vec2;
+    /// use infinitecanvas_engine::{AnyElement, Rectangle, Text};
+    ///
+    /// let mut local = CollabSession::with_client_id(1, 1);
+    /// let mut remote = CollabSession::with_client_id(2, 2);
+    /// let rect_id = local.allocate_id();
+    /// let text_id = local.allocate_id();
+    /// local.insert(AnyElement::Rectangle(Rectangle::new(
+    ///     rect_id,
+    ///     Vec2::ZERO,
+    ///     Vec2::new(10.0, 10.0),
+    /// )))?;
+    /// local.insert(AnyElement::Text(Text::new(
+    ///     text_id,
+    ///     Vec2::new(30.0, 0.0),
+    ///     "Hi",
+    /// )))?;
+    /// let group_id = local.group(&[rect_id, text_id])?;
+    /// local.set_locked(group_id, true)?;
+    /// MemoryProvider::sync(&mut local, &mut remote)?;
+    /// assert_eq!(remote.scene().parent_of(rect_id), Some(group_id));
+    /// assert_eq!(remote.scene().children_of(group_id), vec![rect_id, text_id]);
+    /// assert!(remote.scene().get(group_id).unwrap().as_element().props().locked);
+    /// # Ok::<(), infinitecanvas_collab::CollabError>(())
+    /// ```
+    pub fn group(&mut self, ids: &[ElementId]) -> Result<ElementId, CollabError> {
+        let mut scratch = self.snapshot()?;
+        let auto_id = scratch.group(ids).map_err(group_error)?;
+        let group_id = self.allocate_id();
+        if group_id != auto_id {
+            scratch = reassign_id(&scratch, auto_id, group_id)?;
+        }
+        self.commit_scene(&scratch)?;
+        Ok(group_id)
+    }
+
+    /// 解散组。组键从文档删除，子元素留在场景里，父指针改到组原来的父节点。
+    ///
+    /// 世界变换不改。锁定的组要先 [`Self::set_locked`] 解开，否则场景拒绝解散。
+    ///
+    /// # 参数
+    /// - `group_id`: 组元素 id。
+    ///
+    /// # 返回
+    /// 原来的直接子元素 id，顺序与组内一致。
+    ///
+    /// # 错误
+    /// 不是组、元素不存在或已锁定时返回 [`CollabError::Group`]。文档保持原样。
+    ///
+    /// # 示例
+    ///
+    /// ```
+    /// use infinitecanvas_collab::{CollabSession, MemoryProvider};
+    /// use infinitecanvas_engine::math::Vec2;
+    /// use infinitecanvas_engine::{AnyElement, Rectangle};
+    ///
+    /// let mut local = CollabSession::with_client_id(1, 1);
+    /// let mut remote = CollabSession::with_client_id(2, 2);
+    /// let left = local.allocate_id();
+    /// let right = local.allocate_id();
+    /// local.insert(AnyElement::Rectangle(Rectangle::new(
+    ///     left,
+    ///     Vec2::ZERO,
+    ///     Vec2::new(8.0, 8.0),
+    /// )))?;
+    /// local.insert(AnyElement::Rectangle(Rectangle::new(
+    ///     right,
+    ///     Vec2::new(20.0, 0.0),
+    ///     Vec2::new(8.0, 8.0),
+    /// )))?;
+    /// let group_id = local.group(&[left, right])?;
+    /// MemoryProvider::sync(&mut local, &mut remote)?;
+    /// let children = local.ungroup(group_id)?;
+    /// MemoryProvider::sync(&mut local, &mut remote)?;
+    /// assert_eq!(children, vec![left, right]);
+    /// assert!(remote.scene().parent_of(left).is_none());
+    /// assert!(!remote.scene().contains(group_id));
+    /// # Ok::<(), infinitecanvas_collab::CollabError>(())
+    /// ```
+    pub fn ungroup(&mut self, group_id: ElementId) -> Result<Vec<ElementId>, CollabError> {
+        let mut scratch = self.snapshot()?;
+        let children = scratch.ungroup(group_id).map_err(group_error)?;
+        self.commit_scene(&scratch)?;
+        Ok(children)
+    }
+
+    /// 设置锁定，并把 `props.locked` 写进该元素的 JSON。
+    ///
+    /// 锁定会随整份元素同步。对端物化后，组和它的子孙都拒绝变换，和本地场景一样。
+    ///
+    /// # 参数
+    /// - `id`: 元素 id
+    /// - `locked`: `true` 为锁定，`false` 为解锁
+    ///
+    /// # 错误
+    /// 本地没有这个 id 时返回 [`CollabError::Missing`]。
+    ///
+    /// # 示例
+    ///
+    /// ```
+    /// use infinitecanvas_collab::CollabSession;
+    /// use infinitecanvas_engine::math::Vec2;
+    /// use infinitecanvas_engine::{AnyElement, Rectangle};
+    ///
+    /// let mut session = CollabSession::with_client_id(1, 1);
+    /// let id = session.allocate_id();
+    /// session.insert(AnyElement::Rectangle(Rectangle::new(
+    ///     id,
+    ///     Vec2::ZERO,
+    ///     Vec2::new(4.0, 4.0),
+    /// )))?;
+    /// session.set_locked(id, true)?;
+    /// assert!(session.scene().get(id).unwrap().as_element().props().locked);
+    /// # Ok::<(), infinitecanvas_collab::CollabError>(())
+    /// ```
+    pub fn set_locked(&mut self, id: ElementId, locked: bool) -> Result<(), CollabError> {
+        if !self.scene.contains(id) {
+            return Err(CollabError::Missing(id));
+        }
+        let mut scratch = self.snapshot()?;
+        if !scratch.set_locked(id, locked) {
+            return Err(CollabError::Missing(id));
+        }
+        self.commit_scene(&scratch)
+    }
+
+    /// 设置世界变换，并把组的子孙变换一起写进文档。
+    ///
+    /// 目标是组时，后代按 `new = to * inverse(from) * child` 跟着变，和
+    /// [`infinitecanvas_engine::Scene::set_world_transform`] 相同。只改本地 `Scene`
+    /// 不会进文档；必须走这里，对端的世界坐标才会一起变。
+    ///
+    /// # 参数
+    /// - `id`: 元素 id
+    /// - `transform`: 该元素的新世界变换
+    ///
+    /// # 错误
+    /// 元素不存在，或它（或祖先）已锁定时返回 [`CollabError::Group`]。文档保持原样。
+    ///
+    /// # 示例
+    ///
+    /// ```
+    /// use infinitecanvas_collab::{CollabSession, MemoryProvider};
+    /// use infinitecanvas_engine::math::{Transform, Vec2};
+    /// use infinitecanvas_engine::{AnyElement, Rectangle};
+    ///
+    /// let mut local = CollabSession::with_client_id(1, 1);
+    /// let mut remote = CollabSession::with_client_id(2, 2);
+    /// let id = local.allocate_id();
+    /// local.insert(AnyElement::Rectangle(Rectangle::new(
+    ///     id,
+    ///     Vec2::ZERO,
+    ///     Vec2::new(4.0, 4.0),
+    /// )))?;
+    /// local.set_world_transform(id, Transform::from_translation(Vec2::new(6.0, 7.0)))?;
+    /// MemoryProvider::sync(&mut local, &mut remote)?;
+    /// let translation = remote
+    ///     .scene()
+    ///     .get(id)
+    ///     .unwrap()
+    ///     .as_element()
+    ///     .props()
+    ///     .transform
+    ///     .translation;
+    /// assert_eq!(translation, Vec2::new(6.0, 7.0));
+    /// # Ok::<(), infinitecanvas_collab::CollabError>(())
+    /// ```
+    pub fn set_world_transform(
+        &mut self,
+        id: ElementId,
+        transform: Transform,
+    ) -> Result<(), CollabError> {
+        let mut scratch = self.snapshot()?;
+        scratch
+            .set_world_transform(id, transform)
+            .map_err(group_error)?;
+        self.commit_scene(&scratch)
+    }
+
     /// 从文档删除元素。
     ///
     /// # 参数
@@ -366,6 +567,53 @@ impl CollabSession {
         self.refresh_scene()
     }
 
+    /// 复制一份场景，供 [`Scene::group`] 这类会改父子和变换的操作使用。
+    ///
+    /// 直接改 [`Self::scene`] 不会进文档，所以先在副本上算出结果，再整批写回。
+    fn snapshot(&self) -> Result<Scene, CollabError> {
+        let json = self
+            .scene
+            .to_json()
+            .map_err(|err| CollabError::Persist(err.to_string()))?;
+        Scene::from_json(&json).map_err(|err| CollabError::Persist(err.to_string()))
+    }
+
+    /// 把 `next` 相对当前场景的增删改写进同一个 yrs 事务，再物化。
+    ///
+    /// 成组会同时插入组、改写每个子元素的 `parent`。拆成多次事务的话，对端可能看到
+    /// 子元素已经指向一个还不存在的组。
+    fn commit_scene(&mut self, next: &Scene) -> Result<(), CollabError> {
+        let mut upserts = Vec::new();
+        for element in next.iter() {
+            let id = element.id();
+            let changed = self.scene.get(id).is_none_or(|current| current != element);
+            if changed {
+                upserts.push((id.to_string(), element_to_json(element)?));
+            }
+        }
+        let removals: Vec<String> = self
+            .scene
+            .iter()
+            .map(AnyElement::id)
+            .filter(|id| !next.contains(*id))
+            .map(|id| id.to_string())
+            .collect();
+        if upserts.is_empty() && removals.is_empty() {
+            return Ok(());
+        }
+        {
+            let elements = self.doc().get_or_insert_map(ELEMENTS_ROOT);
+            let mut txn = self.doc().transact_mut();
+            for (key, json) in upserts {
+                elements.try_update(&mut txn, key.as_str(), json);
+            }
+            for key in &removals {
+                elements.remove(&mut txn, key.as_str());
+            }
+        }
+        self.refresh_scene()
+    }
+
     fn materialize(&self) -> Result<Scene, CollabError> {
         let meta = self.doc().get_or_insert_map(META_ROOT);
         let elements = self.doc().get_or_insert_map(ELEMENTS_ROOT);
@@ -457,6 +705,54 @@ fn empty_state_vector() -> StateVector {
     StateVector::from_iter([])
 }
 
+fn group_error(err: GroupError) -> CollabError {
+    CollabError::Group(err.to_string())
+}
+
+/// 把场景在成组时自动分配的 id 换成 [`CollabSession::allocate_id`] 的结果。
+///
+/// `Scene::group` 只能用自己的 `next_id`。物化后的 `next_id` 是最大 id 加 1，
+/// 两端场景相同时会分到同一个组 id。这里改元素 id、`parent` 和组的 `children`。
+fn reassign_id(scene: &Scene, from: ElementId, to: ElementId) -> Result<Scene, CollabError> {
+    if scene.contains(to) {
+        return Err(CollabError::Duplicate(to));
+    }
+    let mut rebuilt = Scene::new();
+    for element in scene.iter() {
+        let mut element = element.clone();
+        rewrite_id(&mut element, from, to);
+        rebuilt.add(element);
+    }
+    if rebuilt.count() != scene.count() || !rebuilt.contains(to) {
+        return Err(CollabError::Decode(format!(
+            "failed to reassign group id {from} to {to}"
+        )));
+    }
+    Ok(rebuilt)
+}
+
+fn rewrite_id(element: &mut AnyElement, from: ElementId, to: ElementId) {
+    let props = element.as_element_mut().props_mut();
+    if props.id == from {
+        props.id = to;
+    }
+    if props.parent == Some(from) {
+        props.parent = Some(to);
+    }
+    if let Some(group) = element.as_group_mut() {
+        for child in &mut group.children {
+            if *child == from {
+                *child = to;
+            }
+        }
+    }
+}
+
+/// 单个元素的场景 JSON。
+///
+/// `AnyElement` 的每个种类都走这里，包括 [`AnyElement::Group`]。组的 `children`、
+/// 每个元素 `props` 上的 `parent` / `locked`，以及世界 `transform`，都在这份 JSON 里。
+/// `selected` 在写入前清掉。
 fn element_to_json(element: &AnyElement) -> Result<String, CollabError> {
     let mut cloned = element.clone();
     cloned.as_element_mut().props_mut().selected = false;
