@@ -30,7 +30,9 @@ pub mod viewport;
 
 // 重导出核心类型
 pub use command::{AddElementCommand, Command, CommandHistory, MoveCommand, RemoveElementCommand};
-pub use element::{Circle, Element, ElementId, ElementProps, ElementStyle, Image, Rectangle};
+pub use element::{
+    Circle, Element, ElementId, ElementProps, ElementStyle, Image, Line, Path, Rectangle,
+};
 pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,
     WheelEvent,

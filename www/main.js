@@ -2,7 +2,7 @@
  * InfiniteCanvas 首页 Demo。
  *
  * 把选择、压力测试和纹理上传放在同一张画布上：
- * 工具栏切换选择 / 绘制 / 平移，压力按钮批量加元素，纹理按钮上传一张程序生成的图片。
+ * 工具栏切换选择 / 直线 / 画笔 / 绘制 / 平移，压力按钮批量加元素，纹理按钮上传一张程序生成的图片。
  *
  * @example
  * ```html
@@ -391,6 +391,12 @@ function bindInput(canvas, engine) {
     switch (event.key.toLowerCase()) {
       case 'v':
         setTool('select');
+        break;
+      case 'l':
+        setTool('line');
+        break;
+      case 'p':
+        setTool('pen');
         break;
       case 'r':
         setTool('rectangle');

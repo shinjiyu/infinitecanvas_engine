@@ -28,10 +28,15 @@ mod texture_manager;
 use infinitecanvas_engine::{
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
     math::{Color, Vec2},
-    AnyElement, Circle, CommandHistory, ElementId, ElementStyle, Event, EventQueue, Image,
-    MoveCommand, PointerButton, PointerEvent, Rectangle, Scene, SelectionBox, SelectionManager,
-    Tool, ToolManager, Viewport,
+    AddElementCommand, AnyElement, Circle, CommandHistory, ElementId, ElementStyle, Event,
+    EventQueue, Image, Line, MoveCommand, Path, PointerButton, PointerEvent, Rectangle, Scene,
+    SelectionBox, SelectionManager, Tool, ToolManager, Viewport,
 };
+
+/// 直线 / 画笔抬笔时短于该长度则丢弃
+const MIN_STROKE_LENGTH: f32 = 2.0;
+/// 画笔采样的最小间距，避免点过密
+const PEN_SAMPLE_SPACING: f32 = 1.5;
 use input::{
     keyboard_event_from_js, modifiers_from_flags, pointer_event_from_js, wheel_event_from_js,
     KeyboardEventKind, PointerEventKind,
@@ -62,6 +67,10 @@ struct DragState {
     total_delta: Vec2,
     /// 被拖动的元素 ID 列表
     dragged_ids: Vec<ElementId>,
+    /// 自由画笔采样点（世界坐标）
+    pen_points: Vec<Vec2>,
+    /// 绘制过程中的预览元素；抬笔后才进入撤销栈
+    preview_id: Option<ElementId>,
 }
 
 /// 性能统计
@@ -430,7 +439,11 @@ impl InfiniteCanvas {
     /// 是否成功撤销
     #[wasm_bindgen]
     pub fn undo(&mut self) -> bool {
-        self.command_history.undo(&mut self.scene)
+        let undone = self.command_history.undo(&mut self.scene);
+        if undone {
+            self.sync_selection_after_history();
+        }
+        undone
     }
 
     /// 重做上一个撤销的操作
@@ -439,7 +452,11 @@ impl InfiniteCanvas {
     /// 是否成功重做
     #[wasm_bindgen]
     pub fn redo(&mut self) -> bool {
-        self.command_history.redo(&mut self.scene)
+        let redone = self.command_history.redo(&mut self.scene);
+        if redone {
+            self.sync_selection_after_history();
+        }
+        redone
     }
 
     /// 是否可以撤销
@@ -471,13 +488,18 @@ impl InfiniteCanvas {
     /// 设置当前工具
     ///
     /// # 参数
-    /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "pan")
+    /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "pan", "line", "pen")
+    ///
+    /// 直线快捷键 `l`，画笔快捷键 `p`。切换工具会丢掉尚未抬笔的预览。
     ///
     /// # 返回
     /// 是否成功设置
     #[wasm_bindgen]
     pub fn set_tool(&mut self, tool_name: String) -> bool {
         if let Ok(tool) = Tool::from_str(&tool_name) {
+            if self.tool_manager.current() != tool {
+                self.cancel_drawing();
+            }
             self.tool_manager.set_tool(tool);
             true
         } else {
@@ -750,6 +772,77 @@ impl InfiniteCanvas {
         self.scene.add_circle(circle);
 
         log::info!("Added circle {} at ({}, {})", id, x, y);
+        id
+    }
+
+    /// 添加直线
+    ///
+    /// # 参数
+    /// - `x1, y1`: 起点（世界坐标）
+    /// - `x2, y2`: 终点（世界坐标）
+    /// - `color`: 描边颜色（可选，如 "#111827"）
+    /// - `stroke_width`: 线宽
+    /// - `arrow`: 终点是否绘制箭头
+    ///
+    /// # 返回
+    /// 元素 ID
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const id = canvas.add_line(10, 20, 180, 20, "#111827", 3, true);
+    /// ```
+    #[wasm_bindgen]
+    pub fn add_line(
+        &mut self,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        color: Option<String>,
+        stroke_width: f32,
+        arrow: bool,
+    ) -> u64 {
+        let id = self.scene.next_id();
+        let stroke = color
+            .and_then(|hex| Color::from_hex(&hex).ok())
+            .unwrap_or(Color::BLACK);
+        let style = ElementStyle::stroke_only(stroke, stroke_width);
+        let line = Line::from_world(id, Vec2::new(x1, y1), Vec2::new(x2, y2), style, arrow);
+        self.scene.add_line(line);
+        log::info!("Added line {} ({}, {}) -> ({}, {})", id, x1, y1, x2, y2);
+        id
+    }
+
+    /// 添加自由画笔路径
+    ///
+    /// # 参数
+    /// - `points`: 扁平坐标 `[x0, y0, x1, y1, ...]`（世界坐标）
+    /// - `color`: 描边颜色（可选）
+    /// - `stroke_width`: 线宽
+    ///
+    /// # 返回
+    /// 元素 ID
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const id = canvas.add_path(new Float32Array([0, 0, 40, 10, 40, 80]), "#111827", 2.5);
+    /// ```
+    #[wasm_bindgen]
+    pub fn add_path(&mut self, points: &[f32], color: Option<String>, stroke_width: f32) -> u64 {
+        let id = self.scene.next_id();
+        let stroke = color
+            .and_then(|hex| Color::from_hex(&hex).ok())
+            .unwrap_or(Color::BLACK);
+        let style = ElementStyle::stroke_only(stroke, stroke_width);
+        let mut world_points = Vec::with_capacity(points.len() / 2);
+        for chunk in points.chunks(2) {
+            if chunk.len() == 2 {
+                world_points.push(Vec2::new(chunk[0], chunk[1]));
+            }
+        }
+        let path = Path::from_world_points(id, &world_points, style);
+        self.scene.add_path(path);
+        log::info!("Added path {} with {} points", id, world_points.len());
         id
     }
 
@@ -1067,6 +1160,8 @@ impl InfiniteCanvas {
         match current_tool {
             Tool::Select => self.handle_select_tool_down(event),
             Tool::Rectangle | Tool::Circle => self.handle_draw_tool_down(event, current_tool),
+            Tool::Line => self.handle_line_tool_down(event),
+            Tool::Pen => self.handle_pen_tool_down(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_down(event),
         }
     }
@@ -1077,6 +1172,8 @@ impl InfiniteCanvas {
         match current_tool {
             Tool::Select => self.handle_select_tool_move(event),
             Tool::Rectangle | Tool::Circle => self.handle_draw_tool_move(event),
+            Tool::Line => self.handle_line_tool_move(event),
+            Tool::Pen => self.handle_pen_tool_move(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_move(event),
         }
     }
@@ -1087,6 +1184,8 @@ impl InfiniteCanvas {
         match current_tool {
             Tool::Select => self.handle_select_tool_up(event),
             Tool::Rectangle | Tool::Circle => self.handle_draw_tool_up(event, current_tool),
+            Tool::Line => self.handle_line_tool_up(event),
+            Tool::Pen => self.handle_pen_tool_up(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_up(event),
         }
     }
@@ -1227,6 +1326,176 @@ impl InfiniteCanvas {
         self.drag_state.pointer_id = None;
     }
 
+    // ========== 直线 / 画笔 ==========
+
+    fn handle_line_tool_down(&mut self, event: PointerEvent) {
+        self.selection.clear(&mut self.scene);
+        self.cancel_drawing();
+        self.drag_state.is_dragging = true;
+        self.drag_state.pointer_id = Some(event.pointer_id);
+        self.drag_state.start_position = event.world_position;
+        self.drag_state.last_position = event.world_position;
+
+        let id = self.scene.next_id();
+        let style =
+            ElementStyle::stroke_only(Color::from_hex("#1f2937").unwrap_or(Color::BLACK), 3.0);
+        let line = Line::from_world(
+            id,
+            event.world_position,
+            event.world_position,
+            style,
+            event.modifiers.shift,
+        );
+        self.scene.add_line(line);
+        self.drag_state.preview_id = Some(id);
+    }
+
+    fn handle_line_tool_move(&mut self, event: PointerEvent) {
+        if !self.drag_state.is_dragging || self.drag_state.pointer_id != Some(event.pointer_id) {
+            return;
+        }
+        self.drag_state.last_position = event.world_position;
+        self.update_line_preview(event.world_position, event.modifiers.shift);
+    }
+
+    fn handle_line_tool_up(&mut self, event: PointerEvent) {
+        if !self.drag_state.is_dragging || self.drag_state.pointer_id != Some(event.pointer_id) {
+            return;
+        }
+        let end = event.world_position;
+        self.update_line_preview(end, event.modifiers.shift);
+        let long_enough = (end - self.drag_state.start_position).length() >= MIN_STROKE_LENGTH;
+        self.drag_state.is_dragging = false;
+        self.drag_state.pointer_id = None;
+        if long_enough {
+            self.commit_preview();
+        } else {
+            self.discard_preview();
+        }
+    }
+
+    fn update_line_preview(&mut self, world_end: Vec2, arrow: bool) {
+        let Some(id) = self.drag_state.preview_id else {
+            return;
+        };
+        if let Some(AnyElement::Line(line)) = self.scene.get_mut(id) {
+            line.set_world_end(world_end);
+            line.set_arrow(arrow);
+        }
+    }
+
+    fn handle_pen_tool_down(&mut self, event: PointerEvent) {
+        self.selection.clear(&mut self.scene);
+        self.cancel_drawing();
+        self.drag_state.is_dragging = true;
+        self.drag_state.pointer_id = Some(event.pointer_id);
+        self.drag_state.start_position = event.world_position;
+        self.drag_state.last_position = event.world_position;
+        self.drag_state.pen_points.push(event.world_position);
+    }
+
+    fn handle_pen_tool_move(&mut self, event: PointerEvent) {
+        if !self.drag_state.is_dragging || self.drag_state.pointer_id != Some(event.pointer_id) {
+            return;
+        }
+        self.push_pen_point(event.world_position, PEN_SAMPLE_SPACING);
+    }
+
+    fn handle_pen_tool_up(&mut self, event: PointerEvent) {
+        if !self.drag_state.is_dragging || self.drag_state.pointer_id != Some(event.pointer_id) {
+            return;
+        }
+        self.push_pen_point(event.world_position, 0.5);
+        let long_enough = self.drag_state.pen_points.len() >= 2
+            && polyline_length(&self.drag_state.pen_points) >= MIN_STROKE_LENGTH;
+        self.drag_state.is_dragging = false;
+        self.drag_state.pointer_id = None;
+        if long_enough {
+            self.commit_preview();
+        } else {
+            self.discard_preview();
+        }
+        self.drag_state.pen_points.clear();
+    }
+
+    fn push_pen_point(&mut self, point: Vec2, min_spacing: f32) {
+        let last = self.drag_state.pen_points.last().copied().unwrap_or(point);
+        if (point - last).length() < min_spacing {
+            return;
+        }
+        self.drag_state.pen_points.push(point);
+        self.drag_state.last_position = point;
+        self.sync_pen_preview();
+    }
+
+    fn sync_pen_preview(&mut self) {
+        if self.drag_state.pen_points.len() < 2 {
+            return;
+        }
+        let points = self.drag_state.pen_points.clone();
+        if let Some(id) = self.drag_state.preview_id {
+            if let Some(AnyElement::Path(path)) = self.scene.get_mut(id) {
+                path.set_world_points(&points);
+                return;
+            }
+        }
+        let id = self.scene.next_id();
+        let style =
+            ElementStyle::stroke_only(Color::from_hex("#111827").unwrap_or(Color::BLACK), 2.5);
+        let path = Path::from_world_points(id, &points, style);
+        self.scene.add_path(path);
+        self.drag_state.preview_id = Some(id);
+    }
+
+    /// 把预览元素正式写入场景，并记入撤销栈。
+    fn commit_preview(&mut self) {
+        let Some(id) = self.drag_state.preview_id.take() else {
+            return;
+        };
+        let Some(element) = self.scene.remove(id) else {
+            return;
+        };
+        self.command_history
+            .execute(Box::new(AddElementCommand::new(element)), &mut self.scene);
+        self.selection.select_element(&mut self.scene, id, false);
+        log::info!("Committed stroke {}", id);
+    }
+
+    fn discard_preview(&mut self) {
+        if let Some(id) = self.drag_state.preview_id.take() {
+            self.scene.remove(id);
+        }
+        self.drag_state.pen_points.clear();
+    }
+
+    fn cancel_drawing(&mut self) {
+        self.discard_preview();
+        self.drag_state.is_dragging = false;
+        self.drag_state.pointer_id = None;
+    }
+
+    /// 撤销/重做后，选择集与元素上的 selected 标记保持一致。
+    fn sync_selection_after_history(&mut self) {
+        let stale: Vec<ElementId> = self
+            .selection
+            .selected_ids()
+            .into_iter()
+            .filter(|id| !self.scene.contains(*id))
+            .collect();
+        for id in stale {
+            self.selection.remove_id(id);
+        }
+        let flagged: Vec<ElementId> = self
+            .scene
+            .iter()
+            .filter(|element| element.as_element().props().selected)
+            .map(|element| element.id())
+            .collect();
+        for id in flagged {
+            self.selection.select_element(&mut self.scene, id, true);
+        }
+    }
+
     // ========== 平移工具事件处理 ==========
 
     fn handle_pan_tool_down(&mut self, event: PointerEvent) {
@@ -1296,6 +1565,13 @@ impl InfiniteCanvas {
             }
         }
     }
+}
+
+fn polyline_length(points: &[Vec2]) -> f32 {
+    points
+        .windows(2)
+        .map(|window| (window[1] - window[0]).length())
+        .sum()
 }
 
 fn hit_results_to_js_array(hits: Vec<HitTestResult>) -> Array {

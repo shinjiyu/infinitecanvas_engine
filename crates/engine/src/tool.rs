@@ -18,6 +18,10 @@ pub enum Tool {
     Pan,
     /// 手型工具 - 按住空格临时切换
     Hand,
+    /// 直线工具 - 拖动绘制直线，按住 Shift 带箭头
+    Line,
+    /// 画笔工具 - 自由绘制路径
+    Pen,
 }
 
 impl std::str::FromStr for Tool {
@@ -32,6 +36,8 @@ impl std::str::FromStr for Tool {
             "rectangle" | "rect" | "r" => Ok(Tool::Rectangle),
             "circle" | "ellipse" | "o" => Ok(Tool::Circle),
             "pan" | "hand" | "h" => Ok(Tool::Pan),
+            "line" | "l" => Ok(Tool::Line),
+            "pen" | "path" | "p" => Ok(Tool::Pen),
             _ => Err(()),
         }
     }
@@ -46,6 +52,8 @@ impl Tool {
             Tool::Circle => "circle",
             Tool::Pan => "pan",
             Tool::Hand => "hand",
+            Tool::Line => "line",
+            Tool::Pen => "pen",
         }
     }
 
@@ -57,12 +65,17 @@ impl Tool {
             Tool::Circle => "crosshair",
             Tool::Pan => "grab",
             Tool::Hand => "grab",
+            Tool::Line => "crosshair",
+            Tool::Pen => "crosshair",
         }
     }
 
     /// 是否是绘制工具
     pub fn is_drawing_tool(&self) -> bool {
-        matches!(self, Tool::Rectangle | Tool::Circle)
+        matches!(
+            self,
+            Tool::Rectangle | Tool::Circle | Tool::Line | Tool::Pen
+        )
     }
 }
 
@@ -141,7 +154,14 @@ mod tests {
         assert_eq!(Tool::from_str("r"), Ok(Tool::Rectangle));
         assert_eq!(Tool::from_str("circle"), Ok(Tool::Circle));
         assert_eq!(Tool::from_str("o"), Ok(Tool::Circle));
+        assert_eq!(Tool::from_str("l"), Ok(Tool::Line));
+        assert_eq!(Tool::from_str("line"), Ok(Tool::Line));
+        assert_eq!("p".parse::<Tool>(), Ok(Tool::Pen));
+        assert_eq!("pen".parse::<Tool>(), Ok(Tool::Pen));
+        assert_eq!("path".parse::<Tool>(), Ok(Tool::Pen));
         assert!(Tool::from_str("unknown").is_err());
+        assert!(Tool::Line.is_drawing_tool());
+        assert!(Tool::Pen.is_drawing_tool());
     }
 
     #[test]

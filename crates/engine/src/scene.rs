@@ -1,7 +1,7 @@
 //! 场景容器
 //!
 //! 管理无限画布上的所有元素
-use crate::element::{Circle, Element, ElementId, Image, Rectangle};
+use crate::element::{Circle, Element, ElementId, Image, Line, Path, Rectangle};
 use std::collections::HashMap;
 
 /// 元素枚举（支持不同类型元素）
@@ -10,6 +10,8 @@ pub enum AnyElement {
     Rectangle(Rectangle),
     Circle(Circle),
     Image(Image),
+    Line(Line),
+    Path(Path),
 }
 
 impl AnyElement {
@@ -19,6 +21,8 @@ impl AnyElement {
             AnyElement::Rectangle(r) => r.props().id,
             AnyElement::Circle(c) => c.props().id,
             AnyElement::Image(i) => i.props().id,
+            AnyElement::Line(line) => line.props().id,
+            AnyElement::Path(path) => path.props().id,
         }
     }
 
@@ -28,6 +32,8 @@ impl AnyElement {
             AnyElement::Rectangle(r) => r,
             AnyElement::Circle(c) => c,
             AnyElement::Image(i) => i,
+            AnyElement::Line(line) => line,
+            AnyElement::Path(path) => path,
         }
     }
 
@@ -37,6 +43,8 @@ impl AnyElement {
             AnyElement::Rectangle(r) => r,
             AnyElement::Circle(c) => c,
             AnyElement::Image(i) => i,
+            AnyElement::Line(line) => line,
+            AnyElement::Path(path) => path,
         }
     }
 }
@@ -98,6 +106,20 @@ impl Scene {
     pub fn add_image(&mut self, image: Image) -> ElementId {
         let id = image.props().id;
         self.elements.insert(id, AnyElement::Image(image));
+        id
+    }
+
+    /// 添加直线元素
+    pub fn add_line(&mut self, line: Line) -> ElementId {
+        let id = line.props().id;
+        self.elements.insert(id, AnyElement::Line(line));
+        id
+    }
+
+    /// 添加自由画笔路径
+    pub fn add_path(&mut self, path: Path) -> ElementId {
+        let id = path.props().id;
+        self.elements.insert(id, AnyElement::Path(path));
         id
     }
 
