@@ -137,6 +137,50 @@ impl Command for RemoveElementCommand {
     }
 }
 
+/// 缩放 / 旋转元素。
+///
+/// 记录每个元素变换前、变换后的快照。拖动手柄时变换已经写进场景，
+/// 因此用 [`CommandHistory::push_executed`] 入栈，撤销时恢复 before。
+#[derive(Debug)]
+pub struct TransformElementsCommand {
+    before: Vec<(ElementId, crate::math::Transform)>,
+    after: Vec<(ElementId, crate::math::Transform)>,
+}
+
+impl TransformElementsCommand {
+    /// 创建变换命令。
+    ///
+    /// `before` 与 `after` 按相同的元素顺序排列。缺失的元素会被跳过。
+    pub fn new(
+        before: Vec<(ElementId, crate::math::Transform)>,
+        after: Vec<(ElementId, crate::math::Transform)>,
+    ) -> Self {
+        Self { before, after }
+    }
+
+    fn apply(scene: &mut Scene, states: &[(ElementId, crate::math::Transform)]) {
+        for (id, transform) in states {
+            if let Some(element) = scene.get_mut(*id) {
+                element.as_element_mut().props_mut().transform = *transform;
+            }
+        }
+    }
+}
+
+impl Command for TransformElementsCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        Self::apply(scene, &self.after);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        Self::apply(scene, &self.before);
+    }
+
+    fn name(&self) -> &'static str {
+        "TransformElements"
+    }
+}
+
 /// 命令历史（撤销/重做栈）
 #[derive(Default)]
 pub struct CommandHistory {

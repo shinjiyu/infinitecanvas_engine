@@ -183,14 +183,9 @@ impl Image {
     ///
     /// # 返回
     ///
-    /// 包含此图片的最小矩形（考虑变换）
+    /// 包含此图片的最小轴对齐矩形，已计入平移、旋转和缩放。
     pub fn bounding_box(&self) -> Rect {
-        let pos = self.props.transform.translation;
-        let scale = self.props.transform.scale;
-        let size = Vec2::new(self.size.x * scale.x, self.size.y * scale.y);
-
-        // TODO: 处理旋转的情况（需要计算旋转后的 AABB）
-        Rect::new(pos.x, pos.y, size.x, size.y)
+        self.world_bounds()
     }
 
     /// 生成纹理顶点（6个顶点 = 2个三角形）
@@ -212,25 +207,37 @@ impl Image {
     /// Triangle 2: v1, v2, v3
     /// ```
     pub fn generate_vertices(&self) -> Vec<Vertex> {
-        let pos = self.props.transform.translation;
-        let size = self.size;
-
-        // 计算 UV 坐标（考虑可选的裁剪）
         let (uv_min, uv_max) = self.get_uv_coords();
-
-        // 顶点颜色（用于 tint 着色和透明度）
         let color = Color::new(1.0, 1.0, 1.0, self.alpha);
+        let transform = &self.props.transform;
+        let local = [
+            (Vec2::ZERO, uv_min.0, uv_min.1),
+            (Vec2::new(self.size.x, 0.0), uv_max.0, uv_min.1),
+            (Vec2::new(0.0, self.size.y), uv_min.0, uv_max.1),
+            (Vec2::new(self.size.x, self.size.y), uv_max.0, uv_max.1),
+        ];
+        let world: Vec<(Vec2, f32, f32)> = local
+            .iter()
+            .map(|(point, u, v)| (transform.transform_point(*point), *u, *v))
+            .collect();
+        let vertex = |index: usize| {
+            Vertex::with_uv(
+                world[index].0.x,
+                world[index].0.y,
+                color,
+                world[index].1,
+                world[index].2,
+            )
+        };
 
-        // 4个角的顶点
-        let v0 = Vertex::with_uv(pos.x, pos.y, color, uv_min.0, uv_min.1); // 左上
-        let v1 = Vertex::with_uv(pos.x + size.x, pos.y, color, uv_max.0, uv_min.1); // 右上
-        let v2 = Vertex::with_uv(pos.x, pos.y + size.y, color, uv_min.0, uv_max.1); // 左下
-        let v3 = Vertex::with_uv(pos.x + size.x, pos.y + size.y, color, uv_max.0, uv_max.1); // 右下
-
-        // 两个三角形（逆时针绕序）
+        // 无旋转且缩放为 1 时，顶点仍落在以平移为左上角的矩形上。
         vec![
-            v0, v2, v1, // 第一个三角形
-            v1, v2, v3, // 第二个三角形
+            vertex(0),
+            vertex(2),
+            vertex(1),
+            vertex(1),
+            vertex(2),
+            vertex(3),
         ]
     }
 }
@@ -377,6 +384,25 @@ mod tests {
         for v in &vertices {
             assert_eq!(v.color[3], 0.5);
         }
+    }
+
+    #[test]
+    fn rotated_image_vertices_and_hit_test_follow_transform() {
+        let mut img = Image::new(
+            1,
+            Vec2::new(100.0, 100.0),
+            Vec2::new(200.0, 100.0),
+            "test".to_string(),
+        );
+        img.set_rotation(std::f32::consts::FRAC_PI_2);
+        let vertices = img.generate_vertices();
+        assert!(vertices.iter().any(|vertex| {
+            (vertex.position[0] - 100.0).abs() < 1e-3 && (vertex.position[1] - 300.0).abs() < 1e-3
+        }));
+        // 局部中心 (100, 50) 旋转 90° 后落到 (50, 200)，仍在图片内。
+        // 旋转前会命中的 (150, 100) 转到局部 y 为负，不再命中。
+        assert!(img.contains_point(Vec2::new(50.0, 200.0)));
+        assert!(!img.contains_point(Vec2::new(150.0, 100.0)));
     }
 
     #[test]

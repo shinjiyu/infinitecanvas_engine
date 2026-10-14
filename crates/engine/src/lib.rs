@@ -26,10 +26,14 @@ pub mod scene;
 pub mod selection;
 pub mod selection_box;
 pub mod tool;
+pub mod transform_handles;
 pub mod viewport;
 
 // 重导出核心类型
-pub use command::{AddElementCommand, Command, CommandHistory, MoveCommand, RemoveElementCommand};
+pub use command::{
+    AddElementCommand, Command, CommandHistory, MoveCommand, RemoveElementCommand,
+    TransformElementsCommand,
+};
 pub use element::{
     Circle, Element, ElementId, ElementProps, ElementStyle, Image, Line, Path, Rectangle,
 };

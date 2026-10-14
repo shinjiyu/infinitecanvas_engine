@@ -25,6 +25,8 @@ let adding = false;
 let frameCount = 0;
 let lastFpsTime = performance.now();
 let spaceHeld = false;
+/** @type {{ x: number, y: number } | null} */
+let lastPointer = null;
 
 /**
  * 浏览器没有可用的 WebGPU 时抛出，用来展示友好提示而不是原始异常。
@@ -283,6 +285,7 @@ function bindInput(canvas, engine) {
 
   canvas.addEventListener('pointermove', (event) => {
     const point = canvasPoint(event, canvas);
+    lastPointer = point;
     engine.handle_pointer_event(
       'move',
       event.pointerId,
@@ -447,7 +450,9 @@ function updateHud(engine) {
   setText('draw-calls', stats.drawCalls ?? engine.get_last_draw_calls());
   setText('zoom', engine.get_zoom().toFixed(2));
   setText('current-tool', engine.get_current_tool());
-  canvasEl.style.cursor = engine.get_tool_cursor();
+  canvasEl.style.cursor = lastPointer
+    ? engine.cursor_at(lastPointer.x, lastPointer.y)
+    : engine.get_tool_cursor();
 
   const undoBtn = document.getElementById('undo-btn');
   const redoBtn = document.getElementById('redo-btn');
