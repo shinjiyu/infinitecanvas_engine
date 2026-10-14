@@ -43,9 +43,10 @@ pub use align::{
     DistributeElementsCommand,
 };
 pub use command::{
-    apply_nudge, AddElementCommand, Command, CommandHistory, DuplicateElementsCommand, MoveCommand,
-    NudgeDirection, NudgeElementsCommand, PasteElementsCommand, RemoveElementCommand,
-    ReorderOutlineCommand, SetStyleCommand, TransformElementsCommand, UpdateTextCommand,
+    apply_nudge, apply_stack_reorder, AddElementCommand, Command, CommandHistory,
+    DuplicateElementsCommand, MoveCommand, NudgeDirection, NudgeElementsCommand,
+    PasteElementsCommand, RemoveElementCommand, ReorderOutlineCommand, ReorderSelectionCommand,
+    SetStyleCommand, StackOrderAction, TransformElementsCommand, UpdateTextCommand,
     NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{

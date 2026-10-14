@@ -41,6 +41,8 @@ pub enum GroupError {
     WouldCycle,
     /// 元素或它的祖先被锁定
     Locked(ElementId),
+    /// 给出的顺序不是这一层兄弟的排列
+    InvalidSiblingOrder,
 }
 
 impl std::fmt::Display for GroupError {
@@ -53,6 +55,7 @@ impl std::fmt::Display for GroupError {
             Self::DifferentParents => write!(f, "元素不在同一个父节点下"),
             Self::WouldCycle => write!(f, "操作会形成环"),
             Self::Locked(id) => write!(f, "元素 {id} 已锁定"),
+            Self::InvalidSiblingOrder => write!(f, "兄弟顺序不是当前列表的排列"),
         }
     }
 }
@@ -176,7 +179,8 @@ pub struct Scene {
 
 /// 重排前的父子关系、组内顺序和 `z_index`。
 ///
-/// [`crate::ReorderOutlineCommand`] 用它撤销。世界变换不在这份快照里。
+/// [`crate::ReorderOutlineCommand`] 和 [`crate::ReorderSelectionCommand`] 用它撤销。
+/// 世界变换不在这份快照里。
 #[derive(Debug, Clone)]
 pub struct OutlineSnapshot {
     nodes: Vec<OutlineNode>,
@@ -901,6 +905,76 @@ impl Scene {
         Ok(Some(refresh))
     }
 
+    /// 同一父节点下的兄弟，下标 `0` 是最底层（先绘制）。
+    ///
+    /// `parent` 为 `None` 时返回根，按 `z_index` 再按 id。组则返回 `children` 的存储顺序。
+    /// 父 id 不是组时返回空列表。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene};
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(4.0, 4.0)));
+    /// scene.add_rect(Rectangle::new(2, Vec2::new(8.0, 0.0), Vec2::new(4.0, 4.0)));
+    /// assert_eq!(scene.sibling_order(None), vec![1, 2]);
+    /// ```
+    pub fn sibling_order(&self, parent: Option<ElementId>) -> Vec<ElementId> {
+        match parent {
+            Some(parent_id) => self.group_child_ids(parent_id),
+            None => self.root_ids_back_to_front(),
+        }
+    }
+
+    /// 把同一父节点下的兄弟排成 `order`（下标 `0` 为最底层）。
+    ///
+    /// `order` 必须是当前兄弟的一个排列。成功后按深度优先重写全部 `z_index`
+    /// （越靠后的兄弟越大），并推进 [`Scene::structure_epoch`]。顶点缓存下一帧按新顺序整表重排。
+    /// 不改世界坐标，也不把元素标成几何脏：三角形没变，和 [`Scene::move_in_outline`] 一样。
+    ///
+    /// 父组被锁定时返回 [`GroupError::Locked`]，不改顺序。顺序本来就一样时返回 `Ok(false)`，
+    /// 不推进结构版本。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene};
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(4.0, 4.0)));
+    /// scene.add_rect(Rectangle::new(2, Vec2::new(10.0, 0.0), Vec2::new(4.0, 4.0)));
+    /// assert!(scene.arrange_siblings(None, &[2, 1]).unwrap());
+    /// assert_eq!(scene.sibling_order(None), vec![2, 1]);
+    /// assert!(!scene.arrange_siblings(None, &[2, 1]).unwrap());
+    /// ```
+    pub fn arrange_siblings(
+        &mut self,
+        parent: Option<ElementId>,
+        order: &[ElementId],
+    ) -> Result<bool, GroupError> {
+        if let Some(parent_id) = parent {
+            self.group_children(parent_id)?;
+        }
+        let current = self.sibling_order(parent);
+        if !Self::permutation_matches(&current, order) {
+            return Err(GroupError::InvalidSiblingOrder);
+        }
+        if current == order {
+            return Ok(false);
+        }
+        if let Some(parent_id) = parent {
+            self.ensure_editable(parent_id)?;
+            self.set_group_children(parent_id, order.to_vec());
+            let roots = self.root_ids_back_to_front();
+            self.assign_z_order(&roots);
+        } else {
+            self.assign_z_order(order);
+        }
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        Ok(true)
+    }
+
     /// 记下当前大纲，供撤销时原样写回。
     pub fn outline_snapshot(&self) -> OutlineSnapshot {
         let mut ids: Vec<ElementId> = self.elements.keys().copied().collect();
@@ -1045,6 +1119,20 @@ impl Scene {
             Some(parent_id) => self.group_children(parent_id),
             None => Ok(self.root_ids_back_to_front()),
         }
+    }
+
+    /// `order` 含有重复项，或不是 `current` 的重排。
+    fn permutation_matches(current: &[ElementId], order: &[ElementId]) -> bool {
+        if current.len() != order.len() {
+            return false;
+        }
+        let mut seen = HashSet::with_capacity(current.len());
+        for id in order {
+            if !seen.insert(*id) {
+                return false;
+            }
+        }
+        current.iter().all(|id| seen.contains(id))
     }
 
     fn root_ids_back_to_front(&self) -> Vec<ElementId> {
@@ -1863,6 +1951,18 @@ mod tests {
         assert_eq!(paint_order(&scene), vec![2, 3, 1]);
         assert!(scene.structure_epoch() > epoch);
         approx(translation(&scene, 1), Vec2::ZERO);
+    }
+
+    #[test]
+    fn arrange_siblings_rejects_a_partial_order() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(10.0, 0.0)));
+        assert!(matches!(
+            scene.arrange_siblings(None, &[1]),
+            Err(GroupError::InvalidSiblingOrder)
+        ));
+        assert_eq!(scene.sibling_order(None), vec![1, 2]);
     }
 
     #[test]
