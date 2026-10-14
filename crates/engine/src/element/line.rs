@@ -134,29 +134,55 @@ impl Line {
         opaque_color(paint_color(&self.style))
     }
 
+    /// 局部坐标下的箭杆端点和箭头三角形。
+    ///
+    /// 有箭头时箭杆终点会缩短，给三角形留出位置。尺寸与 [`Line::generate_vertices`]
+    /// 相同，SVG 导出直接使用这份几何，避免和画布上的箭头分叉。
+    ///
+    /// # 返回
+    /// `(箭杆起点, 箭杆终点, 箭头三角形)`。没有箭头，或线段短到无法放下箭头时，三角形为 `None`。
+    pub fn local_shaft_and_arrow(&self) -> (Vec2, Vec2, Option<[Vec2; 3]>) {
+        let (shaft, arrow) = self.shaft_and_arrow();
+        (shaft[0], shaft[1], arrow)
+    }
+
     /// 生成描边三角形（含可选箭头），坐标已变换到世界空间。
     ///
     /// 直线本身是一条三角形带；箭头是额外的一个三角形。
     pub fn generate_vertices(&self) -> Vec<Vertex> {
         let color = paint_color(&self.style);
         let width = self.stroke_width();
-        let mut shaft = [self.start, self.end];
-        let mut arrow = Vec::new();
-        if self.arrow {
-            let delta = self.end - self.start;
-            if delta.length_squared() > 1e-12 {
-                let length = arrow_length_for(width);
-                if let Some(tri) = arrow_points(self.end, delta, length, arrow_width_for(width)) {
-                    shorten_end(&mut shaft, length);
-                    for point in tri {
-                        arrow.push(Vertex::new(point.x, point.y, color));
-                    }
-                }
+        let (shaft, arrow) = self.shaft_and_arrow();
+        let mut vertices = stroke_triangles(&shaft, width, color);
+        if let Some(tri) = arrow {
+            for point in tri {
+                vertices.push(Vertex::new(point.x, point.y, color));
             }
         }
-        let mut vertices = stroke_triangles(&shaft, width, color);
-        vertices.extend(arrow);
         transform_vertices(vertices, &self.props.transform)
+    }
+
+    /// 局部箭杆，以及可选的箭头三角形。箭杆在有箭头时已缩短。
+    fn shaft_and_arrow(&self) -> ([Vec2; 2], Option<[Vec2; 3]>) {
+        let mut shaft = [self.start, self.end];
+        if !self.arrow {
+            return (shaft, None);
+        }
+        let delta = self.end - self.start;
+        if delta.length_squared() <= 1e-12 {
+            return (shaft, None);
+        }
+        let length = arrow_length_for(self.stroke_width());
+        let Some(tri) = arrow_points(
+            self.end,
+            delta,
+            length,
+            arrow_width_for(self.stroke_width()),
+        ) else {
+            return (shaft, None);
+        };
+        shorten_end(&mut shaft, length);
+        (shaft, Some(tri))
     }
 
     fn hit_radius(&self) -> f32 {

@@ -2,7 +2,7 @@
  * InfiniteCanvas 首页 Demo。
  *
  * 把选择、直线、画笔、压力测试和纹理上传放在同一张画布上。
- * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，改动会写入 localStorage。
+ * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  *
  * @example
  * ```html
@@ -304,6 +304,29 @@ function exportPng(engine, selectionOnly) {
 }
 
 /**
+ * 下载场景或选中元素的 SVG。
+ *
+ * 全部导出时 viewBox 是可见元素的包围盒；选区导出只包含当前选中元素。
+ *
+ * @param {WasmCanvas} engine
+ * @param {boolean} selectedOnly
+ */
+function exportSvg(engine, selectedOnly) {
+  try {
+    const svg = engine.export_svg(selectedOnly);
+    if (selectedOnly && svg.includes('nothing selected')) {
+      setStatus('没有选中元素', true);
+      return;
+    }
+    const name = selectedOnly ? 'selection.svg' : 'scene.svg';
+    downloadBlob(name, new Blob([svg], { type: 'image/svg+xml' }));
+    setStatus(selectedOnly ? '已导出选区 SVG' : '已导出 SVG');
+  } catch (error) {
+    setStatus(errorText(error), true);
+  }
+}
+
+/**
  * @param {WasmCanvas} engine
  * @returns {boolean} 是否恢复了本地场景
  */
@@ -513,6 +536,8 @@ function bindInput(canvas, engine) {
   });
   document.getElementById('png-btn')?.addEventListener('click', () => exportPng(engine, false));
   document.getElementById('png-selection-btn')?.addEventListener('click', () => exportPng(engine, true));
+  document.getElementById('svg-btn')?.addEventListener('click', () => exportSvg(engine, false));
+  document.getElementById('svg-selection-btn')?.addEventListener('click', () => exportSvg(engine, true));
   document.getElementById('snap-btn')?.addEventListener('click', () => {
     engine.set_snap_enabled(!engine.is_snap_enabled());
     syncSnapControls(engine);

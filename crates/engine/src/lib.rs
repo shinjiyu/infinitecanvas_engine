@@ -28,6 +28,7 @@ pub mod scene_tree;
 pub mod selection;
 pub mod selection_box;
 pub mod snap;
+pub mod svg;
 pub mod tool;
 pub mod transform_handles;
 pub mod vertex_cache;
@@ -60,6 +61,7 @@ pub use snap::{
     bounds_union, snap_bounds, snap_drag, AlignmentGuide, DragSnap, GuideAxis, SnapResult,
     SnapSettings,
 };
+pub use svg::export_svg;
 pub use tool::{Tool, ToolManager};
 pub use vertex_cache::{
     rebuild_all_vertices, GpuVertexWrite, RebuiltGeometry, TexturedDraw, VertexBufferKind,

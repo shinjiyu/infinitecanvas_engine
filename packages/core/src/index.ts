@@ -115,6 +115,24 @@ export class InfiniteCanvas {
   }
 
   /**
+   * 把场景导出为 SVG。
+   *
+   * 默认包含全部可见元素，viewBox 是它们的包围盒。图片没有像素数据时会被跳过，
+   * 文档里会有说明。文本导出为 `<text>`。
+   *
+   * @param selectedOnly - 为 true 时只导出选中元素
+   * @returns SVG 文档
+   *
+   * @example
+   * ```ts
+   * const svg = canvas.exportSvg(false);
+   * ```
+   */
+  exportSvg(selectedOnly = false): string {
+    return this.requireWasm().export_svg(selectedOnly);
+  }
+
+  /**
    * 销毁实例
    */
   destroy(): void {

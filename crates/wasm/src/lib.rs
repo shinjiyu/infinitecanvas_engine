@@ -30,7 +30,7 @@ use infinitecanvas_engine::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
     },
-    export_selection_png, export_viewport_png,
+    export_selection_png, export_svg, export_viewport_png,
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
     math::{Color, Rect, Transform, Vec2},
     snap::{bounds_union, snap_drag, AlignmentGuide, DragSnap, SnapSettings},
@@ -1161,6 +1161,27 @@ impl InfiniteCanvas {
             export_viewport_png(&self.scene, &self.viewport)
         };
         bytes.map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// 把场景导出为 SVG 文本。
+    ///
+    /// 矩形、圆、直线（含箭头）、自由路径和文本按绘制顺序写入。变换使用与画布相同的
+    /// `matrix`（缩放、旋转、平移）。`viewBox` 默认是全部可见元素的包围盒。
+    ///
+    /// # 参数
+    /// - `selected_only`: `true` 时只导出当前选中元素，包围盒也只包住这些元素
+    ///
+    /// # 返回
+    /// SVG 文档。图片纹理不在场景里，对应元素会被跳过并在文档中注明。
+    /// 文本写成 `<text>`，锚点与对齐方式一致。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const svg = canvas.export_svg(false);
+    /// ```
+    #[wasm_bindgen]
+    pub fn export_svg(&self, selected_only: bool) -> String {
+        export_svg(&self.scene, selected_only)
     }
 
     /// 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。

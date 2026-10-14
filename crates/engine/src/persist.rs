@@ -301,6 +301,16 @@ pub fn export_selection_png(scene: &Scene, pixels_per_unit: f32) -> Result<Vec<u
     export_region_png(scene, bounds.inflate(SELECTION_PADDING), pixels_per_unit)
 }
 
+/// 按绘制顺序返回元素。
+///
+/// 先按 `z_index` 升序，同一层级再按 id 升序。后出现的元素画在上面。
+/// PNG 栅格化和 SVG 导出共用这一次遍历，避免两套排序。
+pub(crate) fn elements_in_paint_order(scene: &Scene) -> Vec<&AnyElement> {
+    let mut ordered: Vec<&AnyElement> = scene.iter().collect();
+    ordered.sort_by_key(|element| (element.as_element().props().z_index, element.id()));
+    ordered
+}
+
 fn selected_bounds(scene: &Scene) -> Option<Rect> {
     let mut combined: Option<Rect> = None;
     for element in scene.iter() {
@@ -326,8 +336,7 @@ fn export_region_png(
 ) -> Result<Vec<u8>, PersistError> {
     let (width, height) = raster_size(region, pixels_per_unit)?;
     let mut pixels = vec![0u8; (width as usize) * (height as usize) * 4];
-    let mut ordered: Vec<&AnyElement> = scene.iter().collect();
-    ordered.sort_by_key(|element| (element.as_element().props().z_index, element.id()));
+    let ordered = elements_in_paint_order(scene);
 
     for element in ordered {
         // 组不绘制。隐藏的组会把它的子孙一并跳过。
