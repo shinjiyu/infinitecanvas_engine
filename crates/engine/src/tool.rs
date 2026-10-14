@@ -24,6 +24,11 @@ pub enum Tool {
     Pen,
     /// 文本工具 - 单击创建，双击已有文本进入编辑
     Text,
+    /// 吸管 - 单击采样最上层可见叶子的填充和描边，写到当前选择
+    ///
+    /// 快捷键是不带修饰键的 `I`。`Shift+I`、`Ctrl/Cmd+I`、`Alt+I` 不进入这个工具，
+    /// 也不占用 V / L / P / R / O / T / H。
+    Eyedropper,
 }
 
 impl std::str::FromStr for Tool {
@@ -41,6 +46,7 @@ impl std::str::FromStr for Tool {
             "line" | "l" => Ok(Tool::Line),
             "pen" | "path" | "p" => Ok(Tool::Pen),
             "text" | "t" => Ok(Tool::Text),
+            "eyedropper" | "dropper" | "i" => Ok(Tool::Eyedropper),
             _ => Err(()),
         }
     }
@@ -58,6 +64,7 @@ impl Tool {
             Tool::Line => "line",
             Tool::Pen => "pen",
             Tool::Text => "text",
+            Tool::Eyedropper => "eyedropper",
         }
     }
 
@@ -72,6 +79,7 @@ impl Tool {
             Tool::Line => "crosshair",
             Tool::Pen => "crosshair",
             Tool::Text => "text",
+            Tool::Eyedropper => "crosshair",
         }
     }
 
@@ -91,6 +99,8 @@ pub struct ToolManager {
     current: Tool,
     /// 上一个工具（用于临时工具切换）
     previous: Option<Tool>,
+    /// 进入吸管之前的工具。按住空格切到手型时不会覆盖它。
+    eyedropper_return: Option<Tool>,
 }
 
 impl ToolManager {
@@ -99,6 +109,7 @@ impl ToolManager {
         Self {
             current: Tool::Select,
             previous: None,
+            eyedropper_return: None,
         }
     }
 
@@ -110,9 +121,31 @@ impl ToolManager {
     /// 设置当前工具
     pub fn set_tool(&mut self, tool: Tool) {
         if self.current != tool {
+            if tool == Tool::Eyedropper {
+                self.eyedropper_return = Some(self.current);
+            } else {
+                self.eyedropper_return = None;
+            }
             self.previous = Some(self.current);
             self.current = tool;
         }
+    }
+
+    /// 结束吸管，回到进入吸管之前的工具。
+    ///
+    /// 当前不是吸管时什么也不做。之前的工具若已不在（或是手型），回到选择工具。
+    /// 临时手型只用 [`Self::previous`]，不会丢掉这里记下的返回目标。
+    pub fn exit_eyedropper(&mut self) {
+        if self.current != Tool::Eyedropper {
+            return;
+        }
+        let back = self.eyedropper_return.take().unwrap_or(Tool::Select);
+        self.current = if matches!(back, Tool::Eyedropper | Tool::Hand) {
+            Tool::Select
+        } else {
+            back
+        };
+        self.previous = None;
     }
 
     /// 临时切换到工具（如按住空格）
@@ -166,6 +199,11 @@ mod tests {
         assert_eq!("path".parse::<Tool>(), Ok(Tool::Pen));
         assert_eq!(Tool::from_str("text"), Ok(Tool::Text));
         assert_eq!(Tool::from_str("t"), Ok(Tool::Text));
+        assert_eq!(Tool::from_str("eyedropper"), Ok(Tool::Eyedropper));
+        assert_eq!(Tool::from_str("i"), Ok(Tool::Eyedropper));
+        assert_eq!(Tool::Eyedropper.name(), "eyedropper");
+        assert_eq!(Tool::Eyedropper.cursor(), "crosshair");
+        assert!(!Tool::Eyedropper.is_drawing_tool());
         assert_eq!(Tool::Text.cursor(), "text");
         assert!(!Tool::Text.is_drawing_tool());
         assert!(Tool::from_str("unknown").is_err());
@@ -190,5 +228,24 @@ mod tests {
         // 恢复
         manager.pop_temporary();
         assert_eq!(manager.current(), Tool::Rectangle);
+    }
+
+    #[test]
+    fn eyedropper_returns_to_the_tool_it_interrupted() {
+        let mut manager = ToolManager::new();
+        manager.set_tool(Tool::Rectangle);
+        manager.set_tool(Tool::Eyedropper);
+        manager.push_temporary(Tool::Hand);
+        manager.pop_temporary();
+        assert_eq!(manager.current(), Tool::Eyedropper);
+        manager.exit_eyedropper();
+        assert_eq!(manager.current(), Tool::Rectangle);
+
+        manager.set_tool(Tool::Select);
+        manager.set_tool(Tool::Eyedropper);
+        manager.exit_eyedropper();
+        assert_eq!(manager.current(), Tool::Select);
+        manager.exit_eyedropper();
+        assert_eq!(manager.current(), Tool::Select);
     }
 }

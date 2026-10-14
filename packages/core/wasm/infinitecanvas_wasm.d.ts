@@ -171,6 +171,21 @@ export class InfiniteCanvas {
      */
     align_selection(mode: string): boolean;
     /**
+     * 采样该世界点，并把颜色写到当前选择。
+     *
+     * 填充写到形状 `fill` 和文本颜色，描边写到 `stroke`。缺的通道不改，也不清掉。
+     * 多选合成一条撤销记录。空选、全部锁定、全部隐藏、点在空白、采样没有颜色，
+     * 或颜色与目标相同，都返回 false，不入栈。
+     *
+     * 不切换工具。页面上的吸管工具在松开指针后再回到之前的工具。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const applied = canvas.apply_sampled_style_at(worldX, worldY);
+     * ```
+     */
+    apply_sampled_style_at(x: number, y: number): boolean;
+    /**
      * 标尺和手动参考线是否显示。
      */
     are_rulers_visible(): boolean;
@@ -840,6 +855,24 @@ export class InfiniteCanvas {
      */
     rotate_selection_quarter(dir: string): boolean;
     /**
+     * 采样世界坐标上最上层可见叶子的填充和描边。
+     *
+     * 返回对象：
+     * - `id`：命中的元素。空白处为 null
+     * - `fill` / `stroke`：`#rrggbbaa`。元素没有该通道，或没有命中时为 null
+     *
+     * 文本的 `fill` 是文字颜色。图片命中时 `id` 有值，两个颜色都是 null。
+     * 锁定元素仍可采样。隐藏元素（含被隐藏的祖先）会跳过，露出下面的叶子。
+     * 不读像素。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const sample = canvas.sample_style_at(worldX, worldY);
+     * if (sample.fill) colorInput.value = sample.fill.slice(0, 7);
+     * ```
+     */
+    sample_style_at(x: number, y: number): any;
+    /**
      * 可见叶子的世界包围盒。
      *
      * 组不计入，隐藏元素及其子孙也不计入。空场景返回 `null`。
@@ -972,9 +1005,11 @@ export class InfiniteCanvas {
      * 设置当前工具
      *
      * # 参数
-     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen")
+     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen", "eyedropper")
      *
-     * 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`。切换工具会丢掉尚未抬笔的预览。
+     * 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`，吸管快捷键 `i`。
+     * 吸管不带 Shift、Ctrl 或 Alt，避免和 V / L / P / R / O / T / H 以及翻转键抢键。
+     * 切换工具会丢掉尚未抬笔的预览。
      *
      * # 返回
      * 是否成功设置
@@ -994,6 +1029,15 @@ export class InfiniteCanvas {
      * ```
      */
     set_zoom(zoom: number): void;
+    /**
+     * 取走最近一次吸管点击的结果。没有新点击时返回 null。
+     *
+     * - `hit`：点到了可见叶子
+     * - `applied`：颜色已经写进当前选择，并占一条撤销记录
+     *
+     * 点在空白处时工具保持吸管。点到元素后，工具回到进入吸管之前的那个。
+     */
+    take_eyedropper_notice(): any;
     /**
      * 取走 T 工具留下的编辑请求。没有请求时返回 `null`。
      */
@@ -1158,6 +1202,7 @@ export interface InitOutput {
     readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
     readonly infinitecanvas_add_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
     readonly infinitecanvas_align_selection: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_apply_sampled_style_at: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_are_rulers_visible: (a: number) => number;
     readonly infinitecanvas_begin_text_edit_at: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_can_redo: (a: number) => number;
@@ -1244,6 +1289,7 @@ export interface InitOutput {
     readonly infinitecanvas_reorder_element: (a: number, b: bigint, c: bigint, d: number) => number;
     readonly infinitecanvas_reorder_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_rotate_selection_quarter: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_sample_style_at: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_scene_bounds: (a: number) => any;
     readonly infinitecanvas_screen_to_world: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_select_all: (a: number) => number;
@@ -1259,6 +1305,7 @@ export interface InitOutput {
     readonly infinitecanvas_set_text_editing: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_tool: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_set_zoom: (a: number, b: number) => void;
+    readonly infinitecanvas_take_eyedropper_notice: (a: number) => any;
     readonly infinitecanvas_take_text_edit_request: (a: number) => any;
     readonly infinitecanvas_take_text_raster_jobs: (a: number) => any;
     readonly infinitecanvas_toggle_selection_locked: (a: number) => number;

@@ -2,6 +2,24 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #60: 吸管取色
+
+- [x] `sample_paint_at`：最上层可见叶子的填充/描边；空白、隐藏为无命中；图片两个通道都是空
+- [x] `apply_sampled_paint`：经 `SetStyle` 写到可见且未锁定的目标，多选一条撤销；空选、锁定、全隐藏、无颜色不入栈
+- [x] 填充同时写形状 fill 和文本颜色；缺的通道不清掉目标上的颜色
+- [x] WASM：`sample_style_at`、`apply_sampled_style_at`；吸管工具单击采样，松开后回到之前的工具
+- [x] Demo：`I` 与工具栏按钮。不带 Shift / Ctrl / Alt，不占用 V/L/P/R/O/T/H/G。`?` 帮助面板列出吸管
+
+```text
+I / 工具栏
+    │
+    ▼
+世界点 ── sample_paint_at（可见叶子，z 然后 id）
+    │
+    ▼
+当前选择里可见且未锁定的叶子 ── SetStyle ── 一条历史
+```
+
 ## Issue #61: 键盘缩放
 
 - [x] `ZOOM_STEP`（1.1）是滚轮和键盘共用的一步。`zoom_by` 绕视口中心调用 `zoom_at`，上下限仍是视口 0.1×–10×

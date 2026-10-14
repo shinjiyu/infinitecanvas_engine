@@ -30,6 +30,8 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 标尺和手动参考线（#56）也在这张表里：不带修饰键的 `G` 显示或隐藏标尺和参考线，按住不重复。`Ctrl/Cmd+G` 仍是成组，`Ctrl/Cmd+Shift+G` 仍是取消分组。吸附一组里的按钮调用同一个 `set_rulers_visible`。选中参考线时，键盘 Delete / Backspace 先删参考线，否则仍删除选中元素。右键菜单里的「删除」只删元素。
 
+吸管（#60）是不带修饰键的 `I`。`Shift+I`、`Ctrl/Cmd+I`、`Alt+I` 都不触发，因此不会占用 V / L / P / R / O / T / H / G，也不会和 Shift+H / Shift+V / Shift+R 撞车。工具栏有同样的按钮。按住不重复。
+
 ## 引擎补充
 
 删除、全选和缩放在页面里没有现成的一次调用，所以 WASM 增加了这些入口，场景逻辑仍在 engine 里：

@@ -41,6 +41,7 @@ use infinitecanvas_engine::{
     },
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
     math::{Color, Rect, Transform, Vec2},
+    sample_paint_at,
     snap::{
         bounds_union, snap_drag_with_guides, AlignmentGuide, DragSnap, GuideAxis, GuideLines,
         SnapSettings,
@@ -151,6 +152,14 @@ struct PerformanceStats {
     geometry_unchanged: bool,
 }
 
+/// 吸管一次点击的结果。按下时记下，松开后交给页面。
+struct EyedropperGesture {
+    /// 点到了可见叶子。
+    hit: bool,
+    /// 颜色写进了当前选择。
+    applied: bool,
+}
+
 /// WASM 主接口，提供无限画布的所有功能
 ///
 /// # 职责
@@ -195,6 +204,10 @@ pub struct InfiniteCanvas {
     minimap_cache: Option<MinimapCache>,
     /// 已经上传到 GPU 的图片资源 id。和场景引用比较，多退少补。
     gpu_image_assets: HashSet<String>,
+    /// 吸管按下后、松开前的结果。
+    eyedropper_gesture: Option<EyedropperGesture>,
+    /// 页面下一帧读走的吸管结果。
+    eyedropper_notice: Option<EyedropperGesture>,
 }
 
 /// 已映射到像素的小地图外框。`epoch` 来自 [`infinitecanvas_engine::Scene::geometry_epoch`]。
@@ -254,6 +267,8 @@ impl InfiniteCanvas {
             style_preview: None,
             minimap_cache: None,
             gpu_image_assets: HashSet::new(),
+            eyedropper_gesture: None,
+            eyedropper_notice: None,
         })
     }
 
@@ -841,9 +856,11 @@ impl InfiniteCanvas {
     /// 设置当前工具
     ///
     /// # 参数
-    /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen")
+    /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen", "eyedropper")
     ///
-    /// 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`。切换工具会丢掉尚未抬笔的预览。
+    /// 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`，吸管快捷键 `i`。
+    /// 吸管不带 Shift、Ctrl 或 Alt，避免和 V / L / P / R / O / T / H 以及翻转键抢键。
+    /// 切换工具会丢掉尚未抬笔的预览。
     ///
     /// # 返回
     /// 是否成功设置
@@ -851,6 +868,9 @@ impl InfiniteCanvas {
     pub fn set_tool(&mut self, tool_name: String) -> bool {
         if let Ok(tool) = Tool::from_str(&tool_name) {
             if self.tool_manager.current() != tool {
+                if self.tool_manager.current() == Tool::Eyedropper {
+                    self.finish_eyedropper_gesture(false);
+                }
                 self.commit_handle_gesture();
                 self.cancel_drawing();
                 self.drag_state.guides.clear();
@@ -884,6 +904,27 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn pop_temporary_tool(&mut self) {
         self.tool_manager.pop_temporary();
+    }
+
+    /// 取走最近一次吸管点击的结果。没有新点击时返回 null。
+    ///
+    /// - `hit`：点到了可见叶子
+    /// - `applied`：颜色已经写进当前选择，并占一条撤销记录
+    ///
+    /// 点在空白处时工具保持吸管。点到元素后，工具回到进入吸管之前的那个。
+    #[wasm_bindgen]
+    pub fn take_eyedropper_notice(&mut self) -> JsValue {
+        let Some(notice) = self.eyedropper_notice.take() else {
+            return JsValue::NULL;
+        };
+        let obj = Object::new();
+        let _ = Reflect::set(&obj, &JsValue::from_str("hit"), &JsValue::from(notice.hit));
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("applied"),
+            &JsValue::from(notice.applied),
+        );
+        obj.into()
     }
 
     // ========== UI 状态查询 API ==========
@@ -3004,6 +3045,7 @@ impl InfiniteCanvas {
             Tool::Pen => self.handle_pen_tool_down(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_down(event),
             Tool::Text => self.handle_text_tool_down(event),
+            Tool::Eyedropper => self.handle_eyedropper_down(event),
         }
     }
 
@@ -3020,6 +3062,7 @@ impl InfiniteCanvas {
             Tool::Pen => self.handle_pen_tool_move(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_move(event),
             Tool::Text => self.handle_text_tool_move(event),
+            Tool::Eyedropper => {}
         }
     }
 
@@ -3036,7 +3079,29 @@ impl InfiniteCanvas {
             Tool::Pen => self.handle_pen_tool_up(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_up(event),
             Tool::Text => self.handle_text_tool_up(event),
+            Tool::Eyedropper => self.finish_eyedropper_gesture(true),
         }
+    }
+
+    /// 吸管按下：采样并尝试写到当前选择。不改选择，也不开始拖动。
+    fn handle_eyedropper_down(&mut self, event: PointerEvent) {
+        let sample = sample_paint_at(&self.scene, event.world_position);
+        let hit = sample.is_some();
+        let applied = sample
+            .map(|sample| self.apply_paint_sample(&sample))
+            .unwrap_or(false);
+        self.eyedropper_gesture = Some(EyedropperGesture { hit, applied });
+    }
+
+    /// 松开时把结果交给页面。点到元素才离开吸管。
+    fn finish_eyedropper_gesture(&mut self, restore_tool: bool) {
+        let Some(gesture) = self.eyedropper_gesture.take() else {
+            return;
+        };
+        if restore_tool && gesture.hit {
+            self.tool_manager.exit_eyedropper();
+        }
+        self.eyedropper_notice = Some(gesture);
     }
 
     // ========== 选择工具事件处理 ==========
@@ -4330,6 +4395,8 @@ mod tests {
             style_preview: None,
             minimap_cache: None,
             gpu_image_assets: HashSet::new(),
+            eyedropper_gesture: None,
+            eyedropper_notice: None,
         }
     }
 
@@ -4993,6 +5060,16 @@ mod tests {
         }
     }
 
+    fn rect_fill(scene: &Scene, id: ElementId) -> Option<Color> {
+        match infinitecanvas_engine::capture_style(scene, id) {
+            Some(
+                infinitecanvas_engine::StyleSnapshot::Rectangle { style, .. }
+                | infinitecanvas_engine::StyleSnapshot::Shape(style),
+            ) => style.fill,
+            other => panic!("shape {id}, got {other:?}"),
+        }
+    }
+
     #[test]
     fn dragging_from_the_top_ruler_creates_a_horizontal_guide() {
         let mut canvas = blank_canvas();
@@ -5100,5 +5177,65 @@ mod tests {
             (right - 24.0).abs() < 0.05,
             "right edge {right} should land on the guide"
         );
+    }
+
+    #[test]
+    fn eyedropper_click_copies_style_without_changing_the_selection() {
+        let mut canvas = blank_canvas();
+        let source = canvas.scene.next_id();
+        canvas.scene.add_rect(
+            Rectangle::new(source, Vec2::ZERO, Vec2::new(40.0, 40.0))
+                .with_style(ElementStyle::fill_only(Color::RED)),
+        );
+        let target = canvas.scene.next_id();
+        canvas.scene.add_rect(
+            Rectangle::new(target, Vec2::new(120.0, 0.0), Vec2::new(40.0, 40.0))
+                .with_style(ElementStyle::fill_only(Color::BLUE)),
+        );
+        assert!(canvas
+            .selection
+            .select_element(&mut canvas.scene, target, false));
+        assert!(canvas
+            .selection
+            .select_element(&mut canvas.scene, source, true));
+        assert!(canvas.set_tool("rectangle".into()));
+        assert!(canvas.set_tool("eyedropper".into()));
+
+        canvas.handle_pointer_down(pointer_at(
+            &canvas,
+            canvas.viewport.world_to_screen(Vec2::ZERO),
+        ));
+        assert_eq!(canvas.get_current_tool(), "eyedropper");
+        assert!(canvas.selection.is_selected(source));
+        assert!(canvas.selection.is_selected(target));
+        canvas.finish_eyedropper_gesture(true);
+
+        assert_eq!(canvas.get_current_tool(), "rectangle");
+        let notice = canvas.eyedropper_notice.take().unwrap();
+        assert!(notice.hit && notice.applied);
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert_eq!(rect_fill(&canvas.scene, target), Some(Color::RED));
+        assert_eq!(rect_fill(&canvas.scene, source), Some(Color::RED));
+        assert!(canvas.undo());
+        assert_eq!(rect_fill(&canvas.scene, target), Some(Color::BLUE));
+
+        assert!(canvas.scene.set_locked(target, true));
+        assert!(!canvas.apply_sampled_style_at(0.0, 0.0));
+        assert!(canvas.scene.set_locked(target, false));
+        assert!(canvas.scene.set_visible(target, false));
+        assert!(!canvas.apply_sampled_style_at(0.0, 0.0));
+        assert_eq!(canvas.get_undo_count(), 0);
+        assert_eq!(rect_fill(&canvas.scene, target), Some(Color::BLUE));
+
+        assert!(canvas.set_tool("eyedropper".into()));
+        canvas.handle_pointer_down(pointer_at(
+            &canvas,
+            canvas.viewport.world_to_screen(Vec2::new(800.0, 800.0)),
+        ));
+        canvas.finish_eyedropper_gesture(true);
+        assert_eq!(canvas.get_current_tool(), "eyedropper");
+        let miss = canvas.eyedropper_notice.take().unwrap();
+        assert!(!miss.hit);
+        assert!(!miss.applied);
     }
 }

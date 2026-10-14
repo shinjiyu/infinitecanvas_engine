@@ -5,9 +5,9 @@
 //! 这样连续拖动只进一条撤销记录。颜色选择器也可以走同一条预览路径。
 
 use infinitecanvas_engine::{
-    apply_style_snapshot, capture_style, math::Color, selection_style, style_locked,
-    style_target_ids, ElementId, SetStyleCommand, StrokeCap, StrokeJoin, StyleField, StylePatch,
-    StyleSnapshot,
+    apply_sampled_paint, apply_style_snapshot, capture_style, math::Color, math::Vec2,
+    sample_paint_at, selection_style, style_locked, style_target_ids, ElementId, SampledPaint,
+    SetStyleCommand, StrokeCap, StrokeJoin, StyleField, StylePatch, StyleSnapshot,
 };
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
@@ -148,9 +148,87 @@ impl InfiniteCanvas {
             .push_executed(Box::new(SetStyleCommand::from_states(before, after)));
         true
     }
+
+    /// 采样世界坐标上最上层可见叶子的填充和描边。
+    ///
+    /// 返回对象：
+    /// - `id`：命中的元素。空白处为 null
+    /// - `fill` / `stroke`：`#rrggbbaa`。元素没有该通道，或没有命中时为 null
+    ///
+    /// 文本的 `fill` 是文字颜色。图片命中时 `id` 有值，两个颜色都是 null。
+    /// 锁定元素仍可采样。隐藏元素（含被隐藏的祖先）会跳过，露出下面的叶子。
+    /// 不读像素。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const sample = canvas.sample_style_at(worldX, worldY);
+    /// if (sample.fill) colorInput.value = sample.fill.slice(0, 7);
+    /// ```
+    #[wasm_bindgen]
+    pub fn sample_style_at(&self, x: f32, y: f32) -> JsValue {
+        let obj = Object::new();
+        let sample = if x.is_finite() && y.is_finite() {
+            sample_paint_at(&self.scene, Vec2::new(x, y))
+        } else {
+            None
+        };
+        match sample {
+            Some(sample) => {
+                js_set(&obj, "id", JsValue::from(sample.id));
+                write_hex(&obj, "fill", sample.fill);
+                write_hex(&obj, "stroke", sample.stroke);
+            }
+            None => {
+                js_set(&obj, "id", JsValue::NULL);
+                js_set(&obj, "fill", JsValue::NULL);
+                js_set(&obj, "stroke", JsValue::NULL);
+            }
+        }
+        obj.into()
+    }
+
+    /// 采样该世界点，并把颜色写到当前选择。
+    ///
+    /// 填充写到形状 `fill` 和文本颜色，描边写到 `stroke`。缺的通道不改，也不清掉。
+    /// 多选合成一条撤销记录。空选、全部锁定、全部隐藏、点在空白、采样没有颜色，
+    /// 或颜色与目标相同，都返回 false，不入栈。
+    ///
+    /// 不切换工具。页面上的吸管工具在松开指针后再回到之前的工具。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const applied = canvas.apply_sampled_style_at(worldX, worldY);
+    /// ```
+    #[wasm_bindgen]
+    pub fn apply_sampled_style_at(&mut self, x: f32, y: f32) -> bool {
+        if !x.is_finite() || !y.is_finite() {
+            return false;
+        }
+        let Some(sample) = sample_paint_at(&self.scene, Vec2::new(x, y)) else {
+            return false;
+        };
+        self.apply_paint_sample(&sample)
+    }
 }
 
 impl InfiniteCanvas {
+    /// 把一次采样写进当前选择。采样没有颜色时不提交进行中的样式预览。
+    pub(crate) fn apply_paint_sample(&mut self, sample: &SampledPaint) -> bool {
+        if sample.fill.is_none() && sample.stroke.is_none() {
+            return false;
+        }
+        self.commit_style_preview();
+        let textures = self.snapshot_text_textures();
+        let applied = apply_sampled_paint(
+            &mut self.command_history,
+            &mut self.scene,
+            &self.selection.selected_ids(),
+            sample,
+        );
+        self.release_text_textures_except(textures);
+        applied
+    }
+
     /// 丢掉未提交的样式预览。导入和清空会整表替换场景，所以这里不把基线写回去。
     pub(crate) fn cancel_style_preview(&mut self) {
         self.style_preview = None;
@@ -167,6 +245,13 @@ impl InfiniteCanvas {
 
 fn js_set(obj: &Object, key: &str, value: JsValue) {
     let _ = Reflect::set(obj, &JsValue::from_str(key), &value);
+}
+
+fn write_hex(obj: &Object, name: &str, color: Option<Color>) {
+    match color {
+        Some(color) => js_set(obj, name, JsValue::from_str(&color.to_hex())),
+        None => js_set(obj, name, JsValue::NULL),
+    }
 }
 
 fn write_optional_color(obj: &Object, name: &str, field: &StyleField<Option<Color>>) {

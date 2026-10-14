@@ -52,6 +52,7 @@ export const TOOL_LABELS = {
   pen: '画笔',
   pan: '平移',
   text: '文本',
+  eyedropper: '吸管',
   canvas: '画布',
 };
 
@@ -65,6 +66,8 @@ export const TOOL_LABELS = {
  * Shift+1 缩放到适合，Shift+2 缩放到选中，Shift+0 为 100%。数字键用 `code`，避开 Shift 改写 `key`。
  * Ctrl/Cmd+L 切换锁定，Ctrl/Cmd+Shift+H 切换隐藏。不带修饰键的 L / H 仍是直线和平移。
  * Ctrl/Cmd+= 或 Ctrl/Cmd++ 放大，Ctrl/Cmd+- 缩小，Ctrl/Cmd+0 回到 100%。倍数来自引擎的 `zoom_step`。
+ * `I` 是吸管，而且必须不带 Shift、Ctrl 和 Alt。V / L / P / R / O / T / H / M / G 都不是 I，互不占用。
+ * Shift+I、Ctrl/Cmd+I、Alt+I 不触发，避免以后的组合键和浏览器快捷键被吸管吃掉。
  *
  * @type {Shortcut[]}
  */
@@ -124,6 +127,17 @@ export const SHORTCUTS = [
     handler: 'tool',
     label: 'H',
     keys: ['h'],
+  },
+  {
+    id: 'tool-eyedropper',
+    action: '吸管：单击吸取填充和描边',
+    tool: 'eyedropper',
+    handler: 'tool',
+    label: 'I',
+    keys: ['i'],
+    // 其他字母工具忽略 Shift。吸管要求没按 Shift，这样 Shift+I 不会抢键。
+    shift: false,
+    allowRepeat: false,
   },
   {
     id: 'minimap',

@@ -68,9 +68,26 @@ test('tool keys select the tools that exist', () => {
   assert.equal(assertHandler('tool', { key: 'p', code: 'KeyP' }).tool, 'pen');
   assert.equal(assertHandler('tool', { key: 'h', code: 'KeyH' }).tool, 'pan');
   assert.equal(assertHandler('tool', { key: 't', code: 'KeyT' }).tool, 'text');
+  assert.equal(assertHandler('tool', { key: 'i', code: 'KeyI' }).tool, 'eyedropper');
   assert.equal(assertHandler('toggleMinimap', { key: 'm', code: 'KeyM' }).id, 'minimap');
   assert.equal(assertHandler('tool', { key: 'V' }).tool, 'select');
   assert.equal(assertHandler('tool', { key: 'l', shiftKey: true }).tool, 'line');
+});
+
+test('eyedropper is plain I and leaves the other tool keys alone', () => {
+  assert.equal(assertHandler('tool', { key: 'I' }).tool, 'eyedropper');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'i', shiftKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'i', ctrlKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'i', metaKey: true }), 'down'), null);
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'i', altKey: true }), 'down'), null);
+  assert.equal(assertHandler('tool', { key: 'v' }).tool, 'select');
+  assert.equal(assertHandler('tool', { key: 'r' }).tool, 'rectangle');
+  assert.equal(assertHandler('tool', { key: 'h' }).tool, 'pan');
+  const row = helpEntries(SHORTCUTS, false).find((entry) => entry.id === 'tool-eyedropper');
+  assert.ok(row);
+  assert.equal(row.toolLabel, '吸管');
+  assert.equal(row.action, '吸管：单击吸取填充和描边');
+  assert.deepEqual(row.chords, ['I']);
 });
 
 test('modifier letters do not switch tools', () => {
