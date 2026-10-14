@@ -1,4 +1,5 @@
 //! 矩形元素
+use super::blur::{blur_active, gaussian_fill_vertices, gaussian_stroke_vertices};
 use super::gradient::paint_gradient_fill;
 use super::shadow::soft_shadow_vertices;
 use super::stroke::{
@@ -218,6 +219,20 @@ impl Rectangle {
             return Vec::new();
         }
 
+        if blur_active(self.style.blur_radius) {
+            let bounds = self.local_bounds();
+            let sampled = self
+                .style
+                .sample_fill(bounds.center(), bounds)
+                .unwrap_or(Color::BLACK);
+            let color = color_with_opacity(sampled, self.style.opacity);
+            return gaussian_fill_vertices(
+                &self.local_silhouette(),
+                color,
+                self.style.blur_radius,
+                &self.props.transform,
+            );
+        }
         let radius = self.effective_corner_radius();
         if self.style.uses_gradient() {
             let outline = if radius > 0.0 {
@@ -285,6 +300,9 @@ impl Rectangle {
         }
 
         let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
+        if blur_active(self.style.blur_radius) {
+            return Vec::new();
+        }
         let radius = self.effective_corner_radius();
         let half_w = self.size.x / 2.0;
         let half_h = self.size.y / 2.0;
@@ -354,6 +372,28 @@ impl Rectangle {
         }
         let color = color_with_opacity(stroke, self.style.opacity);
         let radius = self.effective_corner_radius();
+        if blur_active(self.style.blur_radius) {
+            let points = if radius > 0.0 {
+                self.rounded_outline(radius)
+            } else {
+                let half_w = self.size.x / 2.0;
+                let half_h = self.size.y / 2.0;
+                vec![
+                    Vec2::new(-half_w, -half_h),
+                    Vec2::new(half_w, -half_h),
+                    Vec2::new(half_w, half_h),
+                    Vec2::new(-half_w, half_h),
+                    Vec2::new(-half_w, -half_h),
+                ]
+            };
+            return gaussian_stroke_vertices(
+                &points,
+                self.style.stroke_width * 0.5,
+                color,
+                self.style.blur_radius,
+                &self.props.transform,
+            );
+        }
         let points = if radius > 0.0 {
             self.rounded_outline(radius)
         } else {

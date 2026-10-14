@@ -14,6 +14,7 @@
 //!        └─ 包围盒：顶点的轴对齐盒
 //! ```
 
+use super::blur::{blur_active, gaussian_fill_vertices, gaussian_stroke_vertices};
 use super::gradient::paint_gradient_fill;
 use super::stroke::{
     color_with_opacity, dash_is_solid, distance_to_polyline, stroke_centerline, stroke_styled,
@@ -311,6 +312,20 @@ impl Polygon {
         if points.len() < 3 {
             return Vec::new();
         }
+        if blur_active(self.style.blur_radius) {
+            let bounds = self.local_bounds();
+            let sampled = self
+                .style
+                .sample_fill(bounds.center(), bounds)
+                .unwrap_or(Color::BLACK);
+            let color = color_with_opacity(sampled, self.style.opacity);
+            return gaussian_fill_vertices(
+                &points,
+                color,
+                self.style.blur_radius,
+                &self.props.transform,
+            );
+        }
         let transform = &self.props.transform;
         if self.style.uses_gradient() {
             let bounds = self.local_bounds();
@@ -392,6 +407,9 @@ impl Polygon {
         if self.style.stroke.is_none() || self.style.stroke_width <= 0.0 {
             return Vec::new();
         }
+        if blur_active(self.style.blur_radius) {
+            return Vec::new();
+        }
         let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
         let outline = self.closed_outline();
         if outline.len() < 2 {
@@ -424,6 +442,15 @@ impl Polygon {
         }
         let color = color_with_opacity(stroke, self.style.opacity);
         let outline = self.closed_outline();
+        if blur_active(self.style.blur_radius) {
+            return gaussian_stroke_vertices(
+                &outline,
+                self.style.stroke_width * 0.5,
+                color,
+                self.style.blur_radius,
+                &self.props.transform,
+            );
+        }
         transform_vertices(
             stroke_styled(
                 &outline,

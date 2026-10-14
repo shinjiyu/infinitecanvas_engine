@@ -329,6 +329,7 @@ fn embedded_image(scene: &Scene, image: &Image) -> Option<String> {
         image.alpha,
         &image.shadow,
         image.blend_mode,
+        image.blur_radius,
         &body,
     ))
 }
@@ -489,6 +490,7 @@ fn write_rectangle(rect: &Rectangle) -> String {
         rect.style.opacity,
         &rect.style.shadow,
         rect.style.blend_mode,
+        rect.style.blur_radius,
         &prepend_defs(&defs, &shape),
     )
 }
@@ -514,6 +516,7 @@ fn write_circle(circle: &Circle) -> String {
         circle.style.opacity,
         &circle.style.shadow,
         circle.style.blend_mode,
+        circle.style.blur_radius,
         &prepend_defs(&defs, &shape),
     )
 }
@@ -543,6 +546,7 @@ fn write_polygon(polygon: &Polygon) -> String {
         polygon.style.opacity,
         &polygon.style.shadow,
         polygon.style.blend_mode,
+        polygon.style.blur_radius,
         &prepend_defs(&defs, &shape),
     )
 }
@@ -575,6 +579,7 @@ fn write_line(line: &Line) -> String {
         line.style.opacity,
         &line.style.shadow,
         line.style.blend_mode,
+        line.style.blur_radius,
         &body,
     )
 }
@@ -627,6 +632,7 @@ fn write_text(text: &Text) -> Option<String> {
         text.opacity,
         &text.shadow,
         text.blend_mode,
+        text.blur_radius,
         &body,
     ))
 }
@@ -647,6 +653,7 @@ fn write_path(path: &Path) -> Option<String> {
         path.style.opacity,
         &path.style.shadow,
         path.style.blend_mode,
+        path.style.blur_radius,
         &body,
     ))
 }
@@ -692,6 +699,7 @@ fn write_fill_shapes(path: &Path) -> Option<String> {
         path.style.opacity,
         &path.style.shadow,
         path.style.blend_mode,
+        path.style.blur_radius,
         &prepend_defs(&defs, &body),
     ))
 }
@@ -702,8 +710,10 @@ fn wrap_group(
     opacity: f32,
     shadow: &DropShadow,
     blend: BlendMode,
+    blur_radius: f32,
     body: &str,
 ) -> String {
+    let blurred = crate::element::blur::blur_active(blur_radius);
     let mut group = format!("  <g id=\"e{id}\"");
     if let Some(matrix) = matrix_value(transform) {
         group.push_str(" transform=\"matrix(");
@@ -715,7 +725,9 @@ fn wrap_group(
         group.push_str(&value);
         group.push('"');
     }
-    if !shadow.is_off() {
+    if blurred {
+        group.push_str(&format!(" filter=\"url(#e{id}-blur)\""));
+    } else if !shadow.is_off() {
         group.push_str(&format!(" filter=\"url(#e{id}-shadow)\""));
     }
     // Normal 不写。查看器不认识 mix-blend-mode 时按普通叠加上色。
@@ -725,12 +737,52 @@ fn wrap_group(
         group.push('"');
     }
     group.push_str(">\n");
-    if let Some(filter) = shadow_filter(id, transform, shadow) {
+    if blurred {
+        if let Some(filter) = blur_filter(id, transform, shadow, blur_radius) {
+            group.push_str(&filter);
+        }
+    } else if let Some(filter) = shadow_filter(id, transform, shadow) {
         group.push_str(&filter);
     }
     group.push_str(body);
     group.push_str("  </g>\n");
     group
+}
+
+/// SVG 的 `feGaussianBlur` 近似画布上的图层模糊。`stdDeviation` 是半径乘缩放。
+///
+/// 和顶点环、5×5 纹理核不是像素级一致。投影同时打开时，先模糊再 `feDropShadow`。
+/// 只有投影时仍走 [`shadow_filter`]，滤镜 id 保持 `e{id}-shadow`。
+fn blur_filter(
+    id: u64,
+    transform: &Transform,
+    shadow: &DropShadow,
+    blur_radius: f32,
+) -> Option<String> {
+    let sigma = crate::element::blur::sanitize_blur(blur_radius);
+    if sigma <= 1.0e-4 {
+        return None;
+    }
+    let scale = transform.scale.x.abs().max(transform.scale.y.abs());
+    let deviation = sigma * scale;
+    if shadow.is_off() {
+        return Some(format!(
+            "    <filter id=\"e{id}-blur\" filterUnits=\"objectBoundingBox\" x=\"-4\" y=\"-4\" width=\"9\" height=\"9\">\n      <feGaussianBlur stdDeviation=\"{}\"/>\n    </filter>\n",
+            fmt_num(deviation),
+        ));
+    }
+    let shadow = shadow.sanitized();
+    let offset = transform.transform_vector(shadow.offset);
+    let shadow_deviation = shadow.blur * scale * 0.5;
+    Some(format!(
+        "    <filter id=\"e{id}-blur\" filterUnits=\"objectBoundingBox\" x=\"-4\" y=\"-4\" width=\"9\" height=\"9\">\n      <feGaussianBlur in=\"SourceGraphic\" stdDeviation=\"{}\" result=\"soft\"/>\n      <feDropShadow in=\"soft\" dx=\"{}\" dy=\"{}\" stdDeviation=\"{}\" flood-color=\"{}\" flood-opacity=\"{}\"/>\n    </filter>\n",
+        fmt_num(deviation),
+        fmt_num(offset.x),
+        fmt_num(offset.y),
+        fmt_num(shadow_deviation),
+        rgb_hex(shadow.color),
+        fmt_num(shadow.color.a),
+    ))
 }
 
 /// SVG 的 `feDropShadow` 近似画布上的偏移羽化。`stdDeviation` 取模糊的一半。
@@ -1088,7 +1140,7 @@ fn fmt_num(value: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::{Element, ElementStyle, GradientStop};
+    use crate::element::{DropShadow, Element, ElementStyle, GradientStop};
     use crate::snap::GuideAxis;
     use infinitecanvas_math::Color;
     use std::f32::consts::FRAC_PI_2;
@@ -1722,5 +1774,38 @@ mod tests {
         }
         let normal = export_svg(&scene, false);
         assert!(!normal.contains("mix-blend-mode"));
+    }
+
+    #[test]
+    fn gaussian_blur_uses_fe_gaussian_blur_and_keeps_shadow_only_ids() {
+        let mut scene = Scene::new();
+        let mut style = ElementStyle::fill_only(Color::RED);
+        style.blur_radius = 4.0;
+        scene.add_rect(rect(1, Vec2::ZERO, Vec2::new(20.0, 20.0), style.clone()));
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains("filter=\"url(#e1-blur)\""));
+        assert!(svg.contains("<feGaussianBlur stdDeviation=\"4\"/>"));
+        assert!(!svg.contains("e1-shadow"));
+
+        style.shadow = DropShadow::new(Vec2::new(2.0, 0.0), 6.0, Color::new(0.0, 0.0, 0.0, 0.5));
+        let mut both = Scene::new();
+        both.add_rect(rect(1, Vec2::ZERO, Vec2::new(20.0, 20.0), style));
+        let chained = export_svg(&both, false);
+        assert!(chained.contains("filter=\"url(#e1-blur)\""));
+        assert!(chained.contains("feGaussianBlur"));
+        assert!(chained.contains("result=\"soft\""));
+        assert!(chained.contains("<feDropShadow in=\"soft\""));
+        assert!(!chained.contains("e1-shadow"));
+
+        let mut shadow_only = ElementStyle::fill_only(Color::RED);
+        shadow_only.shadow =
+            DropShadow::new(Vec2::new(2.0, 0.0), 6.0, Color::new(0.0, 0.0, 0.0, 0.5));
+        let mut shadows = Scene::new();
+        shadows.add_rect(rect(1, Vec2::ZERO, Vec2::new(20.0, 20.0), shadow_only));
+        let svg = export_svg(&shadows, false);
+        assert!(svg.contains("filter=\"url(#e1-shadow)\""));
+        assert!(svg.contains("<feDropShadow "));
+        assert!(!svg.contains("feGaussianBlur"));
+        assert!(!svg.contains("e1-blur"));
     }
 }

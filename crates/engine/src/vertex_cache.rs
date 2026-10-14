@@ -13,6 +13,7 @@
 //! 矩形/圆形的 1px 描边仍走线条缓冲。图片和文本走纹理缓冲；只有图片先画纯色底。
 
 use crate::blend::BlendMode;
+use crate::element::blur::blur_active;
 use crate::scene::{AnyElement, Scene};
 use crate::ElementId;
 use infinitecanvas_math::Vertex;
@@ -77,6 +78,8 @@ pub struct TexturedDraw {
     pub vertex_count: u32,
     /// 图片先画纯色底。文本纹理有透明背景，纯色底会挡住字形。
     pub underlay: bool,
+    /// 使用 5×5 高斯纹理管线。模糊为 0 的绘制仍走原来的单次采样。
+    pub blurred: bool,
 }
 
 /// [`VertexCache::sync`] 的结果。缓冲内容用缓存上的切片读取。
@@ -114,6 +117,7 @@ struct Slot {
     texture_id: Option<String>,
     underlay: bool,
     blend: BlendMode,
+    blurred: bool,
 }
 
 struct Mesh {
@@ -123,6 +127,7 @@ struct Mesh {
     texture_id: Option<String>,
     underlay: bool,
     blend: BlendMode,
+    blurred: bool,
 }
 
 impl Mesh {
@@ -134,6 +139,7 @@ impl Mesh {
             texture_id: None,
             underlay: false,
             blend: BlendMode::Normal,
+            blurred: false,
         }
     }
 }
@@ -142,6 +148,7 @@ const ZERO_VERTEX: Vertex = Vertex {
     position: [0.0, 0.0],
     color: [0.0, 0.0, 0.0, 0.0],
     uv: [0.0, 0.0],
+    blur_uv: [0.0, 0.0],
 };
 
 /// 按元素缓存世界空间顶点，并给出 GPU 增量写入区间。
@@ -392,6 +399,7 @@ impl VertexCache {
             texture_id: mesh.texture_id,
             underlay: mesh.underlay,
             blend: mesh.blend,
+            blurred: mesh.blurred,
         };
         self.fill.extend(mesh.fill);
         self.stroke.extend(mesh.stroke);
@@ -429,10 +437,13 @@ impl VertexCache {
         if repack {
             return true;
         }
-        let texture_changed = slot.texture_id != mesh.texture_id || slot.underlay != mesh.underlay;
+        let texture_changed = slot.texture_id != mesh.texture_id
+            || slot.underlay != mesh.underlay
+            || slot.blurred != mesh.blurred;
         slot.texture_id = mesh.texture_id;
         slot.underlay = mesh.underlay;
         slot.blend = mesh.blend;
+        slot.blurred = mesh.blurred;
         self.slots.insert(id, slot);
         if texture_changed
             || writes
@@ -458,7 +469,11 @@ impl VertexCache {
             };
             if let Some(last) = self.textured_draws.last_mut() {
                 let adjacent = last.vertex_offset + last.vertex_count == slot.tex_offset;
-                if last.texture_id == texture_id && adjacent && last.underlay == slot.underlay {
+                if last.texture_id == texture_id
+                    && adjacent
+                    && last.underlay == slot.underlay
+                    && last.blurred == slot.blurred
+                {
                     last.vertex_count += slot.tex_count;
                     continue;
                 }
@@ -468,6 +483,7 @@ impl VertexCache {
                 vertex_offset: slot.tex_offset,
                 vertex_count: slot.tex_count,
                 underlay: slot.underlay,
+                blurred: slot.blurred,
             });
         }
     }
@@ -525,6 +541,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 texture_id: None,
                 underlay: false,
                 blend: BlendMode::Normal,
+                blurred: false,
             }
         }
         AnyElement::Circle(circle) => {
@@ -538,6 +555,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 texture_id: None,
                 underlay: false,
                 blend: BlendMode::Normal,
+                blurred: false,
             }
         }
         AnyElement::Polygon(polygon) => {
@@ -551,26 +569,26 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 texture_id: None,
                 underlay: false,
                 blend: BlendMode::Normal,
+                blurred: false,
             }
         }
         AnyElement::Image(image) => {
             if !image.props.visible {
-                return Mesh {
-                    fill: Vec::new(),
-                    stroke: Vec::new(),
-                    textured: Vec::new(),
-                    texture_id: None,
-                    underlay: false,
-                    blend: BlendMode::Normal,
-                };
+                return Mesh::empty();
+            }
+            let blurred = blur_active(image.blur_radius);
+            let mut fill = image.shadow_vertices();
+            if blurred {
+                fill.extend(image.plate_vertices());
             }
             Mesh {
-                fill: image.shadow_vertices(),
+                fill,
                 stroke: Vec::new(),
                 textured: image.generate_vertices(),
                 texture_id: Some(image.texture_id.clone()),
-                underlay: true,
+                underlay: !blurred,
                 blend: BlendMode::Normal,
+                blurred,
             }
         }
         AnyElement::Line(line) => {
@@ -583,6 +601,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 texture_id: None,
                 underlay: false,
                 blend: BlendMode::Normal,
+                blurred: false,
             }
         }
         AnyElement::Path(path) => {
@@ -595,16 +614,22 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 texture_id: None,
                 underlay: false,
                 blend: BlendMode::Normal,
+                blurred: false,
             }
         }
-        AnyElement::Text(text) => Mesh {
-            fill: text.shadow_vertices(),
-            stroke: Vec::new(),
-            textured: text.generate_vertices(),
-            texture_id: text.texture_id.clone(),
-            underlay: false,
-            blend: BlendMode::Normal,
-        },
+        AnyElement::Text(text) => {
+            let textured = text.generate_vertices();
+            let blurred = blur_active(text.blur_radius) && !textured.is_empty();
+            Mesh {
+                fill: text.shadow_vertices(),
+                stroke: Vec::new(),
+                textured,
+                texture_id: text.texture_id.clone(),
+                underlay: false,
+                blend: BlendMode::Normal,
+                blurred,
+            }
+        }
         AnyElement::Frame(frame) => {
             let rect = frame.shape_proxy();
             let mut fill = rect.shadow_vertices();
@@ -617,6 +642,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 texture_id: None,
                 underlay: false,
                 blend: BlendMode::Normal,
+                blurred: false,
             }
         }
         AnyElement::Group(_) => Mesh::empty(),

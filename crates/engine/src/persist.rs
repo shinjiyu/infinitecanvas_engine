@@ -15,8 +15,13 @@
 
 use crate::asset::{AssetError, AssetRecord, AssetTable};
 use crate::blend::{composite_straight, BlendMode};
+use crate::element::blur::{
+    blur_active, blurred_mask, blurred_paint, kernel_color, sanitize_blur, BLUR_EXTENT,
+};
 use crate::element::shadow::{composite_over, feather_coverage};
-use crate::element::{Circle, DropShadow, Element, Image, Polygon, PolygonKind, Rectangle, Text};
+use crate::element::{
+    Circle, DropShadow, Element, ElementStyle, Image, Polygon, PolygonKind, Rectangle, Text,
+};
 use crate::guides::{GuideStore, ManualGuide};
 use crate::scene::{AnyElement, Scene};
 use crate::snap::GuideAxis;
@@ -208,7 +213,8 @@ impl Scene {
         let mut elements = HashMap::with_capacity(raw.elements.len());
         let mut max_id = 0u64;
         for value in raw.elements {
-            let element = decode_element(value)?;
+            let mut element = decode_element(value)?;
+            crate::element::blur::sanitize_element(&mut element);
             let id = element.id();
             max_id = max_id.max(id);
             if elements.insert(id, element).is_some() {
@@ -496,7 +502,11 @@ fn selected_bounds(scene: &Scene) -> Option<Rect> {
         if !element.as_element().props().selected {
             continue;
         }
-        let bounds = element.as_element().world_bounds();
+        let mut bounds = element.as_element().world_bounds();
+        // 画板导出区域保持世界包围盒，不把画板自己的光晕算进去。
+        if !matches!(element, AnyElement::Frame(_)) {
+            bounds = bounds.inflate(blur_reach(element));
+        }
         if !bounds.width.is_finite() || !bounds.height.is_finite() {
             continue;
         }
@@ -642,7 +652,31 @@ fn paint_bounds(element: &AnyElement) -> Rect {
         | AnyElement::Group(_) => 0.0,
     };
     let (shadow, transform) = element_shadow(element);
-    base.inflate(extra.max(0.0) + shadow_reach(shadow, transform))
+    base.inflate(extra.max(0.0) + shadow_reach(shadow, transform) + blur_reach(element))
+}
+
+fn element_blur_radius(element: &AnyElement) -> f32 {
+    match element {
+        AnyElement::Rectangle(rect) => rect.style.blur_radius,
+        AnyElement::Circle(circle) => circle.style.blur_radius,
+        AnyElement::Polygon(polygon) => polygon.style.blur_radius,
+        AnyElement::Line(line) => line.style.blur_radius,
+        AnyElement::Path(path) => path.style.blur_radius,
+        AnyElement::Text(text) => text.blur_radius,
+        AnyElement::Image(image) => image.blur_radius,
+        AnyElement::Frame(frame) => frame.style.blur_radius,
+        AnyElement::Group(_) => 0.0,
+    }
+}
+
+/// 光晕在世界空间里伸出包围盒的距离。关闭时为 0。命中盒不调用这里。
+fn blur_reach(element: &AnyElement) -> f32 {
+    let sigma = sanitize_blur(element_blur_radius(element));
+    if sigma <= 1.0e-4 {
+        return 0.0;
+    }
+    let (_, transform) = element_shadow(element);
+    BLUR_EXTENT * sigma * scale_extent(transform)
 }
 
 fn element_shadow(element: &AnyElement) -> (DropShadow, &Transform) {
@@ -739,9 +773,14 @@ fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
     let half = rect.size * 0.5;
     let stroke = rect.style.stroke_width.max(0.0) * 0.5;
     let radius = rect.effective_corner_radius();
+    let half_abs = Vec2::new(half.x.abs(), half.y.abs());
+    let distance = |point: Vec2| rounded_box_sdf(point, half_abs, radius);
+    if blur_active(rect.style.blur_radius) {
+        let body = blurred_shape_body(&rect.style, local, rect.local_bounds(), distance(local));
+        return paint_with_shadow(body, local, rect.style.shadow, rect.style.opacity, distance);
+    }
     let (in_fill, in_stroke) = if radius > 0.0 {
-        let half_abs = Vec2::new(half.x.abs(), half.y.abs());
-        let sdf = rounded_box_sdf(local, half_abs, radius);
+        let sdf = distance(local);
         (sdf <= 1.0e-4, stroke > 0.0 && sdf.abs() <= stroke + 1.0e-4)
     } else {
         let ax = local.x.abs();
@@ -765,14 +804,7 @@ fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
             body = with_opacity(color, rect.style.opacity);
         }
     }
-    let half_abs = Vec2::new(half.x.abs(), half.y.abs());
-    paint_with_shadow(
-        body,
-        local,
-        rect.style.shadow,
-        rect.style.opacity,
-        |point| rounded_box_sdf(point, half_abs, radius),
-    )
+    paint_with_shadow(body, local, rect.style.shadow, rect.style.opacity, distance)
 }
 
 fn sample_polygon(polygon: &Polygon, world: Vec2) -> Option<Color> {
@@ -780,13 +812,23 @@ fn sample_polygon(polygon: &Polygon, world: Vec2) -> Option<Color> {
         return None;
     }
     let local = try_local(&polygon.props.transform, world)?;
-    let body = polygon.sample_local(local);
+    let distance = |point: Vec2| polygon.silhouette_distance(point);
+    let body = if blur_active(polygon.style.blur_radius) {
+        blurred_shape_body(
+            &polygon.style,
+            local,
+            polygon.local_bounds(),
+            distance(local),
+        )
+    } else {
+        polygon.sample_local(local)
+    };
     paint_with_shadow(
         body,
         local,
         polygon.style.shadow,
         polygon.style.opacity,
-        |point| polygon.silhouette_distance(point),
+        distance,
     )
 }
 
@@ -795,6 +837,18 @@ fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
         return None;
     }
     let local = try_local(&circle.props.transform, world)?;
+    let radius = circle.radius;
+    let distance = |point: Vec2| point.length() - radius;
+    if blur_active(circle.style.blur_radius) {
+        let body = blurred_shape_body(&circle.style, local, circle.local_bounds(), distance(local));
+        return paint_with_shadow(
+            body,
+            local,
+            circle.style.shadow,
+            circle.style.opacity,
+            distance,
+        );
+    }
     let dist = local.length();
     let stroke = circle.style.stroke_width.max(0.0) * 0.5;
     let in_fill = dist <= circle.radius;
@@ -811,13 +865,12 @@ fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
             body = with_opacity(color, circle.style.opacity);
         }
     }
-    let radius = circle.radius;
     paint_with_shadow(
         body,
         local,
         circle.style.shadow,
         circle.style.opacity,
-        |point| point.length() - radius,
+        distance,
     )
 }
 
@@ -826,28 +879,71 @@ fn sample_image(scene: &Scene, image: &Image, world: Vec2) -> Option<Color> {
         return None;
     }
     let local = try_local(&image.props.transform, world)?;
-    let body = if image.contains_point(world) {
-        if let Some(asset) = scene.image_asset(&image.asset_id) {
-            image.sample_pixels(world, asset.width, asset.height, &asset.rgba)
-        } else {
-            let mut color = IMAGE_PNG_PLACEHOLDER;
-            color.a *= image.alpha.clamp(0.0, 1.0);
-            if color.a <= 0.0 {
-                None
-            } else {
-                Some(color)
-            }
-        }
+    let body = if blur_active(image.blur_radius) {
+        let sigma = sanitize_blur(image.blur_radius);
+        kernel_color(|i, j| {
+            image_color_at_local(
+                scene,
+                image,
+                local + Vec2::new(i as f32 * sigma, j as f32 * sigma),
+            )
+        })
     } else {
-        None
+        image_color_at_world(scene, image, world)
     };
-    let size = image.size;
+    let visible = image.visible_local_rect();
     paint_with_shadow(body, local, image.shadow, image.alpha, |point| {
-        axis_box_sdf(point, Vec2::ZERO, size)
+        axis_box_sdf(
+            point,
+            Vec2::new(visible.x, visible.y),
+            Vec2::new(visible.width, visible.height),
+        )
     })
 }
 
+fn image_color_at_local(scene: &Scene, image: &Image, local: Vec2) -> Option<Color> {
+    if !local.x.is_finite() || !local.y.is_finite() {
+        return None;
+    }
+    image_color_at_world(scene, image, image.props.transform.transform_point(local))
+}
+
+fn image_color_at_world(scene: &Scene, image: &Image, world: Vec2) -> Option<Color> {
+    if !image.contains_point(world) {
+        return None;
+    }
+    if let Some(asset) = scene.image_asset(&image.asset_id) {
+        image.sample_pixels(world, asset.width, asset.height, &asset.rgba)
+    } else {
+        let mut color = IMAGE_PNG_PLACEHOLDER;
+        color.a *= image.alpha.clamp(0.0, 1.0);
+        if color.a <= 0.0 {
+            None
+        } else {
+            Some(color)
+        }
+    }
+}
+
 fn sample_line(line: &crate::element::Line, world: Vec2) -> Option<Color> {
+    if blur_active(line.style.blur_radius) {
+        if !line.props.visible {
+            return None;
+        }
+        let local = try_local(&line.props.transform, world)?;
+        let body = blurred_mask(
+            stroke_paint_color(&line.style),
+            line.silhouette_distance(local),
+            line.style.blur_radius,
+        );
+        return paint_with_shadow(
+            body,
+            local,
+            line.style.shadow,
+            line.style.opacity,
+            |point| line.silhouette_distance(point),
+        );
+    }
     let body = line.color_at(world);
     let Some(local) = try_local(&line.props.transform, world) else {
         return body;
@@ -862,6 +958,35 @@ fn sample_line(line: &crate::element::Line, world: Vec2) -> Option<Color> {
 }
 
 fn sample_path(path: &crate::element::Path, world: Vec2) -> Option<Color> {
+    if blur_active(path.style.blur_radius) {
+        if !path.props.visible {
+            return None;
+        }
+        let local = try_local(&path.props.transform, world)?;
+        let body = if path.is_filled() {
+            blurred_shape_body(
+                &path.style,
+                local,
+                path.local_bounds(),
+                path.silhouette_distance(local),
+            )
+        } else if path.points().len() < 2 {
+            return None;
+        } else {
+            blurred_mask(
+                stroke_paint_color(&path.style),
+                path.silhouette_distance(local),
+                path.style.blur_radius,
+            )
+        };
+        return paint_with_shadow(
+            body,
+            local,
+            path.style.shadow,
+            path.style.opacity,
+            |point| path.silhouette_distance(point),
+        );
+    }
     let body = path.color_at(world);
     let Some(local) = try_local(&path.props.transform, world) else {
         return body;
@@ -876,12 +1001,20 @@ fn sample_path(path: &crate::element::Path, world: Vec2) -> Option<Color> {
 }
 
 fn sample_text(text: &Text, world: Vec2) -> Option<Color> {
-    let body = text.color_at(world);
     if text.editing {
-        return body;
+        return text.color_at(world);
     }
     let Some(local) = try_local(&text.props.transform, world) else {
-        return body;
+        return text.color_at(world);
+    };
+    let body = if blur_active(text.blur_radius) {
+        let sigma = sanitize_blur(text.blur_radius);
+        kernel_color(|i, j| {
+            let point = local + Vec2::new(i as f32 * sigma, j as f32 * sigma);
+            text.color_at(text.props.transform.transform_point(point))
+        })
+    } else {
+        text.color_at(world)
     };
     let bounds = text.local_bounds();
     paint_with_shadow(body, local, text.shadow, text.opacity, |point| {
@@ -891,6 +1024,43 @@ fn sample_text(text: &Text, world: Vec2) -> Option<Color> {
             Vec2::new(bounds.width, bounds.height),
         )
     })
+}
+
+/// 填充盖住内部，描边再盖在上面。颜色已经乘过不透明度。σ 接近 0 时不要调用。
+fn blurred_shape_body(
+    style: &ElementStyle,
+    local: Vec2,
+    bounds: Rect,
+    signed_distance: f32,
+) -> Option<Color> {
+    let fill = style
+        .sample_fill(local, bounds)
+        .and_then(|color| with_opacity(color, style.opacity));
+    let stroke = if style.stroke_width.max(0.0) > 0.0 {
+        style
+            .stroke
+            .and_then(|color| with_opacity(color, style.opacity))
+    } else {
+        None
+    };
+    blurred_paint(
+        fill,
+        stroke,
+        style.stroke_width.max(0.0) * 0.5,
+        signed_distance,
+        style.blur_radius,
+    )
+}
+
+/// 描边色优先，否则填充色，并乘上不透明度。与 `element::stroke::paint_color` 一致。
+fn stroke_paint_color(style: &ElementStyle) -> Color {
+    let color = style.stroke.or(style.fill).unwrap_or(Color::BLACK);
+    Color::new(
+        color.r,
+        color.g,
+        color.b,
+        (color.a * style.opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0),
+    )
 }
 
 fn axis_box_sdf(point: Vec2, origin: Vec2, size: Vec2) -> f32 {
@@ -1964,5 +2134,104 @@ mod tests {
         }
         // 正片叠底在下层，上层不透明红盖住它。若按 id 而不是 z 绘制，这里会变成黑。
         assert_pixel(sample_pixel(&scene, Vec2::ZERO), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn gaussian_blur_softens_png_without_enlarging_hits() {
+        let mut solid = ElementStyle::fill_only(Color::RED);
+        solid.blur_radius = 4.0;
+        let rect = Rectangle::new(1, Vec2::ZERO, Vec2::new(80.0, 80.0)).with_style(solid.clone());
+        let center = sample_rectangle(&rect, Vec2::ZERO).unwrap();
+        assert!(center.a > 0.95);
+        let edge = sample_rectangle(&rect, Vec2::new(40.0, 0.0)).unwrap();
+        assert!((edge.a - 0.5).abs() < 0.05);
+        let halo = sample_rectangle(&rect, Vec2::new(44.0, 0.0)).unwrap();
+        assert!((halo.a - 0.1587).abs() < 0.02);
+        assert!(sample_rectangle(&rect, Vec2::new(60.0, 0.0)).is_none());
+
+        solid.opacity = 0.5;
+        let faint = Rectangle::new(2, Vec2::ZERO, Vec2::new(80.0, 80.0)).with_style(solid);
+        let faded = sample_rectangle(&faint, Vec2::ZERO).unwrap();
+        assert!((faded.a - 0.5).abs() < 0.05);
+
+        let mut scene = Scene::new();
+        scene.add_rect(rect);
+        let pixel = sample_pixel(&scene, Vec2::new(44.0, 0.0));
+        assert!(pixel[0] > 200, "{pixel:?}");
+        assert!((20..=80).contains(&pixel[3]), "{pixel:?}");
+        assert!(crate::hit_test_point(
+            &scene,
+            Vec2::new(44.0, 0.0),
+            &crate::HitTestOptions::default()
+        )
+        .is_empty());
+
+        let mut cover = Rectangle::new(3, Vec2::ZERO, Vec2::new(20.0, 20.0))
+            .with_style(ElementStyle::fill_only(Color::BLUE));
+        cover.props.z_index = 5;
+        scene.add_rect(cover);
+        let top = sample_pixel(&scene, Vec2::ZERO);
+        assert!(top[2] > 250 && top[0] < 5, "{top:?}");
+
+        let mut image = Image::new(
+            4,
+            Vec2::new(400.0, 0.0),
+            Vec2::new(80.0, 80.0),
+            "missing".to_string(),
+        );
+        image.blur_radius = 4.0;
+        scene.add_image(image);
+        let plate = sample_pixel(&scene, Vec2::new(440.0, 40.0));
+        let expect = [
+            (IMAGE_PNG_PLACEHOLDER.r * 255.0).round() as u8,
+            (IMAGE_PNG_PLACEHOLDER.g * 255.0).round() as u8,
+            (IMAGE_PNG_PLACEHOLDER.b * 255.0).round() as u8,
+        ];
+        for (got, want) in plate[..3].iter().zip(expect) {
+            assert!((*got as i16 - want as i16).abs() <= 2, "{plate:?}");
+        }
+        assert!(plate[3] > 240, "{plate:?}");
+
+        let mut stroke = ElementStyle::stroke_only(Color::RED, 4.0);
+        stroke.blur_radius = 4.0;
+        let line = Line::from_world(
+            5,
+            Vec2::new(0.0, 300.0),
+            Vec2::new(100.0, 300.0),
+            stroke,
+            false,
+        );
+        let outside = Vec2::new(50.0, 306.0);
+        assert!(!line.contains_point(outside));
+        let ink = super::sample_line(&line, outside).unwrap();
+        assert!(ink.r > 0.9, "{ink:?}");
+        assert!((ink.a - 0.1587).abs() < 0.02, "{ink:?}");
+        scene.add_line(line);
+        assert!(
+            crate::hit_test_point(&scene, outside, &crate::HitTestOptions::default()).is_empty()
+        );
+
+        let size = serde_json::to_value(Vec2::new(12.0, 12.0)).unwrap();
+        let negative = json!({
+            "version": 1,
+            "elements": [{
+                "type": "rectangle",
+                "data": {
+                    "props": { "id": 8 },
+                    "size": size,
+                    "style": { "blur_radius": -8.0 }
+                }
+            }]
+        });
+        let loaded = Scene::from_json(&negative.to_string()).unwrap();
+        match loaded.get(8).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style.blur_radius, 0.0);
+                assert!(!serde_json::to_value(rect).unwrap()["style"]
+                    .get("blur_radius")
+                    .is_some());
+            }
+            other => panic!("rect, got {other:?}"),
+        }
     }
 }

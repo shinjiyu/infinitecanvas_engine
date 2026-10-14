@@ -5,8 +5,8 @@
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
 //! 画板有自己的填充和描边；选中画板只改画板，不把样式写到子元素上。
 //!
-//! 投影、渐变和混合模式都是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
-//! 吸管只写填充和描边，并把渐变收成纯色。混合模式不随吸管改变。
+//! 投影、渐变、混合模式和图层模糊都是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
+//! 吸管只写填充和描边，并把渐变收成纯色，不会清掉图层模糊或混合模式。
 //!
 //! ```text
 //! 选中 id ──► style_target_ids（组展开为子孙，画板不展开）
@@ -18,9 +18,10 @@
 //!                                      ├─ 矩形圆角（其它元素忽略该字段）
 //!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
 //!                                      ├─ 形状渐变（种类、色标、角度、圆心、半径）
-//!                                      ├─ 投影（形状、文本、图片；不丢文本光栅）
+//!                                      ├─ 投影（形状、文本、图片、画板；不丢文本光栅）
 //!                                      ├─ 混合模式写到形状、文本、图片和画板
-//!                                      └─ 图片只改 alpha、投影和混合模式
+//!                                      ├─ 图层模糊（同上；不丢文本光栅，不扩大命中盒，也不清渐变或混合模式）
+//!                                      └─ 图片只改 alpha、投影、混合模式和图层模糊
 //! ```
 
 use crate::blend::BlendMode;
@@ -59,6 +60,8 @@ pub struct TextPaint {
     pub shadow: DropShadow,
     /// 混合模式。
     pub blend_mode: BlendMode,
+    /// 图层模糊标准差。不进字形纹理。
+    pub blur_radius: f32,
 }
 
 /// 一个元素上可撤销的样式快照。
@@ -87,7 +90,7 @@ pub enum StyleSnapshot {
     },
     /// 文本。
     Text(TextPaint),
-    /// 图片。不透明度、投影和混合模式。不改资源表。
+    /// 图片。不透明度、投影、混合模式和图层模糊。不改资源表。
     Image {
         /// [`crate::element::Image::alpha`]。
         alpha: f32,
@@ -95,6 +98,8 @@ pub enum StyleSnapshot {
         shadow: DropShadow,
         /// 混合模式。
         blend_mode: BlendMode,
+        /// 图层模糊标准差。
+        blur_radius: f32,
     },
 }
 
@@ -151,6 +156,10 @@ pub struct StylePatch {
     pub fill_radius: Option<f32>,
     /// 形状、文本、图片或画板的混合模式。组展开到子孙叶子。
     pub blend_mode: Option<BlendMode>,
+    /// 图层高斯模糊标准差。形状、文本、图片和画板都写。负数收成 0。
+    ///
+    /// 没出现在补丁里就保持原值，也不改渐变或混合模式。
+    pub blur_radius: Option<f32>,
 }
 
 /// 当前选择的公共样式。
@@ -194,7 +203,7 @@ pub struct SelectionStyle {
     pub shadow_color: StyleField<Color>,
     /// 投影浓度。
     pub shadow_opacity: StyleField<f32>,
-    /// 选择里有形状、文本或图片，可以改投影。
+    /// 选择里有形状、文本或图片，可以改投影。画板算形状。
     pub shadow_supported: bool,
     /// 形状填充种类。文本和图片不参与。
     pub fill_kind: StyleField<FillKind>,
@@ -206,6 +215,10 @@ pub struct SelectionStyle {
     pub fill_center: StyleField<Vec2>,
     /// 径向渐变半径。文本和图片不参与。
     pub fill_radius: StyleField<f32>,
+    /// 图层模糊标准差。没有可编辑叶子时为 [`StyleField::Absent`]。
+    pub blur_radius: StyleField<f32>,
+    /// 选择里有形状、文本、图片或画板，可以改图层模糊。
+    pub blur_supported: bool,
     /// 选择里有形状（含组内的形状）。
     pub has_shape: bool,
     /// 选择里有矩形（含组内的矩形）。圆角只对它们生效。
@@ -279,11 +292,13 @@ impl StyleSnapshot {
                     text.blend_mode = mode;
                 }
                 apply_shadow(&mut text.shadow, patch);
+                apply_layer_blur(&mut text.blur_radius, patch);
             }
             Self::Image {
                 alpha,
                 shadow,
                 blend_mode,
+                blur_radius,
             } => {
                 if let Some(opacity) = finite_opacity(patch.opacity) {
                     *alpha = opacity;
@@ -292,6 +307,7 @@ impl StyleSnapshot {
                     *blend_mode = mode;
                 }
                 apply_shadow(shadow, patch);
+                apply_layer_blur(blur_radius, patch);
             }
         }
         *self != original
@@ -374,11 +390,13 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             stroke_width: text.stroke_width,
             shadow: text.shadow,
             blend_mode: text.blend_mode,
+            blur_radius: crate::element::blur::sanitize_blur(text.blur_radius),
         })),
         AnyElement::Image(image) => Some(StyleSnapshot::Image {
             alpha: image.alpha,
             shadow: image.shadow,
             blend_mode: image.blend_mode,
+            blur_radius: crate::element::blur::sanitize_blur(image.blur_radius),
         }),
         AnyElement::Frame(frame) => Some(StyleSnapshot::Shape(frame.style.clone())),
         AnyElement::Group(_) => None,
@@ -405,8 +423,9 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                     paint.stroke,
                     paint.stroke_width,
                 );
-                // 投影不进字形纹理，只标脏让填充通道重写包围盒阴影。
+                // 投影和图层模糊都不进字形纹理，只标脏让顶点重写。
                 text.shadow = paint.shadow;
+                text.blur_radius = crate::element::blur::sanitize_blur(paint.blur_radius);
                 true
             } else {
                 false
@@ -417,11 +436,13 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                 alpha,
                 shadow,
                 blend_mode,
+                blur_radius,
             } = snapshot
             {
                 image.blend_mode = *blend_mode;
                 image.set_alpha(*alpha);
                 image.shadow = *shadow;
+                image.blur_radius = crate::element::blur::sanitize_blur(*blur_radius);
                 true
             } else {
                 false
@@ -460,6 +481,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut fill_centers = Vec::new();
     let mut fill_radii = Vec::new();
     let mut blends = Vec::new();
+    let mut layer_blurs = Vec::new();
     let mut has_shape = false;
     let mut has_polygon = false;
     let mut has_star = false;
@@ -498,6 +520,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_opacities,
                     style.shadow,
                 );
+                layer_blurs.push(crate::element::blur::sanitize_blur(style.blur_radius));
             }
             Some(StyleSnapshot::Rectangle {
                 style,
@@ -533,6 +556,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_opacities,
                     style.shadow,
                 );
+                layer_blurs.push(crate::element::blur::sanitize_blur(style.blur_radius));
             }
             Some(StyleSnapshot::Polygon {
                 style,
@@ -575,6 +599,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_opacities,
                     style.shadow,
                 );
+                layer_blurs.push(crate::element::blur::sanitize_blur(style.blur_radius));
             }
             Some(StyleSnapshot::Text(text)) => {
                 has_text = true;
@@ -592,11 +617,13 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_opacities,
                     text.shadow,
                 );
+                layer_blurs.push(text.blur_radius);
             }
             Some(StyleSnapshot::Image {
                 alpha,
                 shadow,
                 blend_mode,
+                blur_radius,
             }) => {
                 has_image = true;
                 opacities.push(alpha);
@@ -609,6 +636,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_opacities,
                     shadow,
                 );
+                layer_blurs.push(blur_radius);
             }
             None => {}
         }
@@ -640,6 +668,8 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         fill_angle: fold(fill_angles),
         fill_center: fold(fill_centers),
         fill_radius: fold(fill_radii),
+        blur_radius: fold(layer_blurs),
+        blur_supported: has_shape || has_text || has_image,
         has_shape,
         has_rect,
         has_text,
@@ -719,6 +749,13 @@ fn apply_shape_paint(style: &mut ElementStyle, patch: &StylePatch) {
         style.blend_mode = mode;
     }
     apply_shadow(&mut style.shadow, patch);
+    apply_layer_blur(&mut style.blur_radius, patch);
+}
+
+fn apply_layer_blur(radius: &mut f32, patch: &StylePatch) {
+    if let Some(value) = patch.blur_radius.filter(|value| value.is_finite()) {
+        *radius = crate::element::blur::sanitize_blur(value);
+    }
 }
 
 fn apply_shadow(shadow: &mut DropShadow, patch: &StylePatch) {
@@ -853,11 +890,14 @@ fn finite_font(value: Option<f32>) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::{DropShadow, Image, Line, Path, Rectangle, StrokeCap, StrokeJoin, Text};
+    use crate::element::{
+        DropShadow, FillKind, Frame, GradientStop, Image, Line, Path, Rectangle, StrokeCap,
+        StrokeJoin, Text,
+    };
     use crate::Element;
     use crate::{
-        hit_test_point, sample_paint_at, Circle, Command, CommandHistory, HitTestOptions,
-        SampledPaint, SetStyleCommand, VertexCache,
+        apply_reparent_into_frame, hit_test_point, sample_paint_at, Circle, Command,
+        CommandHistory, HitTestOptions, SampledPaint, SetStyleCommand, VertexCache,
     };
     use infinitecanvas_math::Vec2;
 
@@ -1801,5 +1841,245 @@ mod tests {
         assert_eq!(leaf_blend(&old, 2), BlendMode::Normal);
         assert_eq!(leaf_blend(&old, 3), BlendMode::Normal);
         assert!(!old.to_json().unwrap().contains("blend_mode"));
+    }
+
+    #[test]
+    fn layer_blur_is_one_undoable_patch_and_stays_out_of_hit_testing() {
+        let mut scene = Scene::new();
+        scene.add_rect(
+            Rectangle::new(1, Vec2::ZERO, Vec2::new(80.0, 80.0))
+                .with_style(ElementStyle::fill_only(Color::RED)),
+        );
+        scene.add_rect(
+            Rectangle::new(2, Vec2::new(200.0, 0.0), Vec2::new(10.0, 10.0))
+                .with_style(ElementStyle::fill_only(Color::BLUE)),
+        );
+        let before = match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => rect.world_bounds(),
+            other => panic!("rect, got {other:?}"),
+        };
+        let blur_on = StylePatch {
+            blur_radius: Some(4.0),
+            ..StylePatch::default()
+        };
+        assert!(SetStyleCommand::from_patch(&scene, &[], &blur_on).is_none());
+        assert!(scene.set_locked(1, true));
+        assert!(SetStyleCommand::from_patch(&scene, &[1], &blur_on).is_none());
+        assert!(scene.set_locked(1, false));
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[1],
+            &StylePatch {
+                blur_radius: Some(0.0),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[1],
+            &StylePatch {
+                blur_radius: Some(-2.0),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+        assert!(!selection_style(&scene, &[]).blur_supported);
+
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1], &blur_on).unwrap()),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert!(scene.has_dirty_elements());
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style.blur_radius, 4.0);
+                assert_eq!(rect.world_bounds(), before);
+                assert!(rect.contains_point(Vec2::ZERO));
+                assert!(!rect.contains_point(Vec2::new(44.0, 0.0)));
+                assert!(rect.generate_fill_vertices().len() > 6);
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        assert!(
+            hit_test_point(&scene, Vec2::new(44.0, 0.0), &HitTestOptions::default()).is_empty()
+        );
+        assert!(sample_paint_at(&scene, Vec2::new(44.0, 0.0)).is_none());
+
+        let mut gradient = SetStyleCommand::from_patch(
+            &scene,
+            &[1],
+            &StylePatch {
+                fill_kind: Some(FillKind::Linear),
+                fill_stops: Some(vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: Color::RED,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: Color::BLUE,
+                    },
+                ]),
+                ..StylePatch::default()
+            },
+        )
+        .unwrap();
+        gradient.execute(&mut scene);
+        assert_eq!(shape_style(&scene, 1).fill_kind, FillKind::Linear);
+        assert!(shape_style(&scene, 1).uses_gradient());
+        assert_eq!(shape_style(&scene, 1).blur_radius, 4.0);
+        gradient.undo(&mut scene);
+        assert_eq!(shape_style(&scene, 1).fill_kind, FillKind::Solid);
+        assert_eq!(shape_style(&scene, 1).blur_radius, 4.0);
+
+        let mixed = selection_style(&scene, &[1, 2]);
+        assert_eq!(mixed.blur_radius, StyleField::Mixed);
+        assert!(mixed.blur_supported);
+
+        let stored = match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => serde_json::to_value(rect).unwrap(),
+            other => panic!("rect, got {other:?}"),
+        };
+        assert_eq!(stored["style"]["blur_radius"], 4.0);
+        let restored: Rectangle = serde_json::from_value(stored).unwrap();
+        assert_eq!(restored.style.blur_radius, 4.0);
+        let size = serde_json::to_value(Vec2::new(10.0, 10.0)).unwrap();
+        let legacy = serde_json::json!({
+            "props": { "id": 9 },
+            "size": size,
+        });
+        let old: Rectangle = serde_json::from_value(legacy).unwrap();
+        assert_eq!(old.style.blur_radius, 0.0);
+        assert!(serde_json::to_value(&old).unwrap()["style"]
+            .get("blur_radius")
+            .is_none());
+        let negative = serde_json::json!({
+            "version": 1,
+            "elements": [{
+                "type": "rectangle",
+                "data": {
+                    "props": { "id": 9 },
+                    "size": size,
+                    "style": { "blur_radius": -4.0 }
+                }
+            }]
+        });
+        let loaded = Scene::from_json(&negative.to_string()).unwrap();
+        assert_eq!(shape_style(&loaded, 9).blur_radius, 0.0);
+        assert!(!loaded.to_json().unwrap().contains("blur_radius"));
+
+        let mut cache = VertexCache::new();
+        let synced = cache.sync(&mut scene);
+        assert!(synced.regenerated >= 1);
+        let painted = cache.fill_slice(1).unwrap();
+        assert!(painted.len() > 6);
+        assert!(painted.iter().any(|vertex| vertex.color[3] < 0.2));
+        assert!(painted.iter().any(|vertex| vertex.color[3] > 0.9));
+        assert!(cache.sync(&mut scene).geometry_unchanged);
+        assert!(!scene.has_dirty_elements());
+
+        let sample = sample_paint_at(&scene, Vec2::new(200.0, 0.0)).unwrap();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1], &sample.to_style_patch()).unwrap()),
+            &mut scene,
+        );
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style.fill, Some(Color::BLUE));
+                assert_eq!(rect.style.blur_radius, 4.0);
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        assert!(history.undo(&mut scene));
+        assert!(history.undo(&mut scene));
+        assert!(scene.has_dirty_elements());
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style.fill, Some(Color::RED));
+                assert_eq!(rect.style.blur_radius, 0.0);
+                assert_eq!(rect.generate_fill_vertices().len(), 6);
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        let _ = cache.sync(&mut scene);
+        assert!(!scene.has_dirty_elements());
+
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let mut grouped = SetStyleCommand::from_patch(
+            &scene,
+            &[group_id],
+            &StylePatch {
+                blur_radius: Some(6.0),
+                ..StylePatch::default()
+            },
+        )
+        .unwrap();
+        grouped.execute(&mut scene);
+        assert_eq!(shape_style(&scene, 1).blur_radius, 6.0);
+        assert_eq!(shape_style(&scene, 2).blur_radius, 6.0);
+        assert!(matches!(scene.get(group_id), Some(AnyElement::Group(_))));
+        assert_eq!(
+            selection_style(&scene, &[group_id]).blur_radius,
+            StyleField::Uniform(6.0)
+        );
+
+        scene.add_frame(Frame::new(10, Vec2::new(400.0, 0.0), Vec2::new(80.0, 80.0)));
+        scene.add_rect(Rectangle::new(
+            11,
+            Vec2::new(400.0, 0.0),
+            Vec2::new(20.0, 20.0),
+        ));
+        let mut frame_history = CommandHistory::new();
+        assert!(apply_reparent_into_frame(
+            &mut frame_history,
+            &mut scene,
+            &[11],
+            10
+        ));
+        let mut frame_blur = SetStyleCommand::from_patch(
+            &scene,
+            &[10],
+            &StylePatch {
+                blur_radius: Some(5.0),
+                ..StylePatch::default()
+            },
+        )
+        .unwrap();
+        frame_blur.execute(&mut scene);
+        assert_eq!(shape_style(&scene, 10).blur_radius, 5.0);
+        assert_eq!(shape_style(&scene, 11).blur_radius, 0.0);
+        assert!(selection_style(&scene, &[10]).blur_supported);
+
+        let mut text = Text::new(3, Vec2::new(0.0, 300.0), "Hi");
+        text.texture_id = Some("glyph".to_string());
+        let revision = text.revision;
+        text.raster_revision = revision;
+        scene.add_text(text);
+        let mut text_blur = SetStyleCommand::from_patch(
+            &scene,
+            &[3],
+            &StylePatch {
+                blur_radius: Some(3.0),
+                ..StylePatch::default()
+            },
+        )
+        .unwrap();
+        text_blur.execute(&mut scene);
+        match scene.get(3).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.blur_radius, 3.0);
+                assert_eq!(text.texture_id.as_deref(), Some("glyph"));
+                assert_eq!(text.raster_revision, revision);
+            }
+            other => panic!("text, got {other:?}"),
+        }
+
+        assert!(scene.set_visible(1, false));
+        let mut hidden = VertexCache::new();
+        let _ = hidden.sync(&mut scene);
+        assert!(hidden.fill_slice(1).is_none_or(|slice| slice.is_empty()));
     }
 }

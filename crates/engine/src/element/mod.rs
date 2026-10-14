@@ -1,6 +1,7 @@
 //! 元素定义
 //!
 //! 提供无限画布上的各种图形元素
+pub(crate) mod blur;
 pub mod circle;
 pub mod frame;
 mod gradient;
@@ -306,6 +307,17 @@ pub struct ElementStyle {
         skip_serializing_if = "crate::blend::blend_is_normal"
     )]
     pub blend_mode: BlendMode,
+    /// 图层高斯模糊的标准差，和元素尺寸同一单位。缺省 0（关闭）。
+    ///
+    /// 0 不写入 JSON。命中测试仍用未模糊的轴对齐包围盒，光晕点不中。
+    /// 绘制是轮廓上的高斯 CDF 环，不是离屏卷积。和渐变同时打开时，软边用包围盒中心
+    /// 采到的一个颜色，不卷积整段渐变。负数在使用时收成 0。改模糊不清混合模式。
+    #[serde(default, skip_serializing_if = "blur_is_zero")]
+    pub blur_radius: f32,
+}
+
+fn blur_is_zero(value: &f32) -> bool {
+    !value.is_finite() || *value <= 0.0
 }
 
 impl ElementStyle {
@@ -326,6 +338,7 @@ impl ElementStyle {
             fill_center: Vec2::ZERO,
             fill_radius: 0.0,
             blend_mode: BlendMode::Normal,
+            blur_radius: 0.0,
         }
     }
 

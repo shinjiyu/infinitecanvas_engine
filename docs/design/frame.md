@@ -18,7 +18,7 @@ F 拖拽 ──► AddElementCommand（Frame）
 | --- | --- | --- |
 | `name` | `"Frame"` | 图层面板和属性面板上的名字 |
 | `size` | 100×100 | 局部宽高。中心是 `transform.translation` |
-| `style` | 浅底 + 细描边 | 填充和描边。投影走 `ElementStyle.shadow` |
+| `style` | 浅底 + 细描边 | 填充和描边。投影走 `ElementStyle.shadow`。图层模糊走 `blur_radius` |
 | `children` | `[]` | 直接子元素，顺序即大纲顺序 |
 
 JSON 类型是 `frame`。上面四个字段都 `serde(default)`，旧文档没有画板仍然能读。
@@ -37,3 +37,5 @@ JSON 类型是 `frame`。上面四个字段都 `serde(default)`，旧文档没�
 `export_frame_png` / `export_frame_svg` 的区域就是画板的轴对齐世界包围盒，没有额外留白。只画这块画板和它的子孙，压在上面但不是子元素的图形不画进去。空画板仍导出矩形尺寸。
 
 `selectionOnly` 在选区根全是画板时同样裁到这些包围盒的并集。混有其它根元素时仍用原来的外扩选区。
+
+画板自己的图层模糊如果超出世界包围盒，PNG 和 SVG 导出都会裁掉这段光晕。画布绘制不按画板裁剪。

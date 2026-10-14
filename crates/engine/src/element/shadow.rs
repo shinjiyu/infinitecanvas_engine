@@ -270,7 +270,7 @@ fn finite_unit(value: f32) -> f32 {
     }
 }
 
-fn open_ring(outline: &[Vec2]) -> Vec<Vec2> {
+pub(crate) fn open_ring(outline: &[Vec2]) -> Vec<Vec2> {
     let mut points = Vec::new();
     for point in outline {
         if !point.x.is_finite() || !point.y.is_finite() {
@@ -294,7 +294,7 @@ fn open_ring(outline: &[Vec2]) -> Vec<Vec2> {
     points
 }
 
-fn fan_fill(ring: &[Vec2], color: Color, transform: &Transform) -> Vec<Vertex> {
+pub(crate) fn fan_fill(ring: &[Vec2], color: Color, transform: &Transform) -> Vec<Vertex> {
     let center = transform.transform_point(centroid(ring));
     let mut vertices = Vec::with_capacity(ring.len() * 3);
     for index in 0..ring.len() {
@@ -307,7 +307,7 @@ fn fan_fill(ring: &[Vec2], color: Color, transform: &Transform) -> Vec<Vertex> {
     vertices
 }
 
-fn feather_strip(
+pub(crate) fn feather_strip(
     inner: &[Vec2],
     outer: &[Vec2],
     inner_color: Color,
@@ -347,7 +347,7 @@ fn signed_area(points: &[Vec2]) -> f32 {
     sum * 0.5
 }
 
-fn outward_normals(points: &[Vec2]) -> Vec<Vec2> {
+pub(crate) fn outward_normals(points: &[Vec2]) -> Vec<Vec2> {
     let count = points.len();
     let clockwise = signed_area(points) >= 0.0;
     let mut edge_normals = Vec::with_capacity(count);
@@ -391,7 +391,7 @@ fn miter_normal(first: Vec2, second: Vec2) -> Vec2 {
     direction / denom
 }
 
-fn capsule_outline(centerline: &[Vec2], half_width: f32) -> Vec<Vec2> {
+pub(crate) fn capsule_outline(centerline: &[Vec2], half_width: f32) -> Vec<Vec2> {
     let points = open_ring_open(centerline);
     if points.len() < 2 || !half_width.is_finite() || half_width <= 1.0e-4 {
         return Vec::new();

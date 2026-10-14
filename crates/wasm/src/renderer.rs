@@ -109,8 +109,9 @@ pub struct WebGPURenderer {
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
 
-    // 纹理渲染管线
+    // 纹理渲染管线。模糊图片和文本走第二条入口，避免锐利图也做 25 次采样。
     texture_pipeline: wgpu::RenderPipeline,
+    texture_blur_pipeline: wgpu::RenderPipeline,
     texture_sampler: wgpu::Sampler,
     texture_manager: TextureManager,
 
@@ -556,6 +557,71 @@ impl WebGPURenderer {
             cache: None,
         });
 
+        let texture_blur_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Texture Blur Pipeline"),
+                layout: Some(&texture_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &texture_shader,
+                    entry_point: Some("vs_blur"),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                offset: 0,
+                                shader_location: 0,
+                                format: wgpu::VertexFormat::Float32x2,
+                            },
+                            wgpu::VertexAttribute {
+                                offset: 8,
+                                shader_location: 1,
+                                format: wgpu::VertexFormat::Float32x4,
+                            },
+                            wgpu::VertexAttribute {
+                                offset: 24,
+                                shader_location: 2,
+                                format: wgpu::VertexFormat::Float32x2,
+                            },
+                            // blur_uv：σ，单位是 UV。形状顶点保持 0，这条管线不读它们。
+                            wgpu::VertexAttribute {
+                                offset: 32,
+                                shader_location: 3,
+                                format: wgpu::VertexFormat::Float32x2,
+                            },
+                        ],
+                    }],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &texture_shader,
+                    entry_point: Some("fs_blur"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_config.format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
         // 18. 创建纹理管理器
         let device_arc = Arc::new(device);
         let queue_arc = Arc::new(queue);
@@ -595,6 +661,7 @@ impl WebGPURenderer {
             uniform_buffer,
             uniform_bind_group,
             texture_pipeline,
+            texture_blur_pipeline,
             texture_sampler,
             texture_manager,
             placeholder_texture,
@@ -747,9 +814,13 @@ impl WebGPURenderer {
                     draw_calls += 1;
                 }
 
-                render_pass.set_pipeline(&self.texture_pipeline);
                 for index in 0..textured_count {
                     let draw = &self.vertex_cache.textured_draws()[index];
+                    if draw.blurred {
+                        render_pass.set_pipeline(&self.texture_blur_pipeline);
+                    } else {
+                        render_pass.set_pipeline(&self.texture_pipeline);
+                    }
                     let texture_id = draw.texture_id.clone();
                     let range = draw.vertex_offset..draw.vertex_offset + draw.vertex_count;
                     let (texture_view, _placeholder) =
@@ -1130,31 +1201,37 @@ impl WebGPURenderer {
                 position: tl,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: tr,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: br,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: tl,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: br,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: bl,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
         ]
     }
@@ -1180,44 +1257,52 @@ impl WebGPURenderer {
                 position: tl,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: tr,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             // 右边
             Vertex {
                 position: tr,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: br,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             // 下边
             Vertex {
                 position: br,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: bl,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             // 左边
             Vertex {
                 position: bl,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
             Vertex {
                 position: tl,
                 color,
                 uv,
+                blur_uv: [0.0, 0.0],
             },
         ]
     }
@@ -1318,6 +1403,7 @@ fn push_quad_fill(fill: &mut Vec<Vertex>, corners: [Vec2; 4], color: [f32; 4]) {
         position: [point.x, point.y],
         color,
         uv,
+        blur_uv: [0.0, 0.0],
     };
     fill.extend([
         vertex(corners[0]),
@@ -1335,11 +1421,13 @@ fn push_segment(stroke: &mut Vec<Vertex>, from: Vec2, to: Vec2, color: [f32; 4])
         position: [from.x, from.y],
         color,
         uv,
+        blur_uv: [0.0, 0.0],
     });
     stroke.push(Vertex {
         position: [to.x, to.y],
         color,
         uv,
+        blur_uv: [0.0, 0.0],
     });
 }
 
@@ -1353,16 +1441,19 @@ fn push_disc(fill: &mut Vec<Vertex>, center: Vec2, radius: f32, color: [f32; 4])
             position: [center.x, center.y],
             color,
             uv,
+            blur_uv: [0.0, 0.0],
         });
         fill.push(Vertex {
             position: [center.x + a0.cos() * radius, center.y + a0.sin() * radius],
             color,
             uv,
+            blur_uv: [0.0, 0.0],
         });
         fill.push(Vertex {
             position: [center.x + a1.cos() * radius, center.y + a1.sin() * radius],
             color,
             uv,
+            blur_uv: [0.0, 0.0],
         });
     }
 }
