@@ -543,6 +543,28 @@ export class InfiniteCanvas {
      */
     constructor();
     /**
+     * 用方向键平移当前选中元素，并记入一条撤销记录。
+     *
+     * 只移动顶层、可见、未锁定的选中元素。选中组时移动组根，子孙跟着走，只改平移。
+     * 步长是世界单位，与缩放无关：默认 1，`shift` 为 true 时为 10。
+     * 多选合成一条历史。空选、锁定或无法识别的方向不入栈。不经过拖拽吸附。
+     *
+     * 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次平移。
+     *
+     * # 参数
+     * - `direction`: `"left"`、`"right"`、`"up"`、`"down"`，或 `"ArrowLeft"` 等
+     * - `shift`: 为 true 时步长 ×10
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.nudge_selection("right", event.shiftKey);
+     * ```
+     */
+    nudge_selection(direction: string, shift: boolean): boolean;
+    /**
      * 平移视口
      *
      * # 参数
@@ -848,6 +870,7 @@ export interface InitOutput {
     readonly infinitecanvas_minimap_viewport_rect: (a: number, b: number, c: number, d: number) => any;
     readonly infinitecanvas_move_selection: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_new: () => [number, number, number];
+    readonly infinitecanvas_nudge_selection: (a: number, b: number, c: number, d: number) => number;
     readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_paste_elements: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
     readonly infinitecanvas_pop_temporary_tool: (a: number) => void;

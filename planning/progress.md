@@ -2,6 +2,20 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #43: 方向键微调
+
+- [x] `NudgeElementsCommand`：顶层可见、未锁定；选中组则平移组根。只改平移，标脏并入撤销栈
+- [x] 步长 1 世界单位，与缩放无关；Shift ×10。多选一条历史
+- [x] 单选 / 多选 / 组、Shift、撤销重做、锁定或空选 no-op
+- [x] Demo：非输入框方向键调用 `nudge_selection`；不抢空格平移、撤销、复制粘贴和工具键
+- [ ] #26 快捷键帮助面板尚未合并，未登记「方向键微调 / Shift 加速」
+
+```text
+方向键 ──► nudge_targets ──► NudgeElementsCommand ──► translate_ids
+                                                      ├─ 一条历史
+                                                      └─ mark_dirty
+```
+
 ## Issue #29: 小地图
 
 - [x] 场景包围盒 → 小地图像素，以及像素反算世界坐标（空场景、单元素、极端宽高比）

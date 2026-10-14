@@ -38,9 +38,10 @@ pub mod viewport;
 
 // 重导出核心类型
 pub use command::{
-    AddElementCommand, Command, CommandHistory, DuplicateElementsCommand, MoveCommand,
-    PasteElementsCommand, RemoveElementCommand, ReorderOutlineCommand, SetStyleCommand,
-    TransformElementsCommand, UpdateTextCommand,
+    apply_nudge, AddElementCommand, Command, CommandHistory, DuplicateElementsCommand, MoveCommand,
+    NudgeDirection, NudgeElementsCommand, PasteElementsCommand, RemoveElementCommand,
+    ReorderOutlineCommand, SetStyleCommand, TransformElementsCommand, UpdateTextCommand,
+    NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{
     Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Rectangle,

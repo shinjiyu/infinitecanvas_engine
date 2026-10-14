@@ -1037,6 +1037,36 @@ export class InfiniteCanvas {
         return this;
     }
     /**
+     * 用方向键平移当前选中元素，并记入一条撤销记录。
+     *
+     * 只移动顶层、可见、未锁定的选中元素。选中组时移动组根，子孙跟着走，只改平移。
+     * 步长是世界单位，与缩放无关：默认 1，`shift` 为 true 时为 10。
+     * 多选合成一条历史。空选、锁定或无法识别的方向不入栈。不经过拖拽吸附。
+     *
+     * 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次平移。
+     *
+     * # 参数
+     * - `direction`: `"left"`、`"right"`、`"up"`、`"down"`，或 `"ArrowLeft"` 等
+     * - `shift`: 为 true 时步长 ×10
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.nudge_selection("right", event.shiftKey);
+     * ```
+     * @param {string} direction
+     * @param {boolean} shift
+     * @returns {boolean}
+     */
+    nudge_selection(direction, shift) {
+        const ptr0 = passStringToWasm0(direction, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_nudge_selection(this.__wbg_ptr, ptr0, len0, shift);
+        return ret !== 0;
+    }
+    /**
      * 平移视口
      *
      * # 参数
@@ -3175,7 +3205,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2552, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2559, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },

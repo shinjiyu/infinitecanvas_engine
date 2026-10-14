@@ -20,7 +20,7 @@ Scene
 | `ElementProps.visible` / `locked` | 每个元素 | 大纲上的眼睛和锁 |
 | `SceneTree` | 查询结果 | 根 → 组 → 叶子的只读快照 |
 
-子元素的 `transform` 是世界变换。移动、旋转或缩放组时，`Scene` 把同一增量写到每个后代（`Transform::rebase_between`）。#7 的手柄通过 `Scene::apply_world_transforms` 走这条路径。
+子元素的 `transform` 是世界变换。移动、旋转或缩放组时，`Scene` 把同一增量写到每个后代（`Transform::rebase_between`）。#7 的手柄通过 `Scene::apply_world_transforms` 走这条路径。方向键微调（`NudgeElementsCommand`）选中组时只平移组根，步长是固定世界单位，不走拖拽吸附。见 [nudge.md](./nudge.md)。
 
 ## API
 
