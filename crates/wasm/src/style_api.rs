@@ -6,9 +6,10 @@
 
 use infinitecanvas_engine::{
     apply_style_snapshot, capture_style, math::Color, selection_style, style_locked,
-    style_target_ids, ElementId, SetStyleCommand, StyleField, StylePatch, StyleSnapshot,
+    style_target_ids, ElementId, SetStyleCommand, StrokeCap, StrokeJoin, StyleField, StylePatch,
+    StyleSnapshot,
 };
-use js_sys::{Object, Reflect};
+use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
 
 use crate::InfiniteCanvas;
@@ -30,6 +31,8 @@ impl InfiniteCanvas {
     /// - `fillNone`：大家都没有填充或描边
     /// - `fillSupported`：选择里有这个字段
     /// - `strokeWidth` / `opacity` / `fontSize`：统一数值，混合或不支持时为 null
+    /// - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
+    ///   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -51,6 +54,9 @@ impl InfiniteCanvas {
         write_number(&obj, "opacity", &style.opacity);
         write_number(&obj, "fontSize", &style.font_size);
         write_color(&obj, "textColor", &style.text_color);
+        write_dash(&obj, &style.stroke_dash);
+        write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
+        write_label(&obj, "strokeJoin", &style.stroke_join, StrokeJoin::as_str);
         obj.into()
     }
 
@@ -58,6 +64,8 @@ impl InfiniteCanvas {
     ///
     /// 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
     /// `strokeWidth`、`opacity`、`fontSize` 是数字。`textColor` 是十六进制颜色。
+    /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
+    /// 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
     /// 没有任何变化时返回 false，也不入栈。
     #[wasm_bindgen]
     pub fn set_selection_style(&mut self, patch: JsValue) -> bool {
@@ -206,6 +214,55 @@ fn write_color(obj: &Object, name: &str, field: &StyleField<Color>) {
     }
 }
 
+fn write_dash(obj: &Object, field: &StyleField<Vec<f32>>) {
+    match field {
+        StyleField::Absent => {
+            js_set(obj, "strokeDash", JsValue::NULL);
+            js_set(obj, "strokeDashMixed", JsValue::from(false));
+            js_set(obj, "strokeDashSupported", JsValue::from(false));
+        }
+        StyleField::Mixed => {
+            js_set(obj, "strokeDash", JsValue::NULL);
+            js_set(obj, "strokeDashMixed", JsValue::from(true));
+            js_set(obj, "strokeDashSupported", JsValue::from(true));
+        }
+        StyleField::Uniform(values) => {
+            let array = Array::new();
+            for value in values {
+                array.push(&JsValue::from(*value));
+            }
+            js_set(obj, "strokeDash", array.into());
+            js_set(obj, "strokeDashMixed", JsValue::from(false));
+            js_set(obj, "strokeDashSupported", JsValue::from(true));
+        }
+    }
+}
+
+fn write_label<T: Copy>(
+    obj: &Object,
+    name: &str,
+    field: &StyleField<T>,
+    label: fn(T) -> &'static str,
+) {
+    match field {
+        StyleField::Absent => {
+            js_set(obj, name, JsValue::NULL);
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(false));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(false));
+        }
+        StyleField::Mixed => {
+            js_set(obj, name, JsValue::NULL);
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(true));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(true));
+        }
+        StyleField::Uniform(value) => {
+            js_set(obj, name, JsValue::from_str(label(*value)));
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(false));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(true));
+        }
+    }
+}
+
 fn write_number(obj: &Object, name: &str, field: &StyleField<f32>) {
     match field {
         StyleField::Absent => {
@@ -237,7 +294,43 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         opacity: read_f32(value, "opacity"),
         font_size: read_f32(value, "fontSize"),
         text_color: read_color(value, "textColor"),
+        stroke_dash: read_dash(value, "strokeDash"),
+        stroke_cap: read_label(value, "strokeCap", StrokeCap::parse),
+        stroke_join: read_label(value, "strokeJoin", StrokeJoin::parse),
     })
+}
+
+fn read_dash(value: &JsValue, key: &str) -> Option<Vec<f32>> {
+    if !has_key(value, key) {
+        return None;
+    }
+    let current = Reflect::get(value, &JsValue::from_str(key)).ok()?;
+    if current.is_null() || current.is_undefined() {
+        return Some(Vec::new());
+    }
+    if !Array::is_array(&current) {
+        return None;
+    }
+    let array = Array::from(&current);
+    let mut dash = Vec::with_capacity(array.length() as usize);
+    for item in array.iter() {
+        let Some(number) = item.as_f64() else {
+            continue;
+        };
+        if number.is_finite() {
+            dash.push(number as f32);
+        }
+    }
+    Some(dash)
+}
+
+fn read_label<T>(value: &JsValue, key: &str, parse: fn(&str) -> Option<T>) -> Option<T> {
+    if !has_key(value, key) {
+        return None;
+    }
+    let current = Reflect::get(value, &JsValue::from_str(key)).ok()?;
+    let text = current.as_string()?;
+    parse(&text)
 }
 
 fn read_color_update(value: &JsValue, key: &str) -> Option<Option<Color>> {

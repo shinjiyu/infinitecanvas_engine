@@ -1484,6 +1484,7 @@ mod tests {
             opacity: Some(0.4),
             font_size: Some(28.0),
             text_color: Some(Color::GREEN),
+            ..StylePatch::default()
         };
         let mut history = CommandHistory::new();
         history.execute(

@@ -53,7 +53,7 @@ pub use command::{
 };
 pub use element::{
     Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Rectangle,
-    Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
+    StrokeCap, StrokeJoin, Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };
 pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,

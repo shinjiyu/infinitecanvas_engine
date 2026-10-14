@@ -43,6 +43,88 @@ fn default_opacity() -> f32 {
     1.0
 }
 
+fn cap_is_butt(cap: &StrokeCap) -> bool {
+    *cap == StrokeCap::Butt
+}
+
+fn join_is_miter(join: &StrokeJoin) -> bool {
+    *join == StrokeJoin::Miter
+}
+
+/// 描边端点。
+///
+/// 闭合实线（矩形、圆）没有端点，线帽只作用在开口路径和每一段虚线的两端。
+/// JSON 用小写名字，缺省为 [`StrokeCap::Butt`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StrokeCap {
+    /// 在端点处截平，不额外伸出。
+    #[default]
+    Butt,
+    /// 以半线宽为半径的半圆。
+    Round,
+    /// 沿切线方向伸出半线宽的矩形。
+    Square,
+}
+
+impl StrokeCap {
+    /// SVG `stroke-linecap` 和属性面板用的名字。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Butt => "butt",
+            Self::Round => "round",
+            Self::Square => "square",
+        }
+    }
+
+    /// 解析 `butt` / `round` / `square`。无法识别时返回 `None`。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "butt" => Some(Self::Butt),
+            "round" => Some(Self::Round),
+            "square" => Some(Self::Square),
+            _ => None,
+        }
+    }
+}
+
+/// 折线拐角。
+///
+/// 斜接长度超过线宽的 4 倍时退化为斜角，和实线描边原来的限制相同。
+/// JSON 用小写名字，缺省为 [`StrokeJoin::Miter`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StrokeJoin {
+    /// 沿两侧外轮廓延长到交点。缺省值。
+    #[default]
+    Miter,
+    /// 以外侧圆弧连接。
+    Round,
+    /// 直接连两侧外轮廓的端点。
+    Bevel,
+}
+
+impl StrokeJoin {
+    /// SVG `stroke-linejoin` 和属性面板用的名字。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Miter => "miter",
+            Self::Round => "round",
+            Self::Bevel => "bevel",
+        }
+    }
+
+    /// 解析 `miter` / `round` / `bevel`。无法识别时返回 `None`。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "miter" => Some(Self::Miter),
+            "round" => Some(Self::Round),
+            "bevel" => Some(Self::Bevel),
+            _ => None,
+        }
+    }
+}
+
 /// 元素通用属性
 ///
 /// # 职责
@@ -168,6 +250,16 @@ pub struct ElementStyle {
     /// 不透明度 (0.0-1.0)
     #[serde(default = "default_opacity")]
     pub opacity: f32,
+    /// 虚线图案。空数组是实线；奇数长度在绘制时按 SVG 规则重复一遍。
+    /// 例如 `[8, 4]` 是虚线，`[2, 4]` 是点线。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stroke_dash: Vec<f32>,
+    /// 线帽。缺省平头。
+    #[serde(default, skip_serializing_if = "cap_is_butt")]
+    pub stroke_cap: StrokeCap,
+    /// 线结。缺省斜接。
+    #[serde(default, skip_serializing_if = "join_is_miter")]
+    pub stroke_join: StrokeJoin,
 }
 
 impl ElementStyle {
@@ -178,6 +270,9 @@ impl ElementStyle {
             stroke: None,
             stroke_width: 1.0,
             opacity: 1.0,
+            stroke_dash: Vec::new(),
+            stroke_cap: StrokeCap::Butt,
+            stroke_join: StrokeJoin::Miter,
         }
     }
 
@@ -186,8 +281,7 @@ impl ElementStyle {
         Self {
             fill: Some(color),
             stroke: None,
-            stroke_width: 1.0,
-            opacity: 1.0,
+            ..Self::new()
         }
     }
 
@@ -196,8 +290,7 @@ impl ElementStyle {
         Ok(Self {
             fill: Some(Color::from_hex(hex)?),
             stroke: None,
-            stroke_width: 1.0,
-            opacity: 1.0,
+            ..Self::new()
         })
     }
 
@@ -207,7 +300,7 @@ impl ElementStyle {
             fill: None,
             stroke: Some(color),
             stroke_width: width,
-            opacity: 1.0,
+            ..Self::new()
         }
     }
 
@@ -217,7 +310,7 @@ impl ElementStyle {
             fill: None,
             stroke: Some(Color::from_hex(hex)?),
             stroke_width: width,
-            opacity: 1.0,
+            ..Self::new()
         })
     }
 }

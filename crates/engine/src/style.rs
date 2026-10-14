@@ -14,7 +14,7 @@
 //!                                      └─ 图片只改 alpha
 //! ```
 
-use crate::element::{ElementId, ElementStyle};
+use crate::element::{ElementId, ElementStyle, StrokeCap, StrokeJoin};
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::Color;
 
@@ -72,6 +72,12 @@ pub struct StylePatch {
     pub font_size: Option<f32>,
     /// 文本填充色。
     pub text_color: Option<Color>,
+    /// 形状虚线。空数组表示改回实线。文本描边不读这个字段。
+    pub stroke_dash: Option<Vec<f32>>,
+    /// 形状线帽。文本描边不读这个字段。
+    pub stroke_cap: Option<StrokeCap>,
+    /// 形状线结。文本描边不读这个字段。
+    pub stroke_join: Option<StrokeJoin>,
 }
 
 /// 当前选择的公共样式。
@@ -89,6 +95,12 @@ pub struct SelectionStyle {
     pub font_size: StyleField<f32>,
     /// 文本填充色。
     pub text_color: StyleField<Color>,
+    /// 形状虚线。空数组是实线。文本不参与。
+    pub stroke_dash: StyleField<Vec<f32>>,
+    /// 形状线帽。文本不参与。
+    pub stroke_cap: StyleField<StrokeCap>,
+    /// 形状线结。文本不参与。
+    pub stroke_join: StyleField<StrokeJoin>,
     /// 选择里有形状（含组内的形状）。
     pub has_shape: bool,
     /// 选择里有文本（含组内的文本）。
@@ -124,6 +136,15 @@ impl StyleSnapshot {
                 }
                 if let Some(opacity) = finite_opacity(patch.opacity) {
                     style.opacity = opacity;
+                }
+                if let Some(dash) = &patch.stroke_dash {
+                    style.stroke_dash = sanitize_dash(dash);
+                }
+                if let Some(cap) = patch.stroke_cap {
+                    style.stroke_cap = cap;
+                }
+                if let Some(join) = patch.stroke_join {
+                    style.stroke_join = join;
                 }
             }
             Self::Text(text) => {
@@ -246,6 +267,9 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut opacities = Vec::new();
     let mut font_sizes = Vec::new();
     let mut text_colors = Vec::new();
+    let mut dashes = Vec::new();
+    let mut caps = Vec::new();
+    let mut joins = Vec::new();
     let mut has_shape = false;
     let mut has_text = false;
     let mut has_image = false;
@@ -258,6 +282,9 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 strokes.push(style.stroke);
                 widths.push(style.stroke_width);
                 opacities.push(style.opacity);
+                dashes.push(style.stroke_dash);
+                caps.push(style.stroke_cap);
+                joins.push(style.stroke_join);
             }
             Some(StyleSnapshot::Text(text)) => {
                 has_text = true;
@@ -282,9 +309,27 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         opacity: fold(opacities),
         font_size: fold(font_sizes),
         text_color: fold(text_colors),
+        stroke_dash: fold(dashes),
+        stroke_cap: fold(caps),
+        stroke_join: fold(joins),
         has_shape,
         has_text,
         has_image,
+    }
+}
+
+/// 丢掉非有限值。全是 0 时收成空数组，和实线是同一种样式。
+fn sanitize_dash(dash: &[f32]) -> Vec<f32> {
+    let values: Vec<f32> = dash
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .map(|value| value.max(0.0))
+        .collect();
+    if values.iter().all(|value| *value <= 1e-6) {
+        Vec::new()
+    } else {
+        values
     }
 }
 
@@ -330,7 +375,7 @@ fn finite_font(value: Option<f32>) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::{Line, Path, Rectangle, Text};
+    use crate::element::{Line, Path, Rectangle, StrokeCap, StrokeJoin, Text};
     use crate::{Circle, Command, CommandHistory, SetStyleCommand, VertexCache};
     use infinitecanvas_math::Vec2;
 
@@ -431,6 +476,7 @@ mod tests {
             opacity: Some(0.5),
             font_size: Some(20.0),
             text_color: Some(Color::GREEN),
+            ..StylePatch::default()
         };
         let mut command = SetStyleCommand::from_patch(&scene, &[1, 2, 3, 4], &patch).unwrap();
         command.execute(&mut scene);
@@ -553,6 +599,9 @@ mod tests {
         assert_eq!(image_only.opacity, StyleField::Uniform(0.8));
         assert_eq!(image_only.fill, StyleField::Absent);
         assert_eq!(image_only.stroke_width, StyleField::Absent);
+        assert_eq!(image_only.stroke_dash, StyleField::Absent);
+        assert_eq!(image_only.stroke_cap, StyleField::Absent);
+        assert_eq!(image_only.stroke_join, StyleField::Absent);
         assert!(!image_only.is_empty());
 
         let together = selection_style(&scene, &[group_id]);
@@ -604,5 +653,121 @@ mod tests {
         }
         assert_eq!(scene.asset_refcount(&asset_id), 1);
         assert_eq!(shape_fill(&scene, 2), Some(Color::RED));
+    }
+
+    #[test]
+    fn stroke_dash_cap_join_round_trip_undo_and_legacy_defaults() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(40.0, 20.0)));
+        scene.add_line(Line::from_world(
+            2,
+            Vec2::ZERO,
+            Vec2::new(80.0, 0.0),
+            ElementStyle::stroke_only(Color::BLACK, 4.0),
+            true,
+        ));
+        scene.add_path(Path::from_world_points(
+            3,
+            &[Vec2::ZERO, Vec2::new(30.0, 10.0), Vec2::new(40.0, 0.0)],
+            ElementStyle::stroke_only(Color::BLACK, 4.0),
+        ));
+        scene.add_circle(Circle::new(4, Vec2::new(10.0, 10.0), 12.0));
+
+        let patch = StylePatch {
+            fill: Some(Some(Color::RED)),
+            stroke_width: Some(6.0),
+            opacity: Some(0.5),
+            stroke_dash: Some(vec![8.0, 4.0, f32::NAN]),
+            stroke_cap: Some(StrokeCap::Round),
+            stroke_join: Some(StrokeJoin::Bevel),
+            ..StylePatch::default()
+        };
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1, 2, 3, 4], &patch).unwrap()),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert!(scene.has_dirty_elements());
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"stroke_dash\""));
+        assert!(json.contains("\"stroke_cap\":\"round\""));
+        assert!(json.contains("\"stroke_join\":\"bevel\""));
+        let restored = Scene::from_json(&json).unwrap();
+        for id in [1, 2, 3, 4] {
+            match capture_style(&restored, id) {
+                Some(StyleSnapshot::Shape(style)) => {
+                    assert_eq!(style.stroke_dash, vec![8.0, 4.0]);
+                    assert_eq!(style.stroke_cap, StrokeCap::Round);
+                    assert_eq!(style.stroke_join, StrokeJoin::Bevel);
+                    assert_eq!(style.stroke_width, 6.0);
+                    assert!((style.opacity - 0.5).abs() < 1e-5);
+                }
+                other => panic!("shape {id}, got {other:?}"),
+            }
+        }
+        match capture_style(&restored, 1) {
+            Some(StyleSnapshot::Shape(style)) => assert_eq!(style.fill, Some(Color::RED)),
+            other => panic!("rect, got {other:?}"),
+        }
+
+        assert!(history.undo(&mut scene));
+        match capture_style(&scene, 2) {
+            Some(StyleSnapshot::Shape(style)) => {
+                assert!(style.stroke_dash.is_empty());
+                assert_eq!(style.stroke_cap, StrokeCap::Butt);
+                assert_eq!(style.stroke_join, StrokeJoin::Miter);
+                assert_eq!(style.stroke_width, 4.0);
+            }
+            other => panic!("line, got {other:?}"),
+        }
+        assert!(history.redo(&mut scene));
+        match capture_style(&scene, 3) {
+            Some(StyleSnapshot::Shape(style)) => {
+                assert_eq!(style.stroke_dash, vec![8.0, 4.0]);
+                assert_eq!(style.stroke_cap, StrokeCap::Round);
+                assert_eq!(style.stroke_join, StrokeJoin::Bevel);
+            }
+            other => panic!("path, got {other:?}"),
+        }
+
+        let mixed = StylePatch {
+            stroke_cap: Some(StrokeCap::Square),
+            ..StylePatch::default()
+        };
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1], &mixed).unwrap()),
+            &mut scene,
+        );
+        let summary = selection_style(&scene, &[1, 2]);
+        assert_eq!(summary.stroke_cap, StyleField::Mixed);
+        assert_eq!(summary.stroke_dash, StyleField::Uniform(vec![8.0, 4.0]));
+        assert_eq!(summary.stroke_join, StyleField::Uniform(StrokeJoin::Bevel));
+        assert_eq!(summary.opacity, StyleField::Uniform(0.5));
+
+        let size = serde_json::to_value(Vec2::new(8.0, 6.0)).unwrap();
+        let start = serde_json::to_value(Vec2::ZERO).unwrap();
+        let end = serde_json::to_value(Vec2::new(12.0, 0.0)).unwrap();
+        let legacy = serde_json::json!({
+            "version": 1,
+            "elements": [
+                { "type": "rectangle", "data": { "props": { "id": 1 }, "size": size } },
+                { "type": "line", "data": { "props": { "id": 2 }, "start": start, "end": end } },
+                { "type": "path", "data": { "props": { "id": 3 } } },
+                { "type": "circle", "data": { "props": { "id": 4 }, "radius": 5.0 } }
+            ]
+        });
+        let legacy_scene = Scene::from_json(&legacy.to_string()).unwrap();
+        for id in [1, 2, 3, 4] {
+            match capture_style(&legacy_scene, id) {
+                Some(StyleSnapshot::Shape(style)) => {
+                    assert!(style.stroke_dash.is_empty(), "id {id} dash");
+                    assert_eq!(style.stroke_cap, StrokeCap::Butt);
+                    assert_eq!(style.stroke_join, StrokeJoin::Miter);
+                }
+                other => panic!("legacy {id}, got {other:?}"),
+            }
+        }
     }
 }
