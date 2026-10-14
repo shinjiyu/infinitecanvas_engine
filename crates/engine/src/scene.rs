@@ -21,7 +21,7 @@
 use crate::asset::{AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
 use crate::element::{Circle, Element, ElementId, Group, Image, Line, Path, Rectangle, Text};
 use crate::scene_tree::{SceneTree, SceneTreeNode};
-use infinitecanvas_math::{Transform, Vec2};
+use infinitecanvas_math::{Rect, Transform, Vec2};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
@@ -586,6 +586,40 @@ impl Scene {
     /// 迭代所有元素
     pub fn iter(&self) -> impl Iterator<Item = &AnyElement> {
         self.elements.values()
+    }
+
+    /// 全部元素世界包围盒的并集。
+    ///
+    /// 空场景，或包围盒含非有限值时，返回 `None`。
+    /// 缩放到适合用它作为目标矩形。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene};
+    /// use infinitecanvas_math::Vec2;
+    /// let mut scene = Scene::new();
+    /// assert!(scene.content_bounds().is_none());
+    /// scene.add_rect(Rectangle::new(1, Vec2::new(100.0, 100.0), Vec2::new(50.0, 50.0)));
+    /// let bounds = scene.content_bounds().unwrap();
+    /// assert!((bounds.width - 50.0).abs() < 1e-3);
+    /// ```
+    pub fn content_bounds(&self) -> Option<Rect> {
+        let mut acc: Option<Rect> = None;
+        for element in self.iter() {
+            let bounds = element.as_element().world_bounds();
+            if !bounds.x.is_finite()
+                || !bounds.y.is_finite()
+                || !bounds.width.is_finite()
+                || !bounds.height.is_finite()
+            {
+                continue;
+            }
+            acc = Some(match acc {
+                Some(previous) => previous.union(&bounds),
+                None => bounds,
+            });
+        }
+        acc
     }
 
     /// 查找指定位置的元素（从上到下）
@@ -1716,6 +1750,29 @@ mod tests {
         let elements = scene.elements_sorted();
         assert_eq!(elements[0].id(), 2); // z_index=5
         assert_eq!(elements[1].id(), 1); // z_index=10
+    }
+
+    #[test]
+    fn content_bounds_unions_every_element() {
+        let mut scene = Scene::new();
+        assert!(scene.content_bounds().is_none());
+
+        scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(100.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+
+        let bounds = scene.content_bounds().unwrap();
+        assert!((bounds.x - -5.0).abs() < 1e-3);
+        assert!((bounds.y - -5.0).abs() < 1e-3);
+        assert!((bounds.width - 110.0).abs() < 1e-3);
+        assert!((bounds.height - 10.0).abs() < 1e-3);
     }
 
     #[test]

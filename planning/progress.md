@@ -209,6 +209,21 @@ reorder_selection ──► ReorderSelectionCommand ──► arrange_siblings
 
 **依赖**: M1 完成
 
+## 快捷键 (#26)
+
+- [x] `www/shortcuts.js` 一张表同时驱动按键分发和 `?` 帮助面板
+- [x] 保留 V/L/P/R/O/T/H、空格临时平移、Ctrl/Cmd+Z/Y/Shift+Z、Ctrl/Cmd+S/O
+- [x] 补齐删除（Delete/Backspace）、全选（Ctrl/Cmd+A）、Esc 取消选择、Shift+1 缩放到适合、Shift+0 为 100%
+- [x] 输入框、textarea、contenteditable 聚焦时不触发；Mac 显示 ⌘，其他平台显示 Ctrl
+- [x] WASM 只新增 `delete_selection`、`select_all`、`zoom_to_fit`、`set_zoom`
+- [x] #4 文本已合并：`T` 切换文本工具，编辑框里 Enter 确认、Esc 取消
+- [x] #13 分组尚未合并，未登记 Ctrl+G
+
+```text
+SHORTCUTS ──► matchShortcut ──► 画布动作
+     └──────► helpEntries ──► ? 帮助面板
+```
+
 ## 对齐与吸附 (#14)
 
 - [x] 拖拽时用选区包围盒对齐其他可见元素的左/右/上/下边缘和水平/垂直中心

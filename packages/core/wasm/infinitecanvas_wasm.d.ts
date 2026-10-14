@@ -247,6 +247,21 @@ export class InfiniteCanvas {
     cursor_at(x: number, y: number): string;
     debug_clear_events(): void;
     debug_pending_event_count(): number;
+    /**
+     * 删除当前选中的元素。
+     *
+     * 多个元素合成一条撤销记录。没有选中时什么也不做。
+     * 元素上的选中标记会随撤销恢复。
+     *
+     * # 返回
+     * 删除的元素数量
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.delete_selection();
+     * ```
+     */
+    delete_selection(): number;
     deselect_element(element_id: bigint): boolean;
     /**
      * 按包围盒间隙均匀分布当前选择，并记入一条撤销记录。
@@ -782,6 +797,18 @@ export class InfiniteCanvas {
      * `[x, y]`
      */
     screen_to_world(x: number, y: number): Float32Array;
+    /**
+     * 选中场景中的全部元素。
+     *
+     * # 返回
+     * 选中数量。空场景返回 0。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.select_all();
+     * ```
+     */
+    select_all(): number;
     select_element(element_id: bigint, additive: boolean): boolean;
     /**
      * 把相机中心移到世界坐标。
@@ -866,6 +893,20 @@ export class InfiniteCanvas {
      */
     set_tool(tool_name: string): boolean;
     /**
+     * 把缩放设为给定倍数，视口中心保持不变。
+     *
+     * 结果会被限制在 0.1 到 10 之间。非有限值会被忽略。
+     *
+     * # 参数
+     * - `zoom`: 缩放倍数，`1` 表示 100%
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_zoom(1);
+     * ```
+     */
+    set_zoom(zoom: number): void;
+    /**
      * 取走 T 工具留下的编辑请求。没有请求时返回 `null`。
      */
     take_text_edit_request(): any;
@@ -924,6 +965,20 @@ export class InfiniteCanvas {
      * - `delta_zoom`: 缩放倍数（例如 1.1 放大 10%）
      */
     zoom_at(anchor_x: number, anchor_y: number, delta_zoom: number): void;
+    /**
+     * 缩放并平移，使全部元素落入画布，四周留出 48 像素。
+     *
+     * 场景为空时不改变视口。
+     *
+     * # 返回
+     * 场景里有元素并且已经调整视口时为 true
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.zoom_to_fit();
+     * ```
+     */
+    zoom_to_fit(): boolean;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -953,6 +1008,7 @@ export interface InitOutput {
     readonly infinitecanvas_cursor_at: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
+    readonly infinitecanvas_delete_selection: (a: number) => number;
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_distribute_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_duplicate_selection: (a: number, b: number, c: number) => any;
@@ -1018,6 +1074,7 @@ export interface InitOutput {
     readonly infinitecanvas_rotate_selection_quarter: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_scene_bounds: (a: number) => any;
     readonly infinitecanvas_screen_to_world: (a: number, b: number, c: number) => [number, number];
+    readonly infinitecanvas_select_all: (a: number) => number;
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_camera_center: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;
@@ -1028,6 +1085,7 @@ export interface InitOutput {
     readonly infinitecanvas_set_snap_threshold: (a: number, b: number) => void;
     readonly infinitecanvas_set_text_editing: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_tool: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_set_zoom: (a: number, b: number) => void;
     readonly infinitecanvas_take_text_edit_request: (a: number) => any;
     readonly infinitecanvas_take_text_raster_jobs: (a: number) => any;
     readonly infinitecanvas_translate_element: (a: number, b: bigint, c: number, d: number) => number;
@@ -1035,6 +1093,7 @@ export interface InitOutput {
     readonly infinitecanvas_ungroup: (a: number, b: bigint) => number;
     readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;
+    readonly infinitecanvas_zoom_to_fit: (a: number) => number;
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_: (a: number, b: number, c: any) => void;

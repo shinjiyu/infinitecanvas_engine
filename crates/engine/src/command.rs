@@ -398,6 +398,65 @@ impl Command for RemoveElementCommand {
     }
 }
 
+/// 一次删除多个元素。
+///
+/// 撤销时按删除前的顺序放回场景，元素上的 `selected` 标记保持原样，
+/// 这样撤销后选择集可以按标记恢复。
+#[derive(Debug)]
+pub struct RemoveElementsCommand {
+    ids: Vec<ElementId>,
+    /// 已经从场景取出的元素。在场景里时为空。
+    stored: Vec<AnyElement>,
+}
+
+impl RemoveElementsCommand {
+    /// 创建删除命令。元素此时仍在场景中，`execute` 才会取出。
+    ///
+    /// # 参数
+    /// - `ids`: 要删除的元素 ID。不存在的 ID 会被跳过
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{CommandHistory, Rectangle, RemoveElementsCommand, Scene};
+    /// use infinitecanvas_math::Vec2;
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::ONE));
+    /// let mut history = CommandHistory::new();
+    /// history.execute(Box::new(RemoveElementsCommand::new(vec![1])), &mut scene);
+    /// assert!(scene.is_empty());
+    /// ```
+    pub fn new(ids: Vec<ElementId>) -> Self {
+        Self {
+            ids,
+            stored: Vec::new(),
+        }
+    }
+}
+
+impl Command for RemoveElementsCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        // 元素已经在命令里时再执行一次不能清掉 stored，否则会丢掉撤销数据。
+        if !self.stored.is_empty() {
+            return;
+        }
+        for id in &self.ids {
+            if let Some(element) = scene.remove(*id) {
+                self.stored.push(element);
+            }
+        }
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        for element in self.stored.drain(..) {
+            scene.add(element);
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "RemoveElements"
+    }
+}
+
 /// 缩放 / 旋转元素。
 ///
 /// 记录每个元素变换前、变换后的快照。拖动手柄时变换已经写进场景，
@@ -2100,5 +2159,28 @@ mod tests {
         assert_eq!(scene.sibling_order(None), vec![2, 3, 4, 5, 1]);
         assert!(history.undo(&mut scene));
         assert_eq!(scene.sibling_order(None), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn remove_elements_command_undo_restores_every_element() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::ONE));
+        scene.add_rect(Rectangle::new(2, Vec2::new(30.0, 0.0), Vec2::ONE));
+        let mut history = CommandHistory::new();
+
+        history.execute(
+            Box::new(RemoveElementsCommand::new(vec![1, 2, 99])),
+            &mut scene,
+        );
+        assert!(scene.is_empty());
+
+        history.undo(&mut scene);
+        assert!(scene.contains(1));
+        assert!(scene.contains(2));
+
+        history.redo(&mut scene);
+        assert!(scene.is_empty());
+        history.undo(&mut scene);
+        assert_eq!(scene.count(), 2);
     }
 }

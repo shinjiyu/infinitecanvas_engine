@@ -444,6 +444,25 @@ export class InfiniteCanvas {
         return ret >>> 0;
     }
     /**
+     * 删除当前选中的元素。
+     *
+     * 多个元素合成一条撤销记录。没有选中时什么也不做。
+     * 元素上的选中标记会随撤销恢复。
+     *
+     * # 返回
+     * 删除的元素数量
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.delete_selection();
+     * ```
+     * @returns {number}
+     */
+    delete_selection() {
+        const ret = wasm.infinitecanvas_delete_selection(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @param {bigint} element_id
      * @returns {boolean}
      */
@@ -1395,6 +1414,22 @@ export class InfiniteCanvas {
         return v1;
     }
     /**
+     * 选中场景中的全部元素。
+     *
+     * # 返回
+     * 选中数量。空场景返回 0。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.select_all();
+     * ```
+     * @returns {number}
+     */
+    select_all() {
+        const ret = wasm.infinitecanvas_select_all(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @param {bigint} element_id
      * @param {boolean} additive
      * @returns {boolean}
@@ -1532,6 +1567,23 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 把缩放设为给定倍数，视口中心保持不变。
+     *
+     * 结果会被限制在 0.1 到 10 之间。非有限值会被忽略。
+     *
+     * # 参数
+     * - `zoom`: 缩放倍数，`1` 表示 100%
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_zoom(1);
+     * ```
+     * @param {number} zoom
+     */
+    set_zoom(zoom) {
+        wasm.infinitecanvas_set_zoom(this.__wbg_ptr, zoom);
+    }
+    /**
      * 取走 T 工具留下的编辑请求。没有请求时返回 `null`。
      * @returns {any}
      */
@@ -1631,6 +1683,24 @@ export class InfiniteCanvas {
      */
     zoom_at(anchor_x, anchor_y, delta_zoom) {
         wasm.infinitecanvas_zoom_at(this.__wbg_ptr, anchor_x, anchor_y, delta_zoom);
+    }
+    /**
+     * 缩放并平移，使全部元素落入画布，四周留出 48 像素。
+     *
+     * 场景为空时不改变视口。
+     *
+     * # 返回
+     * 场景里有元素并且已经调整视口时为 true
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.zoom_to_fit();
+     * ```
+     * @returns {boolean}
+     */
+    zoom_to_fit() {
+        const ret = wasm.infinitecanvas_zoom_to_fit(this.__wbg_ptr);
+        return ret !== 0;
     }
 }
 if (Symbol.dispose) InfiniteCanvas.prototype[Symbol.dispose] = InfiniteCanvas.prototype.free;

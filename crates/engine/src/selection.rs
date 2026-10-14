@@ -78,6 +78,31 @@ impl SelectionManager {
         self.selected.remove(&id);
     }
 
+    /// 选中场景中的全部元素。
+    ///
+    /// 先清空当前选择，再逐个选中。返回选中数量。
+    ///
+    /// # 参数
+    /// - `scene`: 要选择的场景
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene, SelectionManager};
+    /// use infinitecanvas_math::Vec2;
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::ONE));
+    /// let mut selection = SelectionManager::new();
+    /// assert_eq!(selection.select_all(&mut scene), 1);
+    /// ```
+    pub fn select_all(&mut self, scene: &mut Scene) -> usize {
+        let ids: Vec<ElementId> = scene.iter().map(|element| element.id()).collect();
+        self.clear(scene);
+        for id in ids {
+            self.select_element(scene, id, true);
+        }
+        self.len()
+    }
+
     /// Returns a sorted list of selected IDs.
     pub fn selected_ids(&self) -> Vec<ElementId> {
         let mut ids: Vec<ElementId> = self.selected.iter().copied().collect();
@@ -228,6 +253,24 @@ mod tests {
         assert_eq!(hits, vec![1]);
         assert!(selection.is_selected(1));
         assert!(!selection.is_selected(2));
+    }
+
+    #[test]
+    fn select_all_selects_every_element() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::ONE));
+        scene.add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::ONE));
+
+        let mut selection = SelectionManager::new();
+        selection.select_element(&mut scene, 1, false);
+        assert_eq!(selection.select_all(&mut scene), 2);
+        assert!(selection.is_selected(1));
+        assert!(selection.is_selected(2));
+        assert!(scene.get(2).unwrap().as_element().props().selected);
+
+        let mut empty = Scene::new();
+        assert_eq!(selection.select_all(&mut empty), 0);
+        assert!(selection.is_empty());
     }
 
     #[test]

@@ -45,9 +45,9 @@ use infinitecanvas_engine::{
     AddElementCommand, AlignMode, AnyElement, Circle, CommandHistory, DistributeAxis,
     DuplicateElementsCommand, Element, ElementId, ElementStyle, Event, EventQueue, FlipAxis, Image,
     Line, MoveCommand, NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton,
-    PointerEvent, QuarterTurn, Rectangle, RemoveElementCommand, ReorderOutlineCommand, Scene,
-    SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign,
-    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
+    PointerEvent, QuarterTurn, Rectangle, RemoveElementCommand, RemoveElementsCommand,
+    ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction,
+    Text, TextAlign, TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
     UpdateTextCommand, Viewport,
 };
 
@@ -55,6 +55,8 @@ use infinitecanvas_engine::{
 const MIN_STROKE_LENGTH: f32 = 2.0;
 /// 粘贴图片时显示尺寸的长边上限（世界单位）。像素尺寸仍记在资源上。
 const MAX_PASTED_DISPLAY_EDGE: f32 = 512.0;
+/// 缩放到适合时，内容与画布边缘之间的留白（屏幕像素）
+const ZOOM_FIT_PADDING: f32 = 48.0;
 /// 画笔采样的最小间距，避免点过密
 const PEN_SAMPLE_SPACING: f32 = 1.5;
 use input::{
@@ -449,6 +451,55 @@ impl InfiniteCanvas {
         self.cancel_handle_gesture();
         self.selection_box.cancel();
         self.selection.clear(&mut self.scene);
+    }
+
+    /// 选中场景中的全部元素。
+    ///
+    /// # 返回
+    /// 选中数量。空场景返回 0。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.select_all();
+    /// ```
+    #[wasm_bindgen]
+    pub fn select_all(&mut self) -> u32 {
+        self.commit_handle_gesture();
+        self.selection_box.cancel();
+        self.selection.select_all(&mut self.scene) as u32
+    }
+
+    /// 删除当前选中的元素。
+    ///
+    /// 多个元素合成一条撤销记录。没有选中时什么也不做。
+    /// 元素上的选中标记会随撤销恢复。
+    ///
+    /// # 返回
+    /// 删除的元素数量
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.delete_selection();
+    /// ```
+    #[wasm_bindgen]
+    pub fn delete_selection(&mut self) -> u32 {
+        self.commit_handle_gesture();
+        self.cancel_drawing();
+        self.selection_box.cancel();
+        self.drag_state.guides.clear();
+        let ids = self.selection.selected_ids();
+        if ids.is_empty() {
+            return 0;
+        }
+        let count = ids.len() as u32;
+        self.command_history.execute(
+            Box::new(RemoveElementsCommand::new(ids.clone())),
+            &mut self.scene,
+        );
+        for id in ids {
+            self.selection.remove_id(id);
+        }
+        count
     }
 
     #[wasm_bindgen]
@@ -2302,6 +2353,44 @@ impl InfiniteCanvas {
     pub fn screen_to_world(&self, x: f32, y: f32) -> Vec<f32> {
         let world = self.viewport.screen_to_world(Vec2::new(x, y));
         vec![world.x, world.y]
+    }
+
+    /// 把缩放设为给定倍数，视口中心保持不变。
+    ///
+    /// 结果会被限制在 0.1 到 10 之间。非有限值会被忽略。
+    ///
+    /// # 参数
+    /// - `zoom`: 缩放倍数，`1` 表示 100%
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.set_zoom(1);
+    /// ```
+    #[wasm_bindgen]
+    pub fn set_zoom(&mut self, zoom: f32) {
+        if zoom.is_finite() {
+            self.viewport.set_zoom(zoom);
+        }
+    }
+
+    /// 缩放并平移，使全部元素落入画布，四周留出 48 像素。
+    ///
+    /// 场景为空时不改变视口。
+    ///
+    /// # 返回
+    /// 场景里有元素并且已经调整视口时为 true
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.zoom_to_fit();
+    /// ```
+    #[wasm_bindgen]
+    pub fn zoom_to_fit(&mut self) -> bool {
+        let Some(bounds) = self.scene.content_bounds() else {
+            return false;
+        };
+        self.viewport.fit_rect(bounds, ZOOM_FIT_PADDING);
+        true
     }
 
     /// 获取视口中心 X
