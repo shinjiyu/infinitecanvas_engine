@@ -300,15 +300,17 @@ fn embedded_image(scene: &Scene, image: &Image) -> Option<String> {
     let href = xml_escape(&asset.to_data_url());
     let width = image.size.x.abs();
     let height = image.size.y.abs();
-    let body = if let Some(crop) = pixel_crop(image, asset.width, asset.height) {
+    let body = if let Some((place, view)) = image_svg_window(image, asset.width, asset.height) {
         format!(
-            "    <svg x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\" preserveAspectRatio=\"none\">\n      <image href=\"{}\" x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\"/>\n    </svg>\n",
-            fmt_num(width),
-            fmt_num(height),
-            fmt_num(crop.x),
-            fmt_num(crop.y),
-            fmt_num(crop.width),
-            fmt_num(crop.height),
+            "    <svg x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" viewBox=\"{} {} {} {}\" preserveAspectRatio=\"none\">\n      <image href=\"{}\" x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" preserveAspectRatio=\"none\"/>\n    </svg>\n",
+            fmt_num(place.x),
+            fmt_num(place.y),
+            fmt_num(place.width),
+            fmt_num(place.height),
+            fmt_num(view.x),
+            fmt_num(view.y),
+            fmt_num(view.width),
+            fmt_num(view.height),
             href,
             asset.width,
             asset.height,
@@ -331,28 +333,41 @@ fn embedded_image(scene: &Scene, image: &Image) -> Option<String> {
     ))
 }
 
-/// UV 矩形换成像素 viewBox。整张图或非正尺寸返回 `None`，调用方直接画满显示矩形。
-fn pixel_crop(image: &Image, width: u32, height: u32) -> Option<Rect> {
-    let rect = image.uv_rect?;
-    if ![rect.x, rect.y, rect.width, rect.height]
+/// 采样窗口换成局部摆放和像素 viewBox。
+///
+/// 整张图且没有 UV 裁剪时返回 `None`，调用方直接画满显示矩形。
+/// 只有 UV 裁剪时，窗口仍铺满显示尺寸。图片裁剪会把 `<svg>` 挪到窗口的局部原点，
+/// 世界变换保持不动。
+fn image_svg_window(image: &Image, width: u32, height: u32) -> Option<(Rect, Rect)> {
+    let sample = image.sample_uv();
+    if ![sample.x, sample.y, sample.width, sample.height]
         .into_iter()
         .all(f32::is_finite)
+        || sample.width <= 0.0
+        || sample.height <= 0.0
     {
         return None;
     }
-    let full = rect.x.abs() <= 1.0e-4
-        && rect.y.abs() <= 1.0e-4
-        && (rect.width - 1.0).abs() <= 1.0e-4
-        && (rect.height - 1.0).abs() <= 1.0e-4;
-    if full || rect.width <= 0.0 || rect.height <= 0.0 {
+    let full = sample.x.abs() <= 1.0e-4
+        && sample.y.abs() <= 1.0e-4
+        && (sample.width - 1.0).abs() <= 1.0e-4
+        && (sample.height - 1.0).abs() <= 1.0e-4;
+    if image.crop_is_full() && full {
         return None;
     }
-    Some(Rect::new(
-        rect.x * width as f32,
-        rect.y * height as f32,
-        rect.width * width as f32,
-        rect.height * height as f32,
-    ))
+    let view = Rect::new(
+        sample.x * width as f32,
+        sample.y * height as f32,
+        sample.width * width as f32,
+        sample.height * height as f32,
+    );
+    let place = if image.crop_is_full() {
+        Rect::new(0.0, 0.0, image.size.x.abs(), image.size.y.abs())
+    } else {
+        let local = image.visible_local_rect();
+        Rect::new(local.x, local.y, local.width.abs(), local.height.abs())
+    };
+    Some((place, view))
 }
 
 /// 子孙在绘制顺序里连成一段的组才包 `<g>`。中间夹了别的叶子时不包，以免打乱 z 顺序或写出重复 id。
@@ -1456,6 +1471,25 @@ mod tests {
         ));
         assert!(svg.contains("<image href=\"data:image/png;base64,"));
         assert!(svg.contains("width=\"2\" height=\"2\" preserveAspectRatio=\"none\""));
+        assert!(svg.contains("transform=\"matrix(1 0 0 1 1 2)\""));
+    }
+
+    #[test]
+    fn image_crop_offsets_the_svg_window_without_moving_the_transform() {
+        use crate::element::Image;
+
+        let mut scene = Scene::new();
+        let png = crate::asset::encode_png_rgba(2, 2, &[255, 0, 0, 255].repeat(4)).unwrap();
+        let asset_id = scene.insert_image_bytes(&png, "image/png").unwrap();
+        let mut image = Image::from_asset(4, Vec2::new(1.0, 2.0), &asset_id, 2, 2);
+        image.size = Vec2::new(8.0, 4.0);
+        image.set_crop(Rect::new(0.25, 0.0, 0.5, 1.0));
+        scene.add_image(image);
+
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains(
+            "<svg x=\"2\" y=\"0\" width=\"4\" height=\"4\" viewBox=\"0.5 0 1 2\" preserveAspectRatio=\"none\">"
+        ));
         assert!(svg.contains("transform=\"matrix(1 0 0 1 1 2)\""));
     }
 

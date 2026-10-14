@@ -2,6 +2,25 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #90: 图片裁剪
+
+- [x] `Image::crop` 是归一化窗口，`serde(default)` 为整张图，与缺省值相同时不写入。旧 JSON 仍有效
+- [x] 裁剪不改 `props.transform`、显示尺寸和资源像素。命中、选中框、顶点和投影都跟窗口走
+- [x] 一条 `SetImageCrop`。空选、锁定或没有变化不入栈。执行和撤销 `mark_dirty`
+- [x] WebGPU 采样合成后的 UV。PNG 只采样窗口。SVG 把嵌套 `<svg>` 收到窗口上，变换矩阵不动
+- [x] 属性面板给出 0–1 的左/上/宽/高，多选不一致为 mixed。预览松手一条历史。「裁剪手柄」复用缩放手柄，不新增快捷键。Esc 先退出裁剪模式
+
+```text
+面板数字 / 裁剪手柄
+        │
+        ▼
+CropPatch ── SetImageCrop ── 一条历史
+        │
+        ├─ 局部窗口 = crop × size（变换不动）
+        ├─ 顶点 / 命中 / 投影
+        └─ PNG 采样窗口，SVG 嵌套 svg 偏移
+```
+
 ## Issue #76: 混合模式
 
 - [x] `BlendMode`：`normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。`serde(default = Normal)`，Normal 不写入 JSON

@@ -16,6 +16,18 @@ use infinitecanvas_engine::{
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
+/// 裁剪模式下的选中覆盖层。
+///
+/// `hide_rotate` 为 true 时缩放手柄改的是裁剪窗口，旋转手柄不画。
+/// `full_frame` 是未裁的整张图，窗口缩小后用来把边拖回去。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CropChrome {
+    /// 整张图的外框。已经是整张图时为 `None`。
+    pub full_frame: Option<SelectionFrame>,
+    /// 不画旋转手柄。
+    pub hide_rotate: bool,
+}
+
 /// 一帧渲染的 CPU 侧统计。GPU 完成时间不在这里。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameRenderStats {
@@ -90,6 +102,8 @@ pub struct WebGPURenderer {
     selection_overlay_dirty: bool,
     /// 手柄框和缩放一起决定选中覆盖层。平移不改变这两项。
     cached_transform_frame: Option<SelectionFrame>,
+    /// 裁剪模式的原图外框。窗口变化时覆盖层要重画。
+    cached_crop_chrome: Option<CropChrome>,
     cached_selection_zoom: f32,
     last_stats: FrameRenderStats,
     uniform_buffer: wgpu::Buffer,
@@ -575,6 +589,7 @@ impl WebGPURenderer {
             cached_selection_box: None,
             selection_overlay_dirty: false,
             cached_transform_frame: None,
+            cached_crop_chrome: None,
             cached_selection_zoom: f32::NAN,
             last_stats: FrameRenderStats::default(),
             uniform_buffer,
@@ -599,6 +614,7 @@ impl WebGPURenderer {
     /// - `selection_box`: 框选矩形（如果正在框选）
     /// - `transform_frame`: 选中框。有选中元素时带 8 个缩放手柄和 1 个旋转手柄
     /// - `grid_visible`: 为 false 时不画背景网格。网格顶点不计入场景几何是否变化
+    /// - `crop_chrome`: 裁剪模式时藏起旋转手柄，并画出未裁区域的外框
     pub fn render(
         &mut self,
         scene: &mut Scene,
@@ -606,10 +622,16 @@ impl WebGPURenderer {
         selection_box: Option<Rect>,
         transform_frame: Option<SelectionFrame>,
         grid_visible: bool,
+        crop_chrome: Option<CropChrome>,
     ) -> Result<(), JsValue> {
         let sync = self.vertex_cache.sync(scene);
-        let selection_changed =
-            self.sync_selection(scene, selection_box, transform_frame, viewport.zoom());
+        let selection_changed = self.sync_selection(
+            scene,
+            selection_box,
+            transform_frame,
+            viewport.zoom(),
+            crop_chrome,
+        );
 
         let geometry_grew = self.ensure_geometry_capacity();
         let selection_grew = self.ensure_selection_capacity();
@@ -819,23 +841,31 @@ impl WebGPURenderer {
         selection_box: Option<Rect>,
         transform_frame: Option<SelectionFrame>,
         zoom: f32,
+        crop_chrome: Option<CropChrome>,
     ) -> bool {
         if !self.selection_overlay_dirty
             && self.cached_selection_epoch == scene.selection_epoch()
             && self.cached_selection_box == selection_box
             && self.cached_transform_frame == transform_frame
+            && self.cached_crop_chrome == crop_chrome
             && self.cached_selection_zoom.to_bits() == zoom.to_bits()
         {
             return false;
         }
         self.selection_overlay_dirty = false;
-        let (fill, stroke) =
-            self.collect_selection_overlay_vertices(scene, selection_box, transform_frame, zoom);
+        let (fill, stroke) = self.collect_selection_overlay_vertices(
+            scene,
+            selection_box,
+            transform_frame,
+            zoom,
+            crop_chrome,
+        );
         self.selection_fill = fill;
         self.selection_stroke = stroke;
         self.cached_selection_epoch = scene.selection_epoch();
         self.cached_selection_box = selection_box;
         self.cached_transform_frame = transform_frame;
+        self.cached_crop_chrome = crop_chrome;
         self.cached_selection_zoom = zoom;
         true
     }
@@ -992,6 +1022,7 @@ impl WebGPURenderer {
         selection_box: Option<Rect>,
         transform_frame: Option<SelectionFrame>,
         zoom: f32,
+        crop_chrome: Option<CropChrome>,
     ) -> (Vec<Vertex>, Vec<Vertex>) {
         let mut fill_vertices = Vec::new();
         let mut stroke_vertices = Vec::new();
@@ -1000,9 +1031,22 @@ impl WebGPURenderer {
         let selection_color = [0.25, 0.55, 0.95, 1.0]; // #4090f2
         let selection_fill_color = [0.25, 0.55, 0.95, 0.15]; // 半透明蓝色填充
         let handle_fill = [1.0, 1.0, 1.0, 1.0];
+        let crop_color = [0.95, 0.72, 0.25, 1.0];
+        let hide_rotate = crop_chrome.is_some_and(|chrome| chrome.hide_rotate);
+        let handle_stroke = if hide_rotate {
+            crop_color
+        } else {
+            selection_color
+        };
+
+        if let Some(chrome) = crop_chrome {
+            if let Some(full) = chrome.full_frame {
+                push_frame_stroke(&mut stroke_vertices, full, crop_color);
+            }
+        }
 
         if let Some(frame) = transform_frame {
-            push_frame_stroke(&mut stroke_vertices, frame, selection_color);
+            push_frame_stroke(&mut stroke_vertices, frame, handle_stroke);
             let selected = selected_elements(scene);
             if selected.len() > 1 {
                 for element in selected {
@@ -1016,6 +1060,7 @@ impl WebGPURenderer {
             let metrics = HandleMetrics::from_zoom(zoom);
             for handle in frame.handles(metrics.rotate_gap) {
                 match handle.kind {
+                    HandleKind::Rotate if hide_rotate => {}
                     HandleKind::Rotate => {
                         push_disc(
                             &mut fill_vertices,
@@ -1034,7 +1079,7 @@ impl WebGPURenderer {
                             handle.position,
                             metrics.draw_half,
                             handle_fill,
-                            selection_color,
+                            handle_stroke,
                         );
                     }
                 }

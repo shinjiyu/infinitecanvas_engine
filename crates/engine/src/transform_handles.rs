@@ -27,7 +27,7 @@
 //! ```
 
 use crate::element::{Element, ElementId};
-use infinitecanvas_math::{Transform, Vec2};
+use infinitecanvas_math::{Rect, Transform, Vec2};
 
 /// 旋转吸附的步进（15°）。
 pub const ROTATE_SNAP_RADIANS: f32 = 15.0 * std::f32::consts::PI / 180.0;
@@ -113,6 +113,20 @@ pub struct SelectionFrame {
 }
 
 impl SelectionFrame {
+    /// 用局部矩形和元素变换建立选中框。裁剪模式下用来画出整张图的外框。
+    pub fn from_local_rect(transform: &Transform, local: Rect) -> Self {
+        let center = transform.transform_point(local.center());
+        let half = Vec2::new(
+            (local.width.abs() * transform.scale.x.abs() * 0.5).max(0.5),
+            (local.height.abs() * transform.scale.y.abs() * 0.5).max(0.5),
+        );
+        Self {
+            center,
+            half_size: half,
+            rotation: transform.rotation,
+        }
+    }
+
     /// 用单个元素的局部包围盒和变换建立选中框。
     ///
     /// 框的旋转等于元素的 [`Element::rotation`]，因此手柄贴在旋转后的边上，

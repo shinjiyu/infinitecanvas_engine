@@ -23,6 +23,7 @@ pub mod blend;
 pub mod boolean;
 pub mod camera_fit;
 pub mod command;
+pub mod crop;
 pub mod element;
 pub mod event;
 pub mod eyedropper;
@@ -66,6 +67,10 @@ pub use command::{
     RemoveElementsCommand, RenameFrameCommand, ReorderOutlineCommand, ReorderSelectionCommand,
     ReparentIntoFrameCommand, SetLockedCommand, SetStyleCommand, SetVisibilityCommand,
     StackOrderAction, TransformElementsCommand, UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
+};
+pub use crop::{
+    apply_image_crop, crop_target_ids, image_crop_selection, resize_image_crop, CropPatch,
+    ImageCropSelection, SetImageCropCommand,
 };
 pub use element::{
     Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, FillShape, Frame,

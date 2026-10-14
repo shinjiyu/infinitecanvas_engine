@@ -163,6 +163,7 @@ impl InfiniteCanvas {
     /// 场景已经是预览后的值，所以只入栈、不再执行。没有变化时返回 false。
     #[wasm_bindgen]
     pub fn commit_style_preview(&mut self) -> bool {
+        self.commit_crop_preview();
         let Some(preview) = self.style_preview.take() else {
             return false;
         };
@@ -268,6 +269,7 @@ impl InfiniteCanvas {
     /// 丢掉未提交的样式预览。导入和清空会整表替换场景，所以这里不把基线写回去。
     pub(crate) fn cancel_style_preview(&mut self) {
         self.style_preview = None;
+        self.cancel_crop_preview();
     }
 
     fn editable_style_snapshots(&self) -> Vec<(ElementId, StyleSnapshot)> {

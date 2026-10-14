@@ -330,6 +330,20 @@
 
     .property-panel[hidden] { display: none; }
 
+    #prop-crop[hidden] { display: none; }
+
+    #prop-crop {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    #prop-crop .row button {
+      padding: 0.35rem 0.2rem;
+      font-size: 0.72rem;
+      text-align: center;
+    }
+
     .prop-row[hidden] { display: none; }
 
     .property-panel .group-label { margin: 0; }
@@ -1063,6 +1077,34 @@
               <span id="prop-shadow-opacity-label" class="prop-value">0%</span>
             </label>
             <p id="prop-shadow-opacity-mixed" class="mixed-tag" hidden>阴影浓度：多种</p>
+          </div>
+          <div id="prop-crop" hidden>
+            <p class="group-label">裁剪</p>
+            <div class="row">
+              <button type="button" id="prop-crop-mode" title="拖动边框裁剪，不改变位置">裁剪手柄</button>
+              <button type="button" id="prop-crop-reset">重置</button>
+            </div>
+            <label class="prop-row" for="prop-crop-x">
+              <span>左</span>
+              <input id="prop-crop-x" type="number" min="0" max="1" step="0.01" value="0" aria-label="裁剪左边缘">
+              <span></span>
+            </label>
+            <label class="prop-row" for="prop-crop-y">
+              <span>上</span>
+              <input id="prop-crop-y" type="number" min="0" max="1" step="0.01" value="0" aria-label="裁剪上边缘">
+              <span></span>
+            </label>
+            <label class="prop-row" for="prop-crop-width">
+              <span>宽</span>
+              <input id="prop-crop-width" type="number" min="0" max="1" step="0.01" value="1" aria-label="裁剪宽度">
+              <span></span>
+            </label>
+            <label class="prop-row" for="prop-crop-height">
+              <span>高</span>
+              <input id="prop-crop-height" type="number" min="0" max="1" step="0.01" value="1" aria-label="裁剪高度">
+              <span></span>
+            </label>
+            <p id="prop-crop-mixed" class="mixed-tag" hidden>裁剪：多种</p>
           </div>
           <div id="prop-text-fields" hidden>
             <label class="prop-row" for="prop-font-size">
