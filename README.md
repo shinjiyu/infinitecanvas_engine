@@ -10,11 +10,13 @@ Open-source infinite canvas: a Rust core, WebGPU rendering, and a WebAssembly AP
 [![wgpu 27](https://img.shields.io/badge/wgpu-27-76b900)](./Cargo.toml)
 [![WebGPU + WASM](https://img.shields.io/badge/WebGPU-WASM-purple)](./crates/wasm)
 
-**Demo:** [shinjiyu.github.io/infinitecanvas_engine](https://shinjiyu.github.io/infinitecanvas_engine/) — GitHub Pages is not live yet.
+**Demo:** [https://shinjiyu.github.io/infinitecanvas_engine/](https://shinjiyu.github.io/infinitecanvas_engine/)
 
-<!-- GIF placeholder. Replace this image after GitHub Pages is published. -->
+That URL is the GitHub Pages address for `www/index.html`. On 2026-10-14 it returned 404: the [Pages workflow](./.github/workflows/pages.yml) builds `dist/`, then `actions/deploy-pages` fails with “Ensure GitHub Pages has been enabled” until Settings → Pages → Source is GitHub Actions. The frames below are that same page, captured from the local preview in [Quick start](#quick-start).
 
-![Demo GIF placeholder. The recording will be added when GitHub Pages is live.](./docs/assets/demo.gif)
+![InfiniteCanvas landing demo: rectangles, circles, a texture, a line, and a freehand stroke](./docs/assets/demo.png)
+
+![Short recording of drawing on the landing demo](./docs/assets/demo.gif)
 
 ## Features
 
@@ -23,7 +25,7 @@ Only behavior that exists in this repository is listed here.
 ### Rendering
 
 - WebGPU renderer on wgpu 27 (`crates/wasm`). Initialization fails if WebGPU is unavailable. There is no Canvas 2D fallback.
-- Rectangle, circle, and image elements, with fill, stroke, and a textured pipeline.
+- Rectangle, circle, line, freehand path, and image elements, with fill, stroke, and a textured pipeline. A line can end in an arrow.
 - Image upload from JavaScript (`upload_texture`, `add_image`) and per-image alpha (`set_image_alpha`).
 - Viewport pan and zoom (`pan`, `zoom_at`), clamped to 0.1×–10×, plus screen/world conversion.
 - Vertices outside the viewport are skipped while collecting geometry.
@@ -31,15 +33,15 @@ Only behavior that exists in this repository is listed here.
 
 ### Interaction
 
-- Pointer events drive select, marquee select, drag-move, rectangle and circle drawing, and pan, according to the active tool.
+- Pointer events drive select, marquee select, drag-move, and drawing, according to the active tool. Drawing tools cover rectangle, circle, line (Shift adds an arrow), pen, and pan.
 - Hit testing walks the flat scene from the highest z-index. It does not consult the QuadTree.
 - Command history for add, remove, and move, exposed as `undo` and `redo`.
-- Tools: Select, Rectangle, Circle, Pan, and a temporary Hand tool (`push_hand_tool` / `pop_temporary_tool`).
-- The pages under `www/` bind V / R / O / H, Space, and Ctrl+Z / Ctrl+Y. Those shortcuts live in the page scripts. The WASM dispatcher applies pointer events; keyboard and wheel events are queued and otherwise ignored.
+- Tools: Select, Line, Pen, Rectangle, Circle, Pan, and a temporary Hand tool (`push_hand_tool` / `pop_temporary_tool`).
+- `www/index.html` binds V / L / P / R / O / H, Space, and Ctrl+Z / Ctrl+Y. Those shortcuts live in the page script. The WASM dispatcher applies pointer events; keyboard and wheel events are queued and otherwise ignored.
 
 ### Scene and math
 
-- Flat scene of `Rectangle`, `Circle`, and `Image`. No groups, inherited transforms, text, or paths.
+- Flat scene of `Rectangle`, `Circle`, `Image`, `Line`, and `Path`. No groups, inherited transforms, or text.
 - `infinitecanvas-math` provides `Vec2`, glam matrices, `Rect`, `Transform`, `Color`, and `Vertex`.
 - `QuadTree` supports insert, point query, and range query, and has unit tests. Rendering and hit testing do not call it.
 
@@ -91,9 +93,9 @@ No benchmark log is checked in. Published numbers are **TBD** until a run is rec
 | Elements sustained at 60 FPS | TBD |
 | Frame time | TBD |
 | Memory | TBD |
-| Release WASM binary (`infinitecanvas_wasm_bg.wasm`) | 2,617,632 bytes |
+| Release WASM binary (`infinitecanvas_wasm_bg.wasm`) | 2,645,351 bytes |
 
-The binary size is from `./build-wasm.sh` on 2026-10-13 (rustc 1.99.0, wasm-pack 0.13.1, wasm-opt). It is the optimized release artifact, not a frame-rate measurement.
+The binary size is from `wasm-pack build --target web --out-dir ../../packages/core/wasm` on 2026-10-14 (rustc 1.99.0, wasm-pack 0.13.1, wasm-opt). It is the optimized release artifact, not a frame-rate measurement.
 
 `get_performance_stats` exposes a frame counter. Its vertex count is `element_count * 50` and its draw-call count is the constant `3`, so those two fields are estimates, not measurements.
 
@@ -105,55 +107,49 @@ The binary size is from `./build-wasm.sh` on 2026-10-13 (rustc 1.99.0, wasm-pack
 
 | Milestone | In the tree today |
 | --- | --- |
-| M1 Core rendering | Done: WebGPU rectangles, circles, images, viewport |
+| M1 Core rendering | Done: WebGPU rectangles, circles, lines, freehand paths, images, viewport |
 | M2 Interaction | Done: hit test, selection, marquee, drag, undo/redo, tools |
 | M3 Scene management | Viewport culling, batched solid draws, performance counters, and a QuadTree module. No scene graph, dirty rectangles, or vertex cache |
 | M4 Collaboration | Rooms, cursors, selection sync, and create-element broadcast. No CRDT, permissions, conflict handling, or replay |
 
 ## Quick start
 
-You need Rust stable (`rust-toolchain.toml` already asks for `wasm32-unknown-unknown`), [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/), and Node.js for the demo and the collaboration server.
+Rust stable, [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/), and Node.js 20. `rust-toolchain.toml` selects stable, rustfmt, clippy, and the `wasm32-unknown-unknown` target. These commands are the same ones in [BUILD_GUIDE.md](./BUILD_GUIDE.md) and [CI](./.github/workflows/ci.yml).
 
 ```bash
 git clone https://github.com/shinjiyu/infinitecanvas_engine.git
 cd infinitecanvas_engine
 
-cargo test -p infinitecanvas-math
+rustup show
+rustup target add wasm32-unknown-unknown
 
-./build-wasm.sh
-```
+# Install wasm-pack once. Either command is enough:
+cargo install wasm-pack
+# curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-`./build-wasm.sh` runs `wasm-pack build --target web --out-dir ../../packages/core/wasm` from `crates/wasm`. It also prepends a macOS rustup directory to `PATH`. On other systems the system `rustc` is still used if that directory is absent. The equivalent command is:
+npm ci
+cargo test --workspace
 
-```bash
 cd crates/wasm
 wasm-pack build --target web --out-dir ../../packages/core/wasm
+cd ../..
+
+npm run dev --workspace=@infinitecanvas/www
 ```
 
-`cargo build` and `cargo test --workspace` do not succeed on a host target today:
+Open [http://localhost:5179/infinitecanvas_engine/](http://localhost:5179/infinitecanvas_engine/). Vite's `base` is `/infinitecanvas_engine/` and the dev server listens on port 5179.
 
-- `infinitecanvas-wasm` calls `wgpu::SurfaceTarget::Canvas`, which exists for `wasm32` and not for the host, so the native library does not compile.
-- `infinitecanvas-engine` library tests do not compile: the `Image` tests call `id`, `is_visible`, `set_visible`, `z_index`, and `set_z_index`, and those methods are not available on `Image`.
+`./build-wasm.sh` runs that same `wasm-pack` command. When `$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin` exists, the script prepends it to `PATH`. Otherwise it uses the `rustc` already on `PATH`.
 
-`cargo test -p infinitecanvas-math` does pass. `./build-wasm.sh` is the build that matches how the demos load the engine.
+The root `package.json` scripts still call `pnpm`. CI, this section, and the build guide use `npm ci` and the workspace scripts above. Do not mix in `pnpm install` or `pnpm dev`.
 
-Web demo:
-
-```bash
-cd www
-npm install
-npm run dev
-```
+`cargo test --workspace` compiles and tests the host crates, including `infinitecanvas-wasm`. Drawing still happens in a browser with WebGPU (desktop Chrome 113+, Edge 113+, or Safari 18+). Other pages: `www/test-selection.html`, `www/test-stress.html`, `www/test-texture.html`, and `www/test-collab-canvas.html`.
 
 Collaboration server (optional, port 8080):
 
 ```bash
-cd packages/server
-npm install
-npm run dev
+npm run dev --workspace=@infinitecanvas/server
 ```
-
-The demo pages need a browser with WebGPU. Useful entry points: `www/test-selection.html`, `www/test-stress.html`, `www/test-texture.html`, and `www/test-collab-canvas.html`.
 
 ## Project layout
 
@@ -178,7 +174,7 @@ Bots follow the claim rules in issue [#9](https://github.com/shinjiyu/infiniteca
 - Rebase onto the latest `master` before opening the pull request. Change only files that belong to the issue.
 - Comment `PROGRESS by <name>: ...` at least every 24 hours. `RELEASE by <name>` returns the issue to `status:ready`. `BLOCKED by <name>: <reason>` asks for help.
 
-New behavior needs a test first (see `.cursorrules`). `cargo test --workspace` is currently red; the Quick start section lists why.
+New behavior needs a test first (see `.cursorrules`). Run `cargo test --workspace` before opening a pull request.
 
 ## License
 

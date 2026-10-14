@@ -1,331 +1,114 @@
-# 🛠️ InfiniteCanvas Engine 构建指南
+# InfiniteCanvas Engine 构建指南
 
-## 📋 项目结构
+命令与 [README.md](./README.md) 的 Quick start、[README.zh-CN.md](./README.zh-CN.md)、以及 `.github/workflows/ci.yml` / `pages.yml` 相同。
 
-```
-infinitecanvas_engine/
-├── crates/                    # Rust 源代码
-│   ├── wasm/                 # WASM 绑定层
-│   ├── engine/               # 核心引擎
-│   └── math/                 # 数学库
-├── packages/
-│   └── core/
-│       └── wasm/             # ✅ WASM 构建产物目录
-│           ├── infinitecanvas_wasm.js
-│           ├── infinitecanvas_wasm_bg.wasm (2.6MB)
-│           ├── infinitecanvas_wasm.d.ts
-│           └── package.json
-├── www/                      # Web 测试应用
-│   ├── index.html           # 主页
-│   ├── test-custom-image.html   # 自定义图片渲染
-│   └── test-texture.html    # 纹理测试
-└── package.json             # 根配置
+在线 Demo 地址：[https://shinjiyu.github.io/infinitecanvas_engine/](https://shinjiyu.github.io/infinitecanvas_engine/)。2026-10-14 该地址返回 404，因为仓库 Settings → Pages 的 Source 还不是 GitHub Actions。本地预览见下面的开发服务器。首页截图在 `docs/assets/demo.png`，短录屏在 `docs/assets/demo.gif`。
 
-```
+## 前置要求
 
----
+| 工具 | 要求 |
+| --- | --- |
+| Rust | stable。`rust-toolchain.toml` 会拉取 rustfmt、clippy 和 `wasm32-unknown-unknown` |
+| wasm-pack | `cargo install wasm-pack`，或 `curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf \| sh` |
+| Node.js | 20（与 CI 的 `actions/setup-node` 一致） |
+| npm | 使用仓库根目录的 `package-lock.json` |
 
-## 🚀 快速开始
+不要用 `pnpm install` / `pnpm dev` 作为本指南的步骤。根目录 `package.json` 里的 `dev`、`build`、`test` 仍会调用 `pnpm`，那不是 CI 路径。
 
-### 1. 安装依赖
+## 安装、测试、构建 WASM、本地预览
 
 ```bash
+git clone https://github.com/shinjiyu/infinitecanvas_engine.git
 cd infinitecanvas_engine
-pnpm install
+
+rustup show
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+
+npm ci
+cargo test --workspace
+
+cd crates/wasm
+wasm-pack build --target web --out-dir ../../packages/core/wasm
+cd ../..
+
+npm run dev --workspace=@infinitecanvas/www
 ```
 
-### 2. 构建 WASM（可选）
+打开 [http://localhost:5179/infinitecanvas_engine/](http://localhost:5179/infinitecanvas_engine/)。
 
-如果需要重新编译 Rust 代码：
+- 端口来自 `www/vite.config.js` 的 `server.port`：**5179**。不要访问 3000。
+- `base` 是 `/infinitecanvas_engine/`，所以路径里要带项目名。根路径 `/` 不是 Demo 页。
+- 需要带 WebGPU 的浏览器（桌面 Chrome 113+、Edge 113+ 或 Safari 18+）。没有 WebGPU 时页面会显示提示，不会回退到 Canvas 2D。
+
+`./build-wasm.sh` 执行的是同一条 `wasm-pack` 命令。脚本会在 `$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin` 存在时把它加到 `PATH` 前面；该目录不存在时使用当前 `PATH` 里的 `rustc`。Linux 和 Windows 上直接跑上面的 `wasm-pack` 即可。
+
+可选协同服务（端口 8080）：
 
 ```bash
-# 使用 rustup 工具链构建
-export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"
-pnpm build:wasm
+npm run dev --workspace=@infinitecanvas/server
 ```
 
-**输出位置**: `packages/core/wasm/`
-
-### 3. 启动开发服务器
+## 与 CI 相同的检查
 
 ```bash
-pnpm dev
+cargo fmt --check
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
 ```
 
-**访问地址**:
-- 主页: http://localhost:3000/index.html
-- 自定义图片: http://localhost:3000/test-custom-image.html
-- 纹理测试: http://localhost:3000/test-texture.html
-
-> 💡 如果端口被占用，会自动使用 3001 端口
-
----
-
-## 📦 构建流程说明
-
-### WASM 构建配置
-
-`package.json` 中的构建脚本：
-
-```json
-{
-  "scripts": {
-    "build:wasm": "cd crates/wasm && wasm-pack build --target web --out-dir ../../packages/core/wasm"
-  }
-}
-```
-
-**关键参数**:
-- `--target web`: 生成 ES 模块格式
-- `--out-dir ../../packages/core/wasm`: 直接输出到最终目录
-
-### 构建产物
-
-| 文件 | 大小 | 说明 |
-|------|------|------|
-| `infinitecanvas_wasm_bg.wasm` | 2.6MB | WebAssembly 二进制 |
-| `infinitecanvas_wasm.js` | 109KB | JS 绑定层 |
-| `infinitecanvas_wasm.d.ts` | 7.7KB | TypeScript 类型定义 |
-| `infinitecanvas_wasm_bg.wasm.d.ts` | 2.4KB | WASM 类型定义 |
-| `package.json` | 385B | NPM 包配置 |
-
----
-
-## 🔧 Rust 工具链配置
-
-### 问题：Homebrew Rust vs Rustup
-
-项目需要 `wasm32-unknown-unknown` 目标，Homebrew 版本的 Rust 不支持。
-
-**解决方案**：
-
-#### 方案 A：临时使用 rustup（推荐）
+`www` 的生产构建与 Pages 工作流一致：
 
 ```bash
-export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"
-pnpm build:wasm
-```
-
-#### 方案 B：永久配置
-
-编辑 `~/.zshrc`:
-
-```bash
-# 优先使用 rustup 工具链
-export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"
-```
-
-然后：
-
-```bash
-source ~/.zshrc
-pnpm build:wasm
-```
-
-### 验证工具链
-
-```bash
-rustc --version
-# 应该显示：rustc 1.91.1 (ed61e7d7e 2025-11-07)
-
-rustup target list | grep wasm32
-# 应该显示：wasm32-unknown-unknown (installed)
-```
-
----
-
-## 🧹 清理项目
-
-### 清理所有构建产物
-
-```bash
-rm -rf target/wasm32-unknown-unknown \
-       crates/wasm/pkg \
-       packages/core/wasm/*.wasm \
-       packages/core/wasm/*.js \
-       packages/core/wasm/*.d.ts \
-       www/dist \
-       dist
-```
-
-### 完整重新构建
-
-```bash
-# 1. 清理
-pnpm clean  # (如果有配置)
-
-# 2. 重新构建 WASM
-export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"
-pnpm build:wasm
-
-# 3. 启动开发服务器
-pnpm dev
-```
-
----
-
-## 🎨 测试页面说明
-
-### 1. `index.html` - 主页
-
-在线 Demo 入口，合并选择、压力测试和纹理：
-- 工具栏：选择 / 矩形 / 圆形 / 平移，撤销重做
-- 批量添加元素（+100 / +1k / +5k）和 FPS
-- 程序生成纹理并上传到 GPU
-- 没有 WebGPU 时显示友好提示
-
-Vite `base` 为 `/infinitecanvas_engine/`，对应 GitHub Pages 项目站。本地预览地址是 `http://localhost:5179/infinitecanvas_engine/`。
-
-### 2. `test-custom-image.html` - 自定义图片渲染
-
-功能：
-- 加载并渲染用户图片 (`woman.jpeg`)
-- 实时调整图片大小 (100-800px)
-- 实时调整透明度 (0-1.0)
-- 性能监控（FPS、元素数量、纹理数量）
-
-### 3. `test-texture.html` - 纹理测试
-
-功能：
-- 程序生成的渐变纹理
-- 棋盘图案纹理
-- 透明度测试
-- 混合渲染（纹理 + 几何图形）
-
----
-
-## 📊 性能指标
-
-### 当前性能
-
-- **帧率**: 稳定 60 FPS
-- **WASM 大小**: 2.6MB (未压缩)
-- **编译时间**: ~30s (release 模式)
-- **启动时间**: ~111ms (Vite)
-
-### 优化建议
-
-1. **WASM 大小优化**:
-   ```bash
-   # 使用 wasm-opt (wasm-pack 自动调用)
-   wasm-pack build --target web --release
-   ```
-
-2. **加载性能**:
-   - 启用 gzip/brotli 压缩
-   - 使用 CDN 托管
-   - 懒加载非关键模块
-
----
-
-## ❗ 常见问题
-
-### Q1: `wasm32-unknown-unknown target not found`
-
-**原因**: 使用了 Homebrew 的 Rust
-
-**解决**:
-```bash
-export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"
-pnpm build:wasm
-```
-
-### Q2: Vite 404 错误
-
-**原因**: Vite 配置的 `root` 路径不正确
-
-**解决**: 已修复在 `www/vite.config.js`
-```javascript
-root: path.resolve(__dirname), // 从 www 目录提供服务
-```
-
-### Q3: Port 3000 被占用
-
-**现象**: `Port 3000 is in use, trying another one...`
-
-**解决**: Vite 会自动使用下一个可用端口（3001）
-
-### Q4: 编译警告
-
-项目有一些未使用的代码警告（15个），这是正常的：
-- 这些是为未来功能预留的代码
-- 不影响运行
-- 可以运行 `cargo fix` 自动修复部分警告
-
----
-
-## 🎯 开发工作流
-
-### 日常开发
-
-```bash
-# 1. 启动开发服务器（WASM 已构建）
-pnpm dev
-
-# 2. 修改前端代码（www/*.html, www/*.js）
-#    → Vite 自动热重载
-
-# 3. 修改 Rust 代码（crates/**/*.rs）
-#    → 需要重新构建 WASM
-export PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH"
-pnpm build:wasm
-
-# 4. 刷新浏览器查看更改
-```
-
-### 生产构建
-
-```bash
-# 1. 构建 WASM (release 模式，已优化)
+npm ci
 cd crates/wasm && wasm-pack build --target web --out-dir ../../packages/core/wasm
-
-# 2. 构建 www（产物在仓库根目录 dist/）
+cd ../..
 npm run build --workspace=@infinitecanvas/www
 ```
 
-推送到 `master` 时，`.github/workflows/pages.yml` 会执行同样的两步并部署到 GitHub Pages。仓库 Settings → Pages 的 Source 需要选 GitHub Actions。
+产物在仓库根目录 `dist/`。推送到 `master` 时 `pages.yml` 会做同样两步并尝试部署。部署步骤在 Pages 未启用时会 404。
 
----
+## 页面
 
-## 📝 脚本速查
+| 页面 | 作用 |
+| --- | --- |
+| `www/index.html` | 首页 Demo：选择、直线、画笔、矩形、圆形、平移、纹理、批量加元素 |
+| `www/test-selection.html` | 选择与框选 |
+| `www/test-stress.html` | 大量元素 |
+| `www/test-texture.html` | 纹理 |
+| `www/test-custom-image.html` | 用户图片与透明度 |
+| `www/test-collab-canvas.html` | 创建元素的广播 |
 
-| 命令 | 说明 | 时间 |
-|------|------|------|
-| `pnpm install` | 安装依赖 | ~10s |
-| `pnpm build:wasm` | 构建 WASM | ~30s |
-| `pnpm dev` | 启动开发服务器 | ~0.1s |
-| `pnpm test:rust` | 运行 Rust 测试 | ~5s |
+本地地址把文件名接在 `http://localhost:5179/infinitecanvas_engine/` 后面，例如 `http://localhost:5179/infinitecanvas_engine/test-texture.html`。
 
----
+## 常见问题
 
-## ✅ 验证清单
+### `wasm32-unknown-unknown` 不存在
 
-构建完成后，验证以下内容：
+```bash
+rustup target add wasm32-unknown-unknown
+```
 
-- [ ] WASM 文件存在：`packages/core/wasm/infinitecanvas_wasm_bg.wasm`
-- [ ] WASM 大小合理：~2.6MB
-- [ ] JS 绑定存在：`packages/core/wasm/infinitecanvas_wasm.js`
-- [ ] TypeScript 类型存在：`packages/core/wasm/infinitecanvas_wasm.d.ts`
-- [ ] 开发服务器启动成功：http://localhost:3000 或 3001
-- [ ] 主页可访问且无控制台错误
-- [ ] 自定义图片页面可以渲染图片
-- [ ] FPS 稳定在 60
+`rust-toolchain.toml` 在 `rustup show` 之后通常已经装好这个 target。
 
----
+### 页面 404，或打开的是 Vite 根路径
 
-## 🎉 完成！
+确认地址包含 `/infinitecanvas_engine/`，并且开发服务器是 `npm run dev --workspace=@infinitecanvas/www`，端口 5179。
 
-项目已完成清理和验证，所有模块编译正确，输入输出目录配置无误。
+### 画布提示没有 WebGPU
 
-**现在可以开始开发了！** 🚀
+引擎在 `navigator.gpu` 不可用时不会初始化。换用上面列出的浏览器，并打开硬件加速。无 GPU 的环境可以用 Mesa lavapipe（`mesa-vulkan-drivers` 的 `lvp_icd.json`）配合支持 Vulkan 的 WebGPU 实现；这只影响能否截到真实画面，不改变构建命令。
 
----
+### 根脚本找不到 `pnpm`
 
-**更新时间**: 2025-11-28  
-**维护者**: InfiniteCanvas Team
+预期行为。按本指南使用 `npm ci` 和 `npm run … --workspace=…`，不要改走 `pnpm install`。
 
+## 验证清单
 
+- [ ] `cargo test --workspace` 通过
+- [ ] `packages/core/wasm/infinitecanvas_wasm_bg.wasm` 已生成
+- [ ] `packages/core/wasm/infinitecanvas_wasm.js` 存在
+- [ ] [http://localhost:5179/infinitecanvas_engine/](http://localhost:5179/infinitecanvas_engine/) 能打开首页
+- [ ] 浏览器有 WebGPU 时，示例矩形、圆形和纹理出现在画布上
 
-
-
-
+**更新**: 2026-10-14

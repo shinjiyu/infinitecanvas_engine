@@ -4,7 +4,13 @@
 
 > 高性能开源无限画布引擎 | Rust + WebGPU + WASM
 
-当前能力说明、性能数字和路线图以英文主文档 [README.md](./README.md) 为准。本文件保留原先的中文介绍。
+**Demo：** [https://shinjiyu.github.io/infinitecanvas_engine/](https://shinjiyu.github.io/infinitecanvas_engine/)
+
+2026-10-14 该地址仍是 404：Pages 工作流能构建 `dist/`，但仓库尚未在 Settings → Pages 里把 Source 设为 GitHub Actions。下面这张图是本地预览的同一页 `www/index.html`。
+
+![InfiniteCanvas 首页 Demo](./docs/assets/demo.png)
+
+当前能力说明、性能数字和路线图以英文主文档 [README.md](./README.md) 为准。构建命令与 [BUILD_GUIDE.md](./BUILD_GUIDE.md) 一致。本文件保留原先的中文介绍。
 
 ## 🎯 项目介绍
 
@@ -23,56 +29,52 @@ InfiniteCanvas 是一个使用 Rust 和 WebGPU 构建的高性能无限画布引
 ```
 infinitecanvas_engine/
 ├── crates/              # Rust 工作空间
-│   ├── engine/          # 核心渲染引擎
-│   ├── wasm/            # WASM 绑定层
+│   ├── engine/          # 场景、视口、工具、命令
+│   ├── wasm/            # WebGPU 渲染与 JS API
 │   └── math/            # 数学库
-├── packages/            # TypeScript/JS 工作空间
-│   ├── core/            # TS 封装层
-│   └── examples/        # 示例应用
-├── www/                 # 主 Web 应用
-├── docs/                # 文档
-│   ├── design/          # 设计文档
-│   └── references/      # 参考资料
-└── .github/workflows/   # CI/CD 配置
+├── packages/
+│   ├── core/            # TypeScript 封装与协同客户端
+│   └── server/          # WebSocket 房间服务
+├── www/                 # Vite Demo
+└── docs/                # 设计文档
 ```
 
 ## 🚀 快速开始
 
+命令与英文 README、[BUILD_GUIDE.md](./BUILD_GUIDE.md)、CI 相同。锁文件是仓库根目录的 `package-lock.json`，用 `npm ci`，不要用 `pnpm install`。
+
 ### 前置要求
 
-- Rust 1.75+
-- Node.js 18+
-- pnpm 8+
+- Rust stable（`rust-toolchain.toml` 已包含 `wasm32-unknown-unknown`）
+- [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
+- Node.js 20
 
-### 安装
+### 安装、测试、预览
 
 ```bash
-# 克隆仓库
 git clone https://github.com/shinjiyu/infinitecanvas_engine.git
 cd infinitecanvas_engine
 
-# 安装 Rust 工具链
+rustup show
 rustup target add wasm32-unknown-unknown
 cargo install wasm-pack
 
-# 安装 Node 依赖
-pnpm install
+npm ci
+cargo test --workspace
 
-# 构建项目
-pnpm build
+cd crates/wasm
+wasm-pack build --target web --out-dir ../../packages/core/wasm
+cd ../..
+
+npm run dev --workspace=@infinitecanvas/www
 ```
 
-### 开发
+浏览器打开 [http://localhost:5179/infinitecanvas_engine/](http://localhost:5179/infinitecanvas_engine/)。端口是 5179，Vite `base` 是 `/infinitecanvas_engine/`。
+
+可选的协同服务（端口 8080）：
 
 ```bash
-# 启动开发服务器
-pnpm dev
-
-# 运行测试
-pnpm test
-
-# 构建 WASM
-pnpm build:wasm
+npm run dev --workspace=@infinitecanvas/server
 ```
 
 ## 📚 文档
