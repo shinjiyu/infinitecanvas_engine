@@ -18,6 +18,7 @@
 //!
 //! 文本写成 `<text>` / `<tspan>`。锚点与 [`TextAlign`] 相同：左上、上边中点或右上角。
 
+use crate::blend::BlendMode;
 use crate::element::{
     Circle, DropShadow, Element, ElementId, ElementStyle, FillKind, Image, Line, Path, Polygon,
     Rectangle, StrokeCap, StrokeJoin, Text, TextAlign,
@@ -325,6 +326,7 @@ fn embedded_image(scene: &Scene, image: &Image) -> Option<String> {
         &image.props.transform,
         image.alpha,
         &image.shadow,
+        image.blend_mode,
         &body,
     ))
 }
@@ -471,6 +473,7 @@ fn write_rectangle(rect: &Rectangle) -> String {
         &rect.props.transform,
         rect.style.opacity,
         &rect.style.shadow,
+        rect.style.blend_mode,
         &prepend_defs(&defs, &shape),
     )
 }
@@ -495,6 +498,7 @@ fn write_circle(circle: &Circle) -> String {
         &circle.props.transform,
         circle.style.opacity,
         &circle.style.shadow,
+        circle.style.blend_mode,
         &prepend_defs(&defs, &shape),
     )
 }
@@ -523,6 +527,7 @@ fn write_polygon(polygon: &Polygon) -> String {
         &polygon.props.transform,
         polygon.style.opacity,
         &polygon.style.shadow,
+        polygon.style.blend_mode,
         &prepend_defs(&defs, &shape),
     )
 }
@@ -554,6 +559,7 @@ fn write_line(line: &Line) -> String {
         &line.props.transform,
         line.style.opacity,
         &line.style.shadow,
+        line.style.blend_mode,
         &body,
     )
 }
@@ -605,6 +611,7 @@ fn write_text(text: &Text) -> Option<String> {
         &text.props.transform,
         text.opacity,
         &text.shadow,
+        text.blend_mode,
         &body,
     ))
 }
@@ -624,6 +631,7 @@ fn write_path(path: &Path) -> Option<String> {
         &path.props.transform,
         path.style.opacity,
         &path.style.shadow,
+        path.style.blend_mode,
         &body,
     ))
 }
@@ -668,6 +676,7 @@ fn write_fill_shapes(path: &Path) -> Option<String> {
         &path.props.transform,
         path.style.opacity,
         &path.style.shadow,
+        path.style.blend_mode,
         &prepend_defs(&defs, &body),
     ))
 }
@@ -677,6 +686,7 @@ fn wrap_group(
     transform: &Transform,
     opacity: f32,
     shadow: &DropShadow,
+    blend: BlendMode,
     body: &str,
 ) -> String {
     let mut group = format!("  <g id=\"e{id}\"");
@@ -692,6 +702,12 @@ fn wrap_group(
     }
     if !shadow.is_off() {
         group.push_str(&format!(" filter=\"url(#e{id}-shadow)\""));
+    }
+    // Normal 不写。查看器不认识 mix-blend-mode 时按普通叠加上色。
+    if blend != BlendMode::Normal {
+        group.push_str(" style=\"mix-blend-mode:");
+        group.push_str(blend.as_str());
+        group.push('"');
     }
     group.push_str(">\n");
     if let Some(filter) = shadow_filter(id, transform, shadow) {
@@ -1654,5 +1670,23 @@ mod tests {
         assert!(marked.contains("#3db7ff"));
         assert!(marked.contains("y1=\"4\""));
         assert!(plain.contains("<rect"));
+    }
+
+    #[test]
+    fn svg_maps_non_normal_blend_to_css_and_omits_normal() {
+        let mut scene = Scene::new();
+        let mut shape = Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0))
+            .with_style(ElementStyle::fill_only(Color::RED));
+        shape.style.blend_mode = BlendMode::Overlay;
+        scene.add_rect(shape);
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains("style=\"mix-blend-mode:overlay\""));
+
+        match scene.get_mut(1).unwrap() {
+            AnyElement::Rectangle(rect) => rect.style.blend_mode = BlendMode::Normal,
+            other => panic!("rect, got {other:?}"),
+        }
+        let normal = export_svg(&scene, false);
+        assert!(!normal.contains("mix-blend-mode"));
     }
 }

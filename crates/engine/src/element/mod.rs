@@ -29,6 +29,7 @@ pub use text::{
     RasterParams, Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };
 
+use crate::blend::BlendMode;
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};
 use serde::{Deserialize, Serialize};
 
@@ -298,6 +299,13 @@ pub struct ElementStyle {
     /// 径向渐变半径，局部单位。0 表示用局部包围盒对角线的一半。
     #[serde(default, skip_serializing_if = "is_zero_f32")]
     pub fill_radius: f32,
+    /// 混合模式。缺省 [`BlendMode::Normal`]（`serde(default = Normal)`）。
+    /// Normal 不写入 JSON，旧文档仍然有效。
+    #[serde(
+        default = "crate::blend::default_blend_mode",
+        skip_serializing_if = "crate::blend::blend_is_normal"
+    )]
+    pub blend_mode: BlendMode,
 }
 
 impl ElementStyle {
@@ -317,6 +325,7 @@ impl ElementStyle {
             fill_angle: 0.0,
             fill_center: Vec2::ZERO,
             fill_radius: 0.0,
+            blend_mode: BlendMode::Normal,
         }
     }
 

@@ -2,6 +2,9 @@
 //!
 //! 使用 wgpu 实现高性能 GPU 渲染
 
+#[path = "blend_pass.rs"]
+mod blend_pass;
+
 use crate::texture_manager::TextureManager;
 use infinitecanvas_engine::{
     element::Element,
@@ -100,6 +103,8 @@ pub struct WebGPURenderer {
     // 占位纹理（用于无纹理绑定时）
     placeholder_texture: wgpu::Texture,
     placeholder_texture_view: wgpu::TextureView,
+    /// 有非 Normal 叶子时才分配。全部为 Normal 时保持空，绘制路径不变。
+    blend_targets: Option<blend_pass::BlendTargets>,
 }
 
 impl WebGPURenderer {
@@ -579,6 +584,7 @@ impl WebGPURenderer {
             texture_manager,
             placeholder_texture,
             placeholder_texture_view,
+            blend_targets: None,
         })
     }
 
@@ -645,8 +651,20 @@ impl WebGPURenderer {
         let selection_stroke_count = self.selection_stroke.len() as u32;
         let textured_count = self.vertex_cache.textured_draws().len();
         let mut draw_calls = 0usize;
+        let blend_composite = self.vertex_cache.needs_blend_composite();
+        if blend_composite {
+            self.ensure_blend_targets();
+        }
 
-        {
+        if blend_composite {
+            draw_calls += self.draw_blended(
+                &mut encoder,
+                &view,
+                grid_count,
+                selection_fill_count,
+                selection_stroke_count,
+            );
+        } else {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1165,6 +1183,7 @@ impl WebGPURenderer {
             self.surface_config.width = width;
             self.surface_config.height = height;
             self.surface.configure(&self.device, &self.surface_config);
+            self.discard_blend_targets();
             log::info!("Surface resized to {}x{}", width, height);
         }
     }

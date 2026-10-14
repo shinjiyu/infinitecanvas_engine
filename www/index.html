@@ -1003,6 +1003,22 @@
             <input id="prop-inner-radius-number" type="number" min="0.05" max="0.95" step="0.01" value="0.5" aria-label="星形内径比数值">
           </div>
           <p id="prop-inner-radius-mixed" class="mixed-tag" hidden>内径：多种</p>
+          <div id="prop-blend-row" hidden>
+            <label class="prop-row" for="prop-blend-mode">
+              <span>混合</span>
+              <select id="prop-blend-mode" aria-label="混合模式">
+                <option value="" hidden>多种</option>
+                <option value="normal">正常</option>
+                <option value="multiply">正片叠底</option>
+                <option value="screen">滤色</option>
+                <option value="overlay">叠加</option>
+                <option value="darken">变暗</option>
+                <option value="lighten">变亮</option>
+              </select>
+              <span></span>
+            </label>
+            <p id="prop-blend-mode-mixed" class="mixed-tag" hidden>混合：多种</p>
+          </div>
           <label class="prop-row" for="prop-opacity">
             <span>不透明度</span>
             <input id="prop-opacity" type="range" min="0" max="1" step="0.01" value="1">

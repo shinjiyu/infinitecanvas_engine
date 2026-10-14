@@ -19,6 +19,7 @@
 
 pub mod align;
 pub mod asset;
+pub mod blend;
 pub mod boolean;
 pub mod camera_fit;
 pub mod command;
@@ -51,6 +52,7 @@ pub use align::{
     DistributeElementsCommand,
 };
 pub use asset::{fitted_size, AssetError, AssetTable, ImageAsset, MAX_IMAGE_EDGE};
+pub use blend::{composite_straight, BlendMode, BLEND_MODES};
 pub use boolean::{apply_boolean, boolean_targets, BooleanElementsCommand, BooleanOp};
 pub use camera_fit::{
     camera_for_bounds, selection_content_bounds, zoom_viewport_to_scene,
@@ -113,8 +115,8 @@ pub use svg::{export_frame_svg, export_svg, export_svg_with_guides};
 pub use svg_import::{apply_svg_import, import_svg, ImportSvgCommand, SvgImportError};
 pub use tool::{Tool, ToolManager};
 pub use vertex_cache::{
-    rebuild_all_vertices, GpuVertexWrite, RebuiltGeometry, TexturedDraw, VertexBufferKind,
-    VertexCache, VertexSync,
+    rebuild_all_vertices, GpuVertexWrite, PaintSpan, RebuiltGeometry, TexturedDraw,
+    VertexBufferKind, VertexCache, VertexSync,
 };
 pub use viewport::{Viewport, ZOOM_STEP};
 

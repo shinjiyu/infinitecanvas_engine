@@ -2,6 +2,22 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #76: 混合模式
+
+- [x] `BlendMode`：`normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。`serde(default = Normal)`，Normal 不写入 JSON
+- [x] 形状写在 `ElementStyle`，文本和图片各有字段。组展开到子孙叶子。画板用自己的样式
+- [x] 改混合模式是一条 `SetStyle`。空选、锁定、无变化不入栈。`mark_dirty` 刷新绘制区间。和投影、渐变一样，未写出的字段保持原值
+- [x] WebGPU：全部为 Normal 时仍批量绘制。有非 Normal 叶子时按 z 逐叶子合成（填充+描边+纹理一层，再 W3C 混合）
+- [x] 属性面板下拉。多选不一致为 mixed。不新增快捷键
+- [x] PNG 使用同一套公式。SVG 映射到 CSS `mix-blend-mode`，Normal 省略
+
+```text
+属性面板 blendMode ── SetStyle ──► 叶子 blend_mode
+                                      │ mark_dirty
+                                      ▼
+                         VertexCache 绘制区间 ──► WebGPU / PNG / SVG
+```
+
 ## Issue #73: 线性 / 径向渐变填充
 
 - [x] `ElementStyle` 增加 `fill_kind` / `fill_stops` / `fill_angle` / `fill_center` / `fill_radius`，全部 `serde(default)`，缺省纯色
@@ -89,8 +105,6 @@ import_svg ── ImportSvgCommand（一条历史）
     ├─ rect / circle / ellipse / line / text / image(data URL)
     └─ path / polygon / polyline → Path
 ```
-
-
 
 ## Issue #65: 多边形与星形
 

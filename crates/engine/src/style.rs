@@ -5,8 +5,8 @@
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
 //! 画板有自己的填充和描边；选中画板只改画板，不把样式写到子元素上。
 //!
-//! 投影和渐变都是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
-//! 吸管只写填充和描边，并把渐变收成纯色。混合模式以后也可以加同样的可选字段。
+//! 投影、渐变和混合模式都是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
+//! 吸管只写填充和描边，并把渐变收成纯色。混合模式不随吸管改变。
 //!
 //! ```text
 //! 选中 id ──► style_target_ids（组展开为子孙，画板不展开）
@@ -19,9 +19,11 @@
 //!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
 //!                                      ├─ 形状渐变（种类、色标、角度、圆心、半径）
 //!                                      ├─ 投影（形状、文本、图片；不丢文本光栅）
-//!                                      └─ 图片只改 alpha 和投影
+//!                                      ├─ 混合模式写到形状、文本、图片和画板
+//!                                      └─ 图片只改 alpha、投影和混合模式
 //! ```
 
+use crate::blend::BlendMode;
 use crate::element::{
     DropShadow, ElementId, ElementStyle, FillKind, GradientStop, Polygon, PolygonKind, Rectangle,
     StrokeCap, StrokeJoin,
@@ -55,6 +57,8 @@ pub struct TextPaint {
     pub stroke_width: f32,
     /// 投影。文本不把它画进字形纹理。
     pub shadow: DropShadow,
+    /// 混合模式。
+    pub blend_mode: BlendMode,
 }
 
 /// 一个元素上可撤销的样式快照。
@@ -83,12 +87,14 @@ pub enum StyleSnapshot {
     },
     /// 文本。
     Text(TextPaint),
-    /// 图片。不透明度和投影。不改资源表。
+    /// 图片。不透明度、投影和混合模式。不改资源表。
     Image {
         /// [`crate::element::Image::alpha`]。
         alpha: f32,
         /// 显示矩形的投影。
         shadow: DropShadow,
+        /// 混合模式。
+        blend_mode: BlendMode,
     },
 }
 
@@ -143,6 +149,8 @@ pub struct StylePatch {
     pub fill_center: Option<Vec2>,
     /// 径向渐变半径，局部单位。0 表示自动。
     pub fill_radius: Option<f32>,
+    /// 形状、文本、图片或画板的混合模式。组展开到子孙叶子。
+    pub blend_mode: Option<BlendMode>,
 }
 
 /// 当前选择的公共样式。
@@ -204,8 +212,10 @@ pub struct SelectionStyle {
     pub has_rect: bool,
     /// 选择里有文本（含组内的文本）。
     pub has_text: bool,
-    /// 选择里有图片（含组内的图片）。图片只贡献不透明度。
+    /// 选择里有图片（含组内的图片）。图片只贡献不透明度和混合模式。
     pub has_image: bool,
+    /// 形状、文本和图片的混合模式。选择里没有叶子时为 [`StyleField::Absent`]。
+    pub blend_mode: StyleField<BlendMode>,
 }
 
 impl SelectionStyle {
@@ -265,11 +275,21 @@ impl StyleSnapshot {
                 if let Some(width) = finite_width(patch.stroke_width) {
                     text.stroke_width = width;
                 }
+                if let Some(mode) = patch.blend_mode {
+                    text.blend_mode = mode;
+                }
                 apply_shadow(&mut text.shadow, patch);
             }
-            Self::Image { alpha, shadow } => {
+            Self::Image {
+                alpha,
+                shadow,
+                blend_mode,
+            } => {
                 if let Some(opacity) = finite_opacity(patch.opacity) {
                     *alpha = opacity;
+                }
+                if let Some(mode) = patch.blend_mode {
+                    *blend_mode = mode;
                 }
                 apply_shadow(shadow, patch);
             }
@@ -353,10 +373,12 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             stroke: text.stroke,
             stroke_width: text.stroke_width,
             shadow: text.shadow,
+            blend_mode: text.blend_mode,
         })),
         AnyElement::Image(image) => Some(StyleSnapshot::Image {
             alpha: image.alpha,
             shadow: image.shadow,
+            blend_mode: image.blend_mode,
         }),
         AnyElement::Frame(frame) => Some(StyleSnapshot::Shape(frame.style.clone())),
         AnyElement::Group(_) => None,
@@ -375,6 +397,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
         Some(AnyElement::Path(path)) => assign_shape(&mut path.style, snapshot),
         Some(AnyElement::Text(text)) => {
             if let StyleSnapshot::Text(paint) = snapshot {
+                text.blend_mode = paint.blend_mode;
                 text.set_paint(
                     paint.font_size,
                     paint.color,
@@ -390,7 +413,13 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
             }
         }
         Some(AnyElement::Image(image)) => {
-            if let StyleSnapshot::Image { alpha, shadow } = snapshot {
+            if let StyleSnapshot::Image {
+                alpha,
+                shadow,
+                blend_mode,
+            } = snapshot
+            {
+                image.blend_mode = *blend_mode;
                 image.set_alpha(*alpha);
                 image.shadow = *shadow;
                 true
@@ -430,6 +459,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut fill_angles = Vec::new();
     let mut fill_centers = Vec::new();
     let mut fill_radii = Vec::new();
+    let mut blends = Vec::new();
     let mut has_shape = false;
     let mut has_polygon = false;
     let mut has_star = false;
@@ -459,6 +489,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
+                blends.push(style.blend_mode);
                 push_shadow(
                     &mut shadow_xs,
                     &mut shadow_ys,
@@ -492,6 +523,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
+                blends.push(style.blend_mode);
                 radii.push(corner_radius);
                 push_shadow(
                     &mut shadow_xs,
@@ -527,6 +559,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
+                blends.push(style.blend_mode);
                 side_counts.push(sides as f32);
                 if kind == PolygonKind::Star {
                     has_star = true;
@@ -550,6 +583,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 opacities.push(text.opacity);
                 font_sizes.push(text.font_size);
                 text_colors.push(text.color);
+                blends.push(text.blend_mode);
                 push_shadow(
                     &mut shadow_xs,
                     &mut shadow_ys,
@@ -559,9 +593,14 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     text.shadow,
                 );
             }
-            Some(StyleSnapshot::Image { alpha, shadow }) => {
+            Some(StyleSnapshot::Image {
+                alpha,
+                shadow,
+                blend_mode,
+            }) => {
                 has_image = true;
                 opacities.push(alpha);
+                blends.push(blend_mode);
                 push_shadow(
                     &mut shadow_xs,
                     &mut shadow_ys,
@@ -605,6 +644,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         has_rect,
         has_text,
         has_image,
+        blend_mode: fold(blends),
     }
 }
 
@@ -674,6 +714,9 @@ fn apply_shape_paint(style: &mut ElementStyle, patch: &StylePatch) {
     }
     if let Some(radius) = patch.fill_radius.filter(|value| value.is_finite()) {
         style.fill_radius = radius.max(0.0);
+    }
+    if let Some(mode) = patch.blend_mode {
+        style.blend_mode = mode;
     }
     apply_shadow(&mut style.shadow, patch);
 }
@@ -1638,5 +1681,125 @@ mod tests {
         let _ = hidden.sync(&mut scene);
         assert!(hidden.fill_slice(1).is_none_or(|slice| slice.is_empty()));
         let _ = DropShadow::default();
+    }
+
+    fn leaf_blend(scene: &Scene, id: ElementId) -> BlendMode {
+        scene.get(id).unwrap().blend_mode()
+    }
+
+    #[test]
+    fn blend_mode_is_one_undoable_set_style_and_noop_when_unchanged() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_text(Text::new(2, Vec2::new(20.0, 0.0), "Hi"));
+        scene.add_image(Image::new(
+            3,
+            Vec2::new(40.0, 0.0),
+            Vec2::new(8.0, 8.0),
+            "tex".to_string(),
+        ));
+        let group_id = scene.group(&[1, 2]).unwrap();
+
+        let patch = StylePatch {
+            blend_mode: Some(BlendMode::Multiply),
+            ..StylePatch::default()
+        };
+        assert!(SetStyleCommand::from_patch(&scene, &[], &patch).is_none());
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[1],
+            &StylePatch {
+                blend_mode: Some(BlendMode::Normal),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let mut locked = Scene::new();
+        let mut rect = Rectangle::new(1, Vec2::ZERO, Vec2::new(4.0, 4.0));
+        rect.props.locked = true;
+        locked.add_rect(rect);
+        assert!(SetStyleCommand::from_patch(&locked, &[1], &patch).is_none());
+
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[group_id, 2, 3], &patch).unwrap()),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert_eq!(leaf_blend(&scene, 1), BlendMode::Multiply);
+        assert_eq!(leaf_blend(&scene, 2), BlendMode::Multiply);
+        assert_eq!(leaf_blend(&scene, 3), BlendMode::Multiply);
+        assert!(scene.has_dirty_elements());
+        let reported = selection_style(&scene, &[1, 2, 3]);
+        assert_eq!(
+            reported.blend_mode,
+            StyleField::Uniform(BlendMode::Multiply)
+        );
+
+        assert!(history.undo(&mut scene));
+        assert_eq!(leaf_blend(&scene, 1), BlendMode::Normal);
+        assert_eq!(leaf_blend(&scene, 2), BlendMode::Normal);
+        assert_eq!(leaf_blend(&scene, 3), BlendMode::Normal);
+        assert!(history.redo(&mut scene));
+        assert_eq!(leaf_blend(&scene, 3), BlendMode::Multiply);
+    }
+
+    #[test]
+    fn mixed_blend_modes_and_legacy_json_default_to_normal() {
+        let mut scene = Scene::new();
+        let mut multiply = Rectangle::new(1, Vec2::ZERO, Vec2::new(4.0, 4.0));
+        multiply.style.blend_mode = BlendMode::Multiply;
+        scene.add_rect(multiply);
+        let mut screen = Rectangle::new(2, Vec2::new(8.0, 0.0), Vec2::new(4.0, 4.0));
+        screen.style.blend_mode = BlendMode::Screen;
+        scene.add_rect(screen);
+
+        let mixed = selection_style(&scene, &[1, 2]);
+        assert_eq!(mixed.blend_mode, StyleField::Mixed);
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(
+                SetStyleCommand::from_patch(
+                    &scene,
+                    &[1, 2],
+                    &StylePatch {
+                        blend_mode: Some(BlendMode::Overlay),
+                        ..StylePatch::default()
+                    },
+                )
+                .unwrap(),
+            ),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert_eq!(leaf_blend(&scene, 1), BlendMode::Overlay);
+        assert_eq!(leaf_blend(&scene, 2), BlendMode::Overlay);
+
+        let mut cache = VertexCache::new();
+        let sync = cache.sync(&mut scene);
+        assert!(sync.full_upload || !sync.geometry_unchanged);
+        let spans = cache.paint_spans();
+        assert!(spans.iter().all(|span| span.blend == BlendMode::Overlay));
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"blend_mode\":\"overlay\""));
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(leaf_blend(&restored, 1), BlendMode::Overlay);
+
+        let size = serde_json::to_value(Vec2::new(2.0, 2.0)).unwrap();
+        let legacy = serde_json::json!({
+            "version": 1,
+            "elements": [
+                { "type": "rectangle", "data": { "props": { "id": 1 }, "size": size } },
+                { "type": "text", "data": { "props": { "id": 2 }, "content": "Old" } },
+                { "type": "image", "data": { "props": { "id": 3 }, "size": size, "texture_id": "t" } }
+            ]
+        });
+        let old = Scene::from_json(&legacy.to_string()).unwrap();
+        assert_eq!(leaf_blend(&old, 1), BlendMode::Normal);
+        assert_eq!(leaf_blend(&old, 2), BlendMode::Normal);
+        assert_eq!(leaf_blend(&old, 3), BlendMode::Normal);
+        assert!(!old.to_json().unwrap().contains("blend_mode"));
     }
 }
