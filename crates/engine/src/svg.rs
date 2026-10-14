@@ -610,6 +610,9 @@ fn write_text(text: &Text) -> Option<String> {
 }
 
 fn write_path(path: &Path) -> Option<String> {
+    if path.is_filled() {
+        return write_fill_shapes(path);
+    }
     if path.points().len() < 2 {
         return None;
     }
@@ -622,6 +625,50 @@ fn write_path(path: &Path) -> Option<String> {
         path.style.opacity,
         &path.style.shadow,
         &body,
+    ))
+}
+
+/// 布尔运算结果：每个环一条闭合子路径。孔和外轮廓用 evenodd 区分。
+fn write_fill_shapes(path: &Path) -> Option<String> {
+    let mut data = String::new();
+    for shape in path.shapes() {
+        for ring in &shape.rings {
+            if ring.len() < 3 {
+                continue;
+            }
+            data.push_str("M ");
+            data.push_str(&fmt_num(ring[0].x));
+            data.push(' ');
+            data.push_str(&fmt_num(ring[0].y));
+            for point in ring.iter().skip(1) {
+                data.push_str(" L ");
+                data.push_str(&fmt_num(point.x));
+                data.push(' ');
+                data.push_str(&fmt_num(point.y));
+            }
+            data.push_str(" Z ");
+        }
+    }
+    if data.is_empty() {
+        return None;
+    }
+    let mut body = format!("    <path d=\"{data}\" fill-rule=\"evenodd\"");
+    let mut defs = String::new();
+    push_fill_stroke(
+        &mut body,
+        &mut defs,
+        path.props.id,
+        &path.style,
+        path.local_bounds(),
+    );
+    push_shape_line_style(&mut body, &path.style);
+    body.push_str("/>\n");
+    Some(wrap_group(
+        path.props.id,
+        &path.props.transform,
+        path.style.opacity,
+        &path.style.shadow,
+        &prepend_defs(&defs, &body),
     ))
 }
 

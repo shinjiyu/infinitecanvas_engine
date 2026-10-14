@@ -1679,6 +1679,19 @@ function syncOrientControls(engine) {
 }
 
 /**
+ * 至少两个可填充叶子时才允许布尔运算。锁定、隐藏和不支持的类型不算。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncBooleanControls(engine) {
+  const enabled = typeof engine.boolean_selection_ready === 'function'
+    && engine.boolean_selection_ready();
+  document.querySelectorAll('[data-boolean]').forEach((button) => {
+    if (button instanceof HTMLButtonElement) button.disabled = !enabled;
+  });
+}
+
+/**
  * 对齐和分布各记一条撤销记录。拖拽吸附不受这些按钮影响。
  *
  * @param {WasmCanvas} engine
@@ -1701,6 +1714,26 @@ function bindAlignControls(engine) {
       if (engine.distribute_selection(axis)) {
         scheduleAutosave(engine);
         setStatus('已分布');
+      }
+    });
+  });
+}
+
+/**
+ * 并集、相减、交集、异或各记一条撤销。相减是最上层减去下层。没有快捷键。
+ *
+ * @param {WasmCanvas} engine
+ */
+function bindBooleanControls(engine) {
+  const labels = { union: '已并集', subtract: '已相减', intersect: '已交集', xor: '已异或' };
+  document.querySelectorAll('[data-boolean]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const op = button.getAttribute('data-boolean');
+      if (!op || typeof engine.boolean_selection !== 'function') return;
+      if (engine.boolean_selection(op)) {
+        scheduleAutosave(engine);
+        syncPropertyPanel(engine);
+        setStatus(labels[op] ?? '已布尔运算');
       }
     });
   });
@@ -2350,6 +2383,7 @@ function bindCornerRadius(engine) {
 function bindInput(canvas, engine) {
   bindPropertyPanel(engine);
   bindAlignControls(engine);
+  bindBooleanControls(engine);
   bindOrientControls(engine);
   document.addEventListener('pointerdown', (event) => {
     if (!contextMenuOpen) return;
@@ -2718,6 +2752,7 @@ function updateHud(engine) {
   if (redoBtn) redoBtn.disabled = !engine.can_redo();
   syncPropertyPanel(engine);
   syncAlignControls(engine);
+  syncBooleanControls(engine);
   syncOrientControls(engine);
   syncSnapControls(engine);
   syncRulerControls(engine);

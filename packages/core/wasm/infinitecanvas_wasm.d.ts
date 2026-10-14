@@ -244,6 +244,42 @@ export class InfiniteCanvas {
      */
     begin_text_edit_at(x: number, y: number): any;
     /**
+     * 对当前选择做布尔运算，并记入一条撤销记录。
+     *
+     * `op` 为 `union`、`subtract`、`intersect` 或 `xor`。相减是最上层减去其余形状（前 − 后）。
+     * 结果是一条路径，替换参与运算的叶子，样式取最上层。空选、单选或不支持的选择不入栈。
+     * 成功后选择集只留下结果路径。
+     *
+     * # 参数
+     * - `op`: `union` / `subtract` / `intersect` / `xor`
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.boolean_selection("subtract");
+     * canvas.undo();
+     * ```
+     */
+    boolean_selection(op: string): boolean;
+    /**
+     * 当前选择是否至少有两个可做布尔运算的叶子。
+     *
+     * 锁定、隐藏、组、直线、文本、图片和开口路径不算。工具栏用它决定按钮是否可点。
+     *
+     * # 返回
+     * 可以执行并集 / 相减 / 交集 / 异或时为 true
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * if (canvas.boolean_selection_ready()) {
+     *   canvas.boolean_selection("union");
+     * }
+     * ```
+     */
+    boolean_selection_ready(): boolean;
+    /**
      * 是否可以重做
      */
     can_redo(): boolean;
@@ -1338,6 +1374,8 @@ export interface InitOutput {
     readonly infinitecanvas_apply_sampled_style_at: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_are_rulers_visible: (a: number) => number;
     readonly infinitecanvas_begin_text_edit_at: (a: number, b: number, c: number) => any;
+    readonly infinitecanvas_boolean_selection: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_boolean_selection_ready: (a: number) => number;
     readonly infinitecanvas_can_redo: (a: number) => number;
     readonly infinitecanvas_can_undo: (a: number) => number;
     readonly infinitecanvas_clear: (a: number) => void;

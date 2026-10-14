@@ -28,9 +28,9 @@ mod texture_manager;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
-    apply_align, apply_distribute, apply_flip, apply_nudge, apply_rename_frame,
+    apply_align, apply_boolean, apply_distribute, apply_flip, apply_nudge, apply_rename_frame,
     apply_reparent_into_frame, apply_rotate_quarter, apply_set_locked, apply_set_visibility,
-    apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility,
+    apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility, boolean_targets,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
@@ -53,8 +53,8 @@ use infinitecanvas_engine::{
         HandleMetrics, SelectionFrame,
     },
     zoom_viewport_to_scene, zoom_viewport_to_selection, AddElementCommand, AlignMode, AnyElement,
-    Circle, CommandHistory, DistributeAxis, DuplicateElementsCommand, EditGuidesCommand, Element,
-    ElementId, ElementStyle, Event, EventQueue, FlipAxis, Frame, Image, Line, MoveCommand,
+    BooleanOp, Circle, CommandHistory, DistributeAxis, DuplicateElementsCommand, EditGuidesCommand,
+    Element, ElementId, ElementStyle, Event, EventQueue, FlipAxis, Frame, Image, Line, MoveCommand,
     NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent,
     Polygon, QuarterTurn, Rectangle, RemoveElementCommand, RemoveElementsCommand,
     ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction,
@@ -791,6 +791,56 @@ impl InfiniteCanvas {
         self.commit_style_preview();
         let selected = self.selection.selected_ids();
         apply_distribute(&mut self.command_history, &mut self.scene, &selected, axis)
+    }
+
+    /// 当前选择是否至少有两个可做布尔运算的叶子。
+    ///
+    /// 锁定、隐藏、组、直线、文本、图片和开口路径不算。工具栏用它决定按钮是否可点。
+    ///
+    /// # 返回
+    /// 可以执行并集 / 相减 / 交集 / 异或时为 true
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// if (canvas.boolean_selection_ready()) {
+    ///   canvas.boolean_selection("union");
+    /// }
+    /// ```
+    #[wasm_bindgen]
+    pub fn boolean_selection_ready(&self) -> bool {
+        boolean_targets(&self.scene, &self.selection.selected_ids()).len() >= 2
+    }
+
+    /// 对当前选择做布尔运算，并记入一条撤销记录。
+    ///
+    /// `op` 为 `union`、`subtract`、`intersect` 或 `xor`。相减是最上层减去其余形状（前 − 后）。
+    /// 结果是一条路径，替换参与运算的叶子，样式取最上层。空选、单选或不支持的选择不入栈。
+    /// 成功后选择集只留下结果路径。
+    ///
+    /// # 参数
+    /// - `op`: `union` / `subtract` / `intersect` / `xor`
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.boolean_selection("subtract");
+    /// canvas.undo();
+    /// ```
+    #[wasm_bindgen]
+    pub fn boolean_selection(&mut self, op: &str) -> bool {
+        let Some(op) = BooleanOp::parse(op) else {
+            return false;
+        };
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        let Some(id) = apply_boolean(&mut self.command_history, &mut self.scene, &selected, op)
+        else {
+            return false;
+        };
+        self.selection.select_element(&mut self.scene, id, false);
+        true
     }
 
     // ========== 撤销/重做 API ==========
@@ -5608,5 +5658,30 @@ mod tests {
         let miss = canvas.eyedropper_notice.take().unwrap();
         assert!(!miss.hit);
         assert!(!miss.applied);
+    }
+
+    #[test]
+    fn boolean_selection_unions_rects_and_undo_restores_them() {
+        let mut canvas = blank_canvas();
+        let left = canvas.add_rectangle(0.0, 0.0, 20.0, 20.0, Some("#0000ff".into()), None, 0.0);
+        let right = canvas.add_rectangle(10.0, 0.0, 20.0, 20.0, Some("#ff0000".into()), None, 0.0);
+        assert!(!canvas.boolean_selection_ready());
+        assert!(!canvas.boolean_selection("union"));
+        assert_eq!(canvas.get_undo_count(), 0);
+
+        canvas.select_element(left, false);
+        assert!(!canvas.boolean_selection_ready());
+        canvas.select_element(right, true);
+        assert!(canvas.boolean_selection_ready());
+        assert!(canvas.boolean_selection("union"));
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert_eq!(canvas.get_selection_count(), 1);
+        assert!(!canvas.scene.contains(left) && !canvas.scene.contains(right));
+
+        assert!(canvas.undo());
+        assert!(canvas.scene.contains(left) && canvas.scene.contains(right));
+        assert_eq!(canvas.get_undo_count(), 0);
+        assert!(canvas.selection.is_selected(left));
+        assert!(canvas.selection.is_selected(right));
     }
 }

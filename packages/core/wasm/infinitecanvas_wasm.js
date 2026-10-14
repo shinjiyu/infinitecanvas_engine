@@ -414,6 +414,53 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 对当前选择做布尔运算，并记入一条撤销记录。
+     *
+     * `op` 为 `union`、`subtract`、`intersect` 或 `xor`。相减是最上层减去其余形状（前 − 后）。
+     * 结果是一条路径，替换参与运算的叶子，样式取最上层。空选、单选或不支持的选择不入栈。
+     * 成功后选择集只留下结果路径。
+     *
+     * # 参数
+     * - `op`: `union` / `subtract` / `intersect` / `xor`
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.boolean_selection("subtract");
+     * canvas.undo();
+     * ```
+     * @param {string} op
+     * @returns {boolean}
+     */
+    boolean_selection(op) {
+        const ptr0 = passStringToWasm0(op, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_boolean_selection(this.__wbg_ptr, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+     * 当前选择是否至少有两个可做布尔运算的叶子。
+     *
+     * 锁定、隐藏、组、直线、文本、图片和开口路径不算。工具栏用它决定按钮是否可点。
+     *
+     * # 返回
+     * 可以执行并集 / 相减 / 交集 / 异或时为 true
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * if (canvas.boolean_selection_ready()) {
+     *   canvas.boolean_selection("union");
+     * }
+     * ```
+     * @returns {boolean}
+     */
+    boolean_selection_ready() {
+        const ret = wasm.infinitecanvas_boolean_selection_ready(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 是否可以重做
      * @returns {boolean}
      */
@@ -4006,12 +4053,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2867, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2892, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 488, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 492, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

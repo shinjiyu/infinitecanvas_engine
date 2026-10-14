@@ -1222,6 +1222,65 @@ impl Scene {
         self.group_child_ids(id)
     }
 
+    /// 用 `children` 替换组或画板的直接子元素，并同步每个子元素的 `parent`。
+    ///
+    /// 不改 `z_index`，也不改世界坐标，也不改画板尺寸。从列表里去掉、但还在场景中的旧子元素会挂回根。
+    /// 布尔运算用它把结果插回原父节点，同时不重排整棵场景的绘制顺序。组会按子元素重算包围盒；画板尺寸保持不变。
+    ///
+    /// # 参数
+    /// - `group_id`: 目标组或画板
+    /// - `children`: 新的子元素 id，从底到顶
+    ///
+    /// # 错误
+    /// 目标不是组或画板、某个 id 不存在，或会把容器放进自己的子孙里。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene};
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+    /// scene.add_rect(Rectangle::new(2, Vec2::new(20.0, 0.0), Vec2::new(10.0, 10.0)));
+    /// let group_id = scene.group(&[1, 2]).unwrap();
+    /// scene.replace_group_children(group_id, &[2, 1]).unwrap();
+    /// assert_eq!(scene.children_of(group_id), vec![2, 1]);
+    /// assert_eq!(scene.parent_of(1), Some(group_id));
+    /// ```
+    pub fn replace_group_children(
+        &mut self,
+        group_id: ElementId,
+        children: &[ElementId],
+    ) -> Result<(), GroupError> {
+        self.container_child_list(group_id)?;
+        for id in children {
+            if !self.elements.contains_key(id) {
+                return Err(GroupError::UnknownElement(*id));
+            }
+            if *id == group_id || self.is_ancestor(*id, group_id) {
+                return Err(GroupError::WouldCycle);
+            }
+        }
+        let previous = self.group_child_ids(group_id);
+        for id in children {
+            if self.parent_id(*id) != Some(group_id) {
+                self.detach_from_parent(*id);
+                self.set_parent(*id, Some(group_id));
+            }
+        }
+        for id in &previous {
+            if !children.contains(id) && self.elements.contains_key(id) {
+                self.set_parent(*id, None);
+            }
+        }
+        self.set_group_children(group_id, children.to_vec());
+        self.refresh_bounds_upwards(group_id);
+        self.mark_dirty(group_id);
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+        self.bump_geometry_epoch();
+        Ok(())
+    }
+
     /// 元素自己加上全部后代，前序。
     pub fn subtree_ids(&self, id: ElementId) -> Vec<ElementId> {
         let mut ids = Vec::new();
