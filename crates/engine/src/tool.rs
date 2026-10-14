@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// 工具类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Tool {
-    /// 选择工具（默认）- 选择、移动、框选
+    /// 选择工具（默认）- 选择、移动、框选、手柄缩放/旋转
     #[default]
     Select,
     /// 矩形工具 - 绘制矩形

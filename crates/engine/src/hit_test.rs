@@ -117,4 +117,91 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, 2); // invisible but higher z-index
     }
+
+    #[test]
+    fn rotated_rectangle_hit_uses_oriented_bounds() {
+        let mut rect = Rectangle::new(1, Vec2::ZERO, Vec2::new(100.0, 20.0));
+        rect.set_rotation(std::f32::consts::FRAC_PI_4);
+        // 沿长轴仍在矩形内。
+        let along = Vec2::new(28.28, 28.28);
+        assert!(rect.contains_point(along));
+        assert_eq!(
+            hit_test_point(
+                &{
+                    let mut scene = Scene::new();
+                    scene.add_rect(rect.clone());
+                    scene
+                },
+                along,
+                &HitTestOptions::default(),
+            )
+            .len(),
+            1
+        );
+        // 轴对齐包围盒的角落在旋转后的矩形外面。
+        assert!(!rect.contains_point(Vec2::new(42.0, 42.0)));
+        assert!(hit_test_point(
+            &{
+                let mut scene = Scene::new();
+                scene.add_rect(rect);
+                scene
+            },
+            Vec2::new(42.0, 42.0),
+            &HitTestOptions::default(),
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn rotated_circle_hit_follows_scaled_axes() {
+        use crate::element::Circle;
+        let mut circle = Circle::new(1, Vec2::ZERO, 10.0);
+        circle.props_mut().transform.scale = Vec2::new(3.0, 1.0);
+        circle.set_rotation(std::f32::consts::FRAC_PI_2);
+        let mut scene = Scene::new();
+        scene.add_circle(circle);
+        // 90° 之后，原先的 X 拉伸转到 Y。
+        assert_eq!(
+            hit_test_point(&scene, Vec2::new(0.0, 25.0), &HitTestOptions::default()).len(),
+            1
+        );
+        assert!(
+            hit_test_point(&scene, Vec2::new(25.0, 0.0), &HitTestOptions::default()).is_empty()
+        );
+    }
+
+    #[test]
+    fn rotated_line_and_path_follow_transform() {
+        use crate::element::{ElementStyle, Line, Path};
+        use infinitecanvas_math::Color;
+
+        let mut line = Line::from_world(
+            1,
+            Vec2::ZERO,
+            Vec2::new(100.0, 0.0),
+            ElementStyle::stroke_only(Color::BLACK, 4.0),
+            false,
+        );
+        line.set_rotation(std::f32::consts::FRAC_PI_2);
+        assert!(line.contains_point(Vec2::new(0.0, 50.0)));
+        assert!(!line.contains_point(Vec2::new(50.0, 0.0)));
+
+        let mut path = Path::from_world_points(
+            2,
+            &[Vec2::ZERO, Vec2::new(80.0, 0.0)],
+            ElementStyle::stroke_only(Color::BLACK, 4.0),
+        );
+        path.set_rotation(std::f32::consts::FRAC_PI_2);
+        assert!(path.contains_point(Vec2::new(0.0, 40.0)));
+        assert!(!path.contains_point(Vec2::new(40.0, 0.0)));
+
+        let mut scene = Scene::new();
+        scene.add_line(line);
+        scene.add_path(path);
+        let hits = hit_test_point(&scene, Vec2::new(0.0, 40.0), &HitTestOptions::default());
+        assert!(hits.iter().any(|hit| hit.id == 2));
+        assert!(
+            hit_test_point(&scene, Vec2::new(40.0, 0.0), &HitTestOptions::default()).is_empty()
+        );
+    }
 }

@@ -27,10 +27,13 @@ mod texture_manager;
 
 use infinitecanvas_engine::{
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
-    math::{Color, Vec2},
+    math::{Color, Transform, Vec2},
+    transform_handles::{
+        cursor_for, transforms_differ, HandleGesture, HandleMetrics, SelectionFrame,
+    },
     AddElementCommand, AnyElement, Circle, CommandHistory, ElementId, ElementStyle, Event,
     EventQueue, Image, Line, MoveCommand, Path, PointerButton, PointerEvent, Rectangle, Scene,
-    SelectionBox, SelectionManager, Tool, ToolManager, Viewport,
+    SelectionBox, SelectionManager, Tool, ToolManager, TransformElementsCommand, Viewport,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -73,6 +76,14 @@ struct DragState {
     preview_id: Option<ElementId>,
 }
 
+/// 缩放 / 旋转手柄的拖动。预览已经写进场景，松手后才进入撤销栈。
+struct HandleInteraction {
+    pointer_id: i32,
+    gesture: HandleGesture,
+    live_frame: SelectionFrame,
+    latest: Vec<(ElementId, Transform)>,
+}
+
 /// 性能统计
 #[derive(Default)]
 struct PerformanceStats {
@@ -110,6 +121,7 @@ pub struct InfiniteCanvas {
     selection: SelectionManager,
     selection_box: SelectionBox,
     drag_state: DragState,
+    handle_drag: Option<HandleInteraction>,
     command_history: CommandHistory,
     tool_manager: ToolManager,
     perf_stats: PerformanceStats,
@@ -148,6 +160,7 @@ impl InfiniteCanvas {
             selection: SelectionManager::new(),
             selection_box: SelectionBox::new(),
             drag_state: DragState::default(),
+            handle_drag: None,
             command_history: CommandHistory::new(),
             tool_manager: ToolManager::new(),
             perf_stats: PerformanceStats::default(),
@@ -232,10 +245,10 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn render(&mut self) -> Result<(), JsValue> {
         self.dispatch_pending_events();
+        let selection_box = self.selection_box.bounds();
+        let transform_frame = self.display_selection_frame();
         if let Some(renderer) = &mut self.webgpu_renderer {
-            // 获取当前框选矩形（如果有）
-            let selection_box = self.selection_box.bounds();
-            renderer.render(&self.scene, &self.viewport, selection_box)?;
+            renderer.render(&self.scene, &self.viewport, selection_box, transform_frame)?;
 
             // 更新性能统计
             self.perf_stats.frame_count += 1;
@@ -361,6 +374,7 @@ impl InfiniteCanvas {
 
     #[wasm_bindgen]
     pub fn clear_selection(&mut self) {
+        self.cancel_handle_gesture();
         self.selection_box.cancel();
         self.selection.clear(&mut self.scene);
     }
@@ -439,6 +453,7 @@ impl InfiniteCanvas {
     /// 是否成功撤销
     #[wasm_bindgen]
     pub fn undo(&mut self) -> bool {
+        self.commit_handle_gesture();
         let undone = self.command_history.undo(&mut self.scene);
         if undone {
             self.sync_selection_after_history();
@@ -452,6 +467,7 @@ impl InfiniteCanvas {
     /// 是否成功重做
     #[wasm_bindgen]
     pub fn redo(&mut self) -> bool {
+        self.commit_handle_gesture();
         let redone = self.command_history.redo(&mut self.scene);
         if redone {
             self.sync_selection_after_history();
@@ -498,6 +514,7 @@ impl InfiniteCanvas {
     pub fn set_tool(&mut self, tool_name: String) -> bool {
         if let Ok(tool) = Tool::from_str(&tool_name) {
             if self.tool_manager.current() != tool {
+                self.commit_handle_gesture();
                 self.cancel_drawing();
             }
             self.tool_manager.set_tool(tool);
@@ -688,6 +705,21 @@ impl InfiniteCanvas {
                 &JsValue::from_str("zIndex"),
                 &JsValue::from(props.z_index),
             );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("rotation"),
+                &JsValue::from(props.rotation()),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("scaleX"),
+                &JsValue::from(props.transform.scale.x),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("scaleY"),
+                &JsValue::from(props.transform.scale.y),
+            );
             obj.into()
         } else {
             JsValue::NULL
@@ -867,6 +899,7 @@ impl InfiniteCanvas {
     /// 清空场景
     #[wasm_bindgen]
     pub fn clear_scene(&mut self) {
+        self.cancel_handle_gesture();
         self.selection.clear(&mut self.scene);
         self.selection_box.cancel();
         self.scene.clear();
@@ -1020,6 +1053,7 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn clear(&mut self) {
         let count = self.scene.count();
+        self.cancel_handle_gesture();
         self.selection.clear(&mut self.scene);
         self.selection_box.cancel();
         self.scene.clear();
@@ -1132,6 +1166,28 @@ impl InfiniteCanvas {
     pub fn get_last_draw_calls(&self) -> usize {
         self.perf_stats.last_draw_calls
     }
+
+    /// 指针下的光标。选择工具命中缩放/旋转手柄时返回对应光标。
+    ///
+    /// # 参数
+    /// - `x`, `y`: 屏幕坐标（与指针事件相同）
+    #[wasm_bindgen]
+    pub fn cursor_at(&self, x: f32, y: f32) -> String {
+        if self.tool_manager.current() != Tool::Select {
+            return self.tool_manager.current().cursor().to_string();
+        }
+        if let Some(drag) = &self.handle_drag {
+            return cursor_for(drag.gesture.kind(), drag.live_frame.rotation).to_string();
+        }
+        let world = self.viewport.screen_to_world(Vec2::new(x, y));
+        if let Some(frame) = self.compute_selection_frame() {
+            let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
+            if let Some(kind) = frame.hit_test(world, metrics.hit_radius, metrics.rotate_gap) {
+                return cursor_for(kind, frame.rotation).to_string();
+            }
+        }
+        self.tool_manager.current().cursor().to_string()
+    }
 }
 
 impl InfiniteCanvas {
@@ -1193,6 +1249,9 @@ impl InfiniteCanvas {
     // ========== 选择工具事件处理 ==========
 
     fn handle_select_tool_down(&mut self, event: PointerEvent) {
+        if self.try_begin_handle_gesture(&event) {
+            return;
+        }
         let options = HitTestOptions {
             max_results: 1,
             include_invisible: false,
@@ -1223,6 +1282,9 @@ impl InfiniteCanvas {
     }
 
     fn handle_select_tool_move(&mut self, event: PointerEvent) {
+        if self.update_handle_gesture(&event) {
+            return;
+        }
         // 如果正在拖动，移动选中的元素
         if self.drag_state.is_dragging && self.drag_state.pointer_id == Some(event.pointer_id) {
             let delta = event.world_position - self.drag_state.last_position;
@@ -1237,6 +1299,9 @@ impl InfiniteCanvas {
     }
 
     fn handle_select_tool_up(&mut self, event: PointerEvent) {
+        if self.finish_handle_gesture(event.pointer_id) {
+            return;
+        }
         // 结束拖动
         if self.drag_state.is_dragging && self.drag_state.pointer_id == Some(event.pointer_id) {
             self.finish_drag();
@@ -1551,6 +1616,137 @@ impl InfiniteCanvas {
         self.drag_state.pointer_id = None;
         self.drag_state.total_delta = Vec2::ZERO;
         self.drag_state.dragged_ids.clear();
+    }
+
+    /// 把当前选中元素收成一个选中框。单选跟元素旋转对齐，多选用包围盒。
+    fn compute_selection_frame(&self) -> Option<SelectionFrame> {
+        let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
+        let elements = self.selected_element_refs();
+        SelectionFrame::from_elements(&elements).map(|frame| frame.inflated(metrics.pad))
+    }
+
+    /// 绘制用的选中框。手柄拖动中用实时预览，否则按当前选中重算。
+    fn display_selection_frame(&self) -> Option<SelectionFrame> {
+        self.handle_drag
+            .as_ref()
+            .map(|drag| drag.live_frame)
+            .or_else(|| self.compute_selection_frame())
+    }
+
+    fn selected_element_refs(&self) -> Vec<&dyn infinitecanvas_engine::Element> {
+        let mut elements = Vec::new();
+        for id in self.selection.selected_ids() {
+            if let Some(element) = self.scene.get(id) {
+                let element = element.as_element();
+                if element.props().visible {
+                    elements.push(element);
+                }
+            }
+        }
+        elements
+    }
+
+    fn selected_transforms(&self) -> Vec<(ElementId, Transform)> {
+        self.selection
+            .selected_ids()
+            .into_iter()
+            .filter_map(|id| {
+                self.scene
+                    .get(id)
+                    .map(|element| (id, element.as_element().props().transform))
+            })
+            .collect()
+    }
+
+    fn apply_transform_list(&mut self, transforms: &[(ElementId, Transform)]) {
+        for (id, transform) in transforms {
+            if let Some(element) = self.scene.get_mut(*id) {
+                element.as_element_mut().props_mut().transform = *transform;
+            }
+        }
+    }
+
+    /// 指针落在手柄上时开始缩放或旋转，不改选择集。
+    fn try_begin_handle_gesture(&mut self, event: &PointerEvent) -> bool {
+        if self.handle_drag.is_some() {
+            self.commit_handle_gesture();
+        }
+        let Some(frame) = self.compute_selection_frame() else {
+            return false;
+        };
+        let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
+        let Some(kind) =
+            frame.hit_test(event.world_position, metrics.hit_radius, metrics.rotate_gap)
+        else {
+            return false;
+        };
+        let originals = self.selected_transforms();
+        if originals.is_empty() {
+            return false;
+        }
+        let gesture = HandleGesture::start(frame, kind, event.world_position, originals.clone());
+        self.selection_box.cancel();
+        self.handle_drag = Some(HandleInteraction {
+            pointer_id: event.pointer_id,
+            gesture,
+            live_frame: frame,
+            latest: originals,
+        });
+        true
+    }
+
+    fn update_handle_gesture(&mut self, event: &PointerEvent) -> bool {
+        let preview = {
+            let Some(drag) = &self.handle_drag else {
+                return false;
+            };
+            if drag.pointer_id != event.pointer_id {
+                return false;
+            }
+            let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
+            drag.gesture.preview(
+                event.world_position,
+                event.modifiers.shift,
+                metrics.min_half,
+            )
+        };
+        self.apply_transform_list(&preview.transforms);
+        if let Some(drag) = &mut self.handle_drag {
+            drag.live_frame = preview.frame;
+            drag.latest = preview.transforms;
+        }
+        true
+    }
+
+    fn finish_handle_gesture(&mut self, pointer_id: i32) -> bool {
+        let matches = self
+            .handle_drag
+            .as_ref()
+            .is_some_and(|drag| drag.pointer_id == pointer_id);
+        if matches {
+            self.commit_handle_gesture();
+        }
+        matches
+    }
+
+    /// 把手势写入撤销栈。场景里已经是最新变换，所以不再 execute。
+    fn commit_handle_gesture(&mut self) {
+        let Some(drag) = self.handle_drag.take() else {
+            return;
+        };
+        let before = drag.gesture.originals().to_vec();
+        if transforms_differ(&before, &drag.latest) {
+            self.command_history
+                .push_executed(Box::new(TransformElementsCommand::new(before, drag.latest)));
+        }
+    }
+
+    /// 丢掉未提交的手柄拖动，元素回到按下时的变换。
+    fn cancel_handle_gesture(&mut self) {
+        if let Some(drag) = self.handle_drag.take() {
+            let originals = drag.gesture.originals().to_vec();
+            self.apply_transform_list(&originals);
+        }
     }
 
     /// 移动所有选中的元素（内部方法，不创建命令）

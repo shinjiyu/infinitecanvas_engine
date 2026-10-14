@@ -5,7 +5,8 @@
 use crate::texture_manager::TextureManager;
 use infinitecanvas_engine::{
     element::Element,
-    math::{Rect, Vertex},
+    math::{Rect, Vec2, Vertex},
+    transform_handles::{HandleKind, HandleMetrics, SelectionFrame},
     AnyElement, Scene, Viewport,
 };
 use std::sync::Arc;
@@ -506,13 +507,15 @@ impl WebGPURenderer {
     ///
     /// # 参数
     /// - `scene`: 场景数据
-    /// - `_viewport`: 视口（当前未使用）
+    /// - `viewport`: 视口，手柄尺寸按缩放换算
     /// - `selection_box`: 框选矩形（如果正在框选）
+    /// - `transform_frame`: 选中框。有选中元素时带 8 个缩放手柄和 1 个旋转手柄
     pub fn render(
         &mut self,
         scene: &Scene,
         viewport: &Viewport,
         selection_box: Option<Rect>,
+        transform_frame: Option<SelectionFrame>,
     ) -> Result<(), JsValue> {
         // 1. 收集所有顶点（带视口裁剪）
         let (fill_vertices, stroke_vertices, _culled_count) =
@@ -520,8 +523,13 @@ impl WebGPURenderer {
         let textured_groups = self.collect_textured_vertices(scene, viewport);
 
         // 1.5 收集选中元素的高亮顶点和框选矩形顶点
-        let (selection_fill_vertices, selection_stroke_vertices) =
-            self.collect_selection_overlay_vertices(scene, selection_box);
+        let (selection_fill_vertices, selection_stroke_vertices) = self
+            .collect_selection_overlay_vertices(
+                scene,
+                selection_box,
+                transform_frame,
+                viewport.zoom(),
+            );
 
         // 计算总顶点数
         let textured_vertex_count: usize = textured_groups.iter().map(|(_, v)| v.len()).sum();
@@ -1066,6 +1074,8 @@ impl WebGPURenderer {
     /// # 参数
     /// - `scene`: 场景，用于获取选中元素
     /// - `selection_box`: 框选矩形（如果正在框选）
+    /// - `transform_frame`: 带手柄的选中框
+    /// - `zoom`: 视口缩放，手柄保持屏幕尺寸
     ///
     /// # 返回
     /// (fill_vertices, stroke_vertices) - 填充顶点和描边顶点
@@ -1073,6 +1083,8 @@ impl WebGPURenderer {
         &self,
         scene: &Scene,
         selection_box: Option<Rect>,
+        transform_frame: Option<SelectionFrame>,
+        zoom: f32,
     ) -> (Vec<Vertex>, Vec<Vertex>) {
         let mut fill_vertices = Vec::new();
         let mut stroke_vertices = Vec::new();
@@ -1080,29 +1092,50 @@ impl WebGPURenderer {
         // 选中高亮颜色（蓝色）
         let selection_color = [0.25, 0.55, 0.95, 1.0]; // #4090f2
         let selection_fill_color = [0.25, 0.55, 0.95, 0.15]; // 半透明蓝色填充
+        let handle_fill = [1.0, 1.0, 1.0, 1.0];
 
-        // 1. 绘制选中元素的高亮边框
-        for element in scene.elements_sorted() {
-            let elem = element.as_element();
-            if !elem.props().selected || !elem.props().visible {
-                continue;
+        if let Some(frame) = transform_frame {
+            push_frame_stroke(&mut stroke_vertices, frame, selection_color);
+            let selected = selected_elements(scene);
+            if selected.len() > 1 {
+                for element in selected {
+                    push_frame_stroke(
+                        &mut stroke_vertices,
+                        SelectionFrame::from_element(element),
+                        selection_color,
+                    );
+                }
             }
-
-            let bounds = elem.world_bounds();
-            let padding = 2.0; // 高亮边框与元素的间距
-            let x = bounds.x - padding;
-            let y = bounds.y - padding;
-            let w = bounds.width + padding * 2.0;
-            let h = bounds.height + padding * 2.0;
-
-            // 绘制选中边框（线条）
-            let line_vertices = self.generate_rect_stroke_vertices(x, y, w, h, selection_color);
-            stroke_vertices.extend(line_vertices);
+            let metrics = HandleMetrics::from_zoom(zoom);
+            for handle in frame.handles(metrics.rotate_gap) {
+                match handle.kind {
+                    HandleKind::Rotate => {
+                        push_disc(
+                            &mut fill_vertices,
+                            handle.position,
+                            metrics.draw_half * 1.15,
+                            selection_color,
+                        );
+                        let stem = frame.to_world(Vec2::new(0.0, -frame.half_size.y));
+                        push_segment(&mut stroke_vertices, stem, handle.position, selection_color);
+                    }
+                    HandleKind::Resize(_) => {
+                        push_handle_square(
+                            &mut fill_vertices,
+                            &mut stroke_vertices,
+                            frame,
+                            handle.position,
+                            metrics.draw_half,
+                            handle_fill,
+                            selection_color,
+                        );
+                    }
+                }
+            }
         }
 
-        // 2. 绘制框选矩形
+        // 框选矩形
         if let Some(rect) = selection_box {
-            // 框选填充（半透明）
             let fill = self.generate_rect_fill_vertices(
                 rect.x,
                 rect.y,
@@ -1112,7 +1145,6 @@ impl WebGPURenderer {
             );
             fill_vertices.extend(fill);
 
-            // 框选边框
             let stroke = self.generate_rect_stroke_vertices(
                 rect.x,
                 rect.y,
@@ -1279,5 +1311,105 @@ impl WebGPURenderer {
     /// 删除纹理
     pub fn remove_texture(&mut self, texture_id: &str) {
         self.texture_manager.remove_texture(texture_id);
+    }
+}
+
+fn selected_elements(scene: &Scene) -> Vec<&dyn Element> {
+    scene
+        .elements_sorted()
+        .into_iter()
+        .filter(|element| {
+            let props = element.as_element().props();
+            props.selected && props.visible
+        })
+        .map(|element| element.as_element())
+        .collect()
+}
+
+fn push_frame_stroke(stroke: &mut Vec<Vertex>, frame: SelectionFrame, color: [f32; 4]) {
+    let corners = frame.corners();
+    for index in 0..4 {
+        push_segment(stroke, corners[index], corners[(index + 1) % 4], color);
+    }
+}
+
+fn push_handle_square(
+    fill: &mut Vec<Vertex>,
+    stroke: &mut Vec<Vertex>,
+    frame: SelectionFrame,
+    world_center: Vec2,
+    half: f32,
+    fill_color: [f32; 4],
+    stroke_color: [f32; 4],
+) {
+    let local = frame.to_local(world_center);
+    let corners = [
+        frame.to_world(local + Vec2::new(-half, -half)),
+        frame.to_world(local + Vec2::new(half, -half)),
+        frame.to_world(local + Vec2::new(half, half)),
+        frame.to_world(local + Vec2::new(-half, half)),
+    ];
+    push_quad_fill(fill, corners, fill_color);
+    push_frame_corners(stroke, corners, stroke_color);
+}
+
+fn push_frame_corners(stroke: &mut Vec<Vertex>, corners: [Vec2; 4], color: [f32; 4]) {
+    for index in 0..4 {
+        push_segment(stroke, corners[index], corners[(index + 1) % 4], color);
+    }
+}
+
+fn push_quad_fill(fill: &mut Vec<Vertex>, corners: [Vec2; 4], color: [f32; 4]) {
+    let uv = [0.0, 0.0];
+    let vertex = |point: Vec2| Vertex {
+        position: [point.x, point.y],
+        color,
+        uv,
+    };
+    fill.extend([
+        vertex(corners[0]),
+        vertex(corners[1]),
+        vertex(corners[2]),
+        vertex(corners[0]),
+        vertex(corners[2]),
+        vertex(corners[3]),
+    ]);
+}
+
+fn push_segment(stroke: &mut Vec<Vertex>, from: Vec2, to: Vec2, color: [f32; 4]) {
+    let uv = [0.0, 0.0];
+    stroke.push(Vertex {
+        position: [from.x, from.y],
+        color,
+        uv,
+    });
+    stroke.push(Vertex {
+        position: [to.x, to.y],
+        color,
+        uv,
+    });
+}
+
+fn push_disc(fill: &mut Vec<Vertex>, center: Vec2, radius: f32, color: [f32; 4]) {
+    let uv = [0.0, 0.0];
+    let segments = 12;
+    for index in 0..segments {
+        let a0 = (index as f32) / (segments as f32) * std::f32::consts::TAU;
+        let a1 = ((index + 1) as f32) / (segments as f32) * std::f32::consts::TAU;
+        fill.push(Vertex {
+            position: [center.x, center.y],
+            color,
+            uv,
+        });
+        fill.push(Vertex {
+            position: [center.x + a0.cos() * radius, center.y + a0.sin() * radius],
+            color,
+            uv,
+        });
+        fill.push(Vertex {
+            position: [center.x + a1.cos() * radius, center.y + a1.sin() * radius],
+            color,
+            uv,
+        });
     }
 }

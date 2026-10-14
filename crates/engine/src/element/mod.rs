@@ -52,6 +52,20 @@ impl ElementProps {
             z_index: 0,
         }
     }
+
+    /// 绕变换原点的旋转角，单位弧度。
+    ///
+    /// 正角为逆时针，与 [`Transform::rotation`] 是同一个字段。顶点生成和命中测试
+    /// 都读它：世界坐标会先逆变换回局部空间，所以旋转后的矩形、圆、直线和路径
+    /// 仍能被点中。
+    pub fn rotation(&self) -> f32 {
+        self.transform.rotation
+    }
+
+    /// 设置旋转角（弧度）。
+    pub fn set_rotation(&mut self, radians: f32) {
+        self.transform.rotation = radians;
+    }
 }
 
 /// 元素样式
@@ -176,9 +190,21 @@ pub trait Element {
     fn type_name(&self) -> &'static str;
 
     /// 判断点是否在元素内（世界坐标）
+    ///
+    /// 默认实现把点逆变换到局部空间再测包围盒，因此已经计入 `rotation` 和非均匀缩放。
     fn contains_point(&self, point: Vec2) -> bool {
         // 转换到局部坐标系
         let local_point = self.props().transform.inverse_transform_point(point);
         self.local_bounds().contains(local_point)
+    }
+
+    /// 元素旋转角（弧度），与 [`ElementProps::rotation`] 相同。
+    fn rotation(&self) -> f32 {
+        self.props().rotation()
+    }
+
+    /// 设置元素旋转角（弧度）。
+    fn set_rotation(&mut self, radians: f32) {
+        self.props_mut().set_rotation(radians);
     }
 }

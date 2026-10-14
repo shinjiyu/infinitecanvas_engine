@@ -127,6 +127,13 @@ export class InfiniteCanvas {
      */
     clear_scene(): void;
     clear_selection(): void;
+    /**
+     * 指针下的光标。选择工具命中缩放/旋转手柄时返回对应光标。
+     *
+     * # 参数
+     * - `x`, `y`: 屏幕坐标（与指针事件相同）
+     */
+    cursor_at(x: number, y: number): string;
     debug_clear_events(): void;
     debug_pending_event_count(): number;
     deselect_element(element_id: bigint): boolean;
@@ -382,6 +389,7 @@ export interface InitOutput {
     readonly infinitecanvas_clear: (a: number) => void;
     readonly infinitecanvas_clear_scene: (a: number) => void;
     readonly infinitecanvas_clear_selection: (a: number) => void;
+    readonly infinitecanvas_cursor_at: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
