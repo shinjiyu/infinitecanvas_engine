@@ -112,8 +112,23 @@ test('delete, select all, escape, zoom, and help', () => {
   assert.equal(assertHandler('escape', { key: 'Escape' }).id, 'escape');
   assert.equal(assertHandler('zoomFit', { key: '!', code: 'Digit1', shiftKey: true }).id, 'zoom-fit');
   assert.equal(assertHandler('zoomFit', { key: '1', code: 'Digit1', shiftKey: true }).id, 'zoom-fit');
+  assert.equal(assertHandler('zoomSelection', { key: '@', code: 'Digit2', shiftKey: true }).id, 'zoom-selection');
+  assert.equal(assertHandler('zoomSelection', { key: '2', code: 'Digit2', shiftKey: true }).id, 'zoom-selection');
   assert.equal(assertHandler('zoom100', { key: ')', code: 'Digit0', shiftKey: true }).id, 'zoom-100');
   assert.equal(assertHandler('zoom100', { code: 'Digit0', shiftKey: true }).id, 'zoom-100');
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: '@', code: 'Digit2', shiftKey: true }), 'down')?.handler,
+    'zoomSelection',
+  );
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: '!', code: 'Digit1', shiftKey: true }), 'down')?.handler,
+    'zoomFit',
+  );
+  assert.equal(
+    matchShortcut(SHORTCUTS, keyEvent({ key: ')', code: 'Digit0', shiftKey: true }), 'down')?.handler,
+    'zoom100',
+  );
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: '2', code: 'Digit2' }), 'down'), null);
   assert.equal(assertHandler('toggleHelp', { key: '?', code: 'Slash', shiftKey: true }).id, 'help');
   assert.equal(assertHandler('toggleHelp', { key: '/', code: 'Slash', shiftKey: true }).id, 'help');
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: '1', code: 'Digit1' }), 'down'), null);
@@ -231,6 +246,9 @@ test('help rows are generated from the table and show both chords', () => {
   assert.deepEqual(deleted?.chords, ['Delete', 'Backspace']);
 
   assert.equal(other.find((row) => row.id === 'zoom-fit')?.chords[0], 'Shift+1');
+  assert.equal(other.find((row) => row.id === 'zoom-selection')?.chords[0], 'Shift+2');
+  assert.equal(mac.find((row) => row.id === 'zoom-selection')?.chords[0], '⇧2');
+  assert.equal(other.find((row) => row.id === 'zoom-selection')?.action, '缩放到选中');
   assert.equal(mac.find((row) => row.id === 'zoom-100')?.chords[0], '⇧0');
   assert.equal(other.find((row) => row.id === 'undo')?.chords[0], 'Ctrl+Z');
   assert.equal(mac.find((row) => row.id === 'select-all')?.chords[0], '⌘A');

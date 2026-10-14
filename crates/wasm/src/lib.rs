@@ -42,12 +42,13 @@ use infinitecanvas_engine::{
         cursor_for, selection_locks_image_aspect, transforms_differ, HandleGesture, HandleMetrics,
         SelectionFrame,
     },
-    AddElementCommand, AlignMode, AnyElement, Circle, CommandHistory, DistributeAxis,
-    DuplicateElementsCommand, Element, ElementId, ElementStyle, Event, EventQueue, FlipAxis, Image,
-    Line, MoveCommand, NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton,
-    PointerEvent, QuarterTurn, Rectangle, RemoveElementCommand, RemoveElementsCommand,
-    ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction,
-    Text, TextAlign, TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
+    zoom_viewport_to_scene, zoom_viewport_to_selection, AddElementCommand, AlignMode, AnyElement,
+    Circle, CommandHistory, DistributeAxis, DuplicateElementsCommand, Element, ElementId,
+    ElementStyle, Event, EventQueue, FlipAxis, Image, Line, MoveCommand, NudgeDirection,
+    OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent, QuarterTurn,
+    Rectangle, RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand, Scene,
+    SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign,
+    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
     UpdateTextCommand, Viewport,
 };
 
@@ -55,8 +56,6 @@ use infinitecanvas_engine::{
 const MIN_STROKE_LENGTH: f32 = 2.0;
 /// 粘贴图片时显示尺寸的长边上限（世界单位）。像素尺寸仍记在资源上。
 const MAX_PASTED_DISPLAY_EDGE: f32 = 512.0;
-/// 缩放到适合时，内容与画布边缘之间的留白（屏幕像素）
-const ZOOM_FIT_PADDING: f32 = 48.0;
 /// 画笔采样的最小间距，避免点过密
 const PEN_SAMPLE_SPACING: f32 = 1.5;
 use input::{
@@ -2386,26 +2385,6 @@ impl InfiniteCanvas {
         }
     }
 
-    /// 缩放并平移，使全部元素落入画布，四周留出 48 像素。
-    ///
-    /// 场景为空时不改变视口。
-    ///
-    /// # 返回
-    /// 场景里有元素并且已经调整视口时为 true
-    ///
-    /// # 示例（JavaScript）
-    /// ```js
-    /// canvas.zoom_to_fit();
-    /// ```
-    #[wasm_bindgen]
-    pub fn zoom_to_fit(&mut self) -> bool {
-        let Some(bounds) = self.scene.content_bounds() else {
-            return false;
-        };
-        self.viewport.fit_rect(bounds, ZOOM_FIT_PADDING);
-        true
-    }
-
     /// 获取视口中心 X
     #[wasm_bindgen]
     pub fn get_viewport_center_x(&self) -> f32 {
@@ -2436,6 +2415,53 @@ impl InfiniteCanvas {
         if x.is_finite() && y.is_finite() {
             self.viewport.move_to(Vec2::new(x, y));
         }
+    }
+
+    /// 把相机对准当前选中内容。
+    ///
+    /// 只用可见、未锁定的选中元素。选中组时用组根的世界包围盒，不把子元素再展开。
+    /// 每边留出视口的 10%，然后设置中心和缩放。不改元素几何，也不写入撤销栈。
+    /// 空选，或过滤后没有可用包围盒时不改相机。
+    ///
+    /// # 返回
+    /// 已经对准选中内容时为 `true`；没有可对准的内容时为 `false`。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.zoom_to_selection();
+    /// ```
+    #[wasm_bindgen]
+    pub fn zoom_to_selection(&mut self) -> bool {
+        let ids = self.selection.selected_ids();
+        zoom_viewport_to_selection(&mut self.viewport, &self.scene, &ids)
+    }
+
+    /// 把相机对准全部可见叶子，使整张场景落在视口内并留出 10% 边距。
+    ///
+    /// 包围盒与 [`Self::scene_bounds`] 相同。不改元素几何，也不写入撤销栈。
+    /// 没有可见叶子时把相机放回默认姿态（原点、缩放 1）并返回 `false`。
+    /// [`Self::fit_scene`] 是同一个命令。
+    ///
+    /// # 返回
+    /// 有内容并完成适应时为 `true`；场景为空（相机已回到默认）时为 `false`。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.zoom_to_fit();
+    /// ```
+    #[wasm_bindgen]
+    pub fn zoom_to_fit(&mut self) -> bool {
+        self.fit_visible_scene()
+    }
+
+    /// [`Self::zoom_to_fit`] 的别名。
+    #[wasm_bindgen]
+    pub fn fit_scene(&mut self) -> bool {
+        self.fit_visible_scene()
+    }
+
+    fn fit_visible_scene(&mut self) -> bool {
+        zoom_viewport_to_scene(&mut self.viewport, &self.scene)
     }
 
     /// 可见叶子的世界包围盒。
@@ -4118,5 +4144,74 @@ mod tests {
         assert!(canvas.selection.is_selected(text_id));
         assert!(canvas.selection.is_selected(left));
         assert!(!canvas.selection.is_selected(right));
+    }
+
+    /// 缩放到选中 / 适应全部只改相机。空选不动，空场景回到默认相机。
+    /// 之后平移、缩放、设置相机中心和框选仍然可用，几何版本和撤销栈不变。
+    #[test]
+    fn zoom_commands_frame_the_camera_and_leave_scene_tools_alone() {
+        let mut canvas = blank_canvas();
+        canvas.viewport.resize(Vec2::new(800.0, 600.0));
+        canvas.pan(30.0, -10.0);
+        assert!(!canvas.zoom_to_selection());
+        assert_eq!(canvas.get_viewport_center_x(), 30.0);
+        assert_eq!(canvas.get_viewport_center_y(), -10.0);
+
+        assert!(!canvas.zoom_to_fit());
+        assert_eq!(canvas.get_viewport_center_x(), 0.0);
+        assert_eq!(canvas.get_zoom(), 1.0);
+        assert!(!canvas.fit_scene());
+        assert_eq!(canvas.get_zoom(), 1.0);
+
+        canvas.scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(400.0, 200.0),
+            Vec2::new(200.0, 100.0),
+        ));
+        let placed = translation(&canvas.scene, 1);
+        let bounds = minimap::scene_bounds(&canvas.scene);
+
+        assert!(!canvas.zoom_to_selection());
+        assert_eq!(canvas.get_zoom(), 1.0);
+
+        assert!(canvas.select_element(1, false));
+        let epoch = canvas.scene.geometry_epoch();
+        assert!(canvas.zoom_to_selection());
+        assert!((canvas.get_viewport_center_x() - 400.0).abs() < 1e-3);
+        assert!((canvas.get_viewport_center_y() - 200.0).abs() < 1e-3);
+        assert!((canvas.get_zoom() - 3.2).abs() < 1e-3);
+        assert_eq!(translation(&canvas.scene, 1), placed);
+        assert_eq!(canvas.scene.geometry_epoch(), epoch);
+        assert_eq!(canvas.get_undo_count(), 0);
+        assert!(!canvas.can_undo());
+
+        assert!(canvas.zoom_to_fit());
+        assert!((canvas.get_zoom() - 3.2).abs() < 1e-3);
+        let center = canvas.viewport.center();
+        let zoom = canvas.get_zoom();
+        assert!(canvas.fit_scene());
+        assert_eq!(canvas.viewport.center(), center);
+        assert_eq!(canvas.get_zoom(), zoom);
+        assert_eq!(minimap::scene_bounds(&canvas.scene), bounds);
+        assert_eq!(canvas.scene.geometry_epoch(), epoch);
+
+        canvas.set_camera_center(10.0, 20.0);
+        assert_eq!(canvas.get_viewport_center_x(), 10.0);
+        assert_eq!(canvas.get_viewport_center_y(), 20.0);
+        canvas.zoom_at(400.0, 300.0, 1.1);
+        assert!((canvas.get_zoom() - zoom * 1.1).abs() < 1e-3);
+        let center = canvas.viewport.center();
+        canvas.pan(15.0, -4.0);
+        assert!((canvas.get_viewport_center_x() - center.x - 15.0).abs() < 1e-3);
+        assert!((canvas.get_viewport_center_y() - center.y + 4.0).abs() < 1e-3);
+
+        canvas.clear_selection();
+        let hits = canvas.selection.select_in_rect(
+            &mut canvas.scene,
+            Rect::new(300.0, 140.0, 200.0, 120.0),
+            false,
+        );
+        assert_eq!(hits, vec![1]);
+        assert_eq!(translation(&canvas.scene, 1), placed);
     }
 }

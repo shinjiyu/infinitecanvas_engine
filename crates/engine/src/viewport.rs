@@ -54,6 +54,16 @@ impl Viewport {
         self.zoom
     }
 
+    /// 最小缩放倍数。[`crate::camera_fit`] 把适应结果限制在这个值以上。
+    pub fn min_zoom(&self) -> f32 {
+        self.min_zoom
+    }
+
+    /// 最大缩放倍数。[`crate::camera_fit`] 把适应结果限制在这个值以下。
+    pub fn max_zoom(&self) -> f32 {
+        self.max_zoom
+    }
+
     /// 获取 Canvas 尺寸
     pub fn canvas_size(&self) -> Vec2 {
         self.canvas_size

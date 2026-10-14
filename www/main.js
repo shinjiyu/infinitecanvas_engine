@@ -10,6 +10,7 @@
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
+ * Shift+1 适应全部，Shift+2 缩放到选中。两条都在 `SHORTCUTS` 里，只改相机，不进撤销栈。
  * 右键空白处可粘贴、全选、缩放到适合；右键元素可复制、粘贴、克隆、删除、成组和调整层级。菜单项调用 `dispatchShortcut`。
  * 把 PNG/JPEG 拖进画布会放进资源表。Ctrl+V 时剪贴板里有图片则粘贴图片，否则粘贴元素 JSON。
  *
@@ -793,7 +794,10 @@ function dispatchShortcut(shortcut, engine) {
       }
       break;
     case 'zoomFit':
-      if (engine.zoom_to_fit()) setStatus('已缩放到适合');
+      fitScene(engine);
+      break;
+    case 'zoomSelection':
+      zoomToSelection(engine);
       break;
     case 'zoom100':
       engine.set_zoom(1);
@@ -1259,6 +1263,43 @@ function bindMinimap(canvas, engine) {
   document.getElementById('minimap-btn')?.addEventListener('click', () => {
     setMinimapVisible(!minimapVisible);
   });
+  document.getElementById('fit-scene-btn')?.addEventListener('click', () => {
+    fitScene(engine);
+  });
+  document.getElementById('zoom-selection-btn')?.addEventListener('click', () => {
+    zoomToSelection(engine);
+  });
+}
+
+/**
+ * 适应全部可见叶子。空场景时引擎把相机放回原点、缩放 1。
+ *
+ * 工具栏和 `SHORTCUTS` 的 `zoomFit`（Shift+1）都走这里。
+ * 调用 `zoom_to_fit`；`fit_scene` 是同一个命令。
+ *
+ * @param {WasmCanvas} engine
+ */
+function fitScene(engine) {
+  if (engine.zoom_to_fit()) {
+    setStatus('已适应全部');
+  } else {
+    setStatus('空场景，相机已回到默认');
+  }
+}
+
+/**
+ * 缩放到当前选中。空选或没有可见内容时不改相机。
+ *
+ * 工具栏和 `SHORTCUTS` 的 `zoomSelection`（Shift+2）都走这里。
+ *
+ * @param {WasmCanvas} engine
+ */
+function zoomToSelection(engine) {
+  if (engine.zoom_to_selection()) {
+    setStatus('已缩放到选中');
+  } else {
+    setStatus('没有可缩放的选中内容');
+  }
 }
 
 /**
