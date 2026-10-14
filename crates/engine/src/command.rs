@@ -2,7 +2,8 @@
 //!
 //! 实现命令模式，支持撤销/重做功能
 
-use crate::{element::ElementId, math::Vec2, AnyElement, Scene};
+use crate::element::{ElementId, TextVisual};
+use crate::{math::Vec2, AnyElement, Scene};
 use std::collections::VecDeque;
 
 /// 命令 Trait
@@ -183,6 +184,53 @@ impl Command for TransformElementsCommand {
     fn name(&self) -> &'static str {
         "TransformElements"
     }
+}
+
+/// 修改文本外观。
+///
+/// 执行和撤销都会丢掉 GPU 纹理引用，并 [`Scene::mark_dirty`]，
+/// 下一帧按当前缩放重新光栅化。这样撤销不会指向已经释放的纹理。
+#[derive(Debug)]
+pub struct UpdateTextCommand {
+    /// 文本元素 ID。
+    element_id: ElementId,
+    /// 修改前的外观。
+    before: TextVisual,
+    /// 修改后的外观。
+    after: TextVisual,
+}
+
+impl UpdateTextCommand {
+    /// 记录一次已经发生或即将发生的文本修改。
+    pub fn new(element_id: ElementId, before: TextVisual, after: TextVisual) -> Self {
+        Self {
+            element_id,
+            before,
+            after,
+        }
+    }
+}
+
+impl Command for UpdateTextCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        apply_text_visual(scene, self.element_id, &self.after);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        apply_text_visual(scene, self.element_id, &self.before);
+    }
+
+    fn name(&self) -> &'static str {
+        "UpdateText"
+    }
+}
+
+fn apply_text_visual(scene: &mut Scene, id: ElementId, visual: &TextVisual) {
+    if let Some(AnyElement::Text(text)) = scene.get_mut(id) {
+        let _ = text.apply_visual(visual);
+    }
+    // 执行、撤销和重做都要重生成纹理四边形。
+    scene.mark_dirty(id);
 }
 
 /// 命令历史（撤销/重做栈）

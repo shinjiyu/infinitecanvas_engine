@@ -12,6 +12,7 @@
 
 import init, { InfiniteCanvas as WasmCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
 import wasmUrl from '../packages/core/wasm/infinitecanvas_wasm_bg.wasm?url';
+import { rasterizeText } from './text-raster.js';
 
 const TEXTURE_ID = 'landing-badge';
 const STORAGE_KEY = 'infinitecanvas.scene.v1';
@@ -29,6 +30,9 @@ let spaceHeld = false;
 /** @type {{ x: number, y: number } | null} */
 let lastPointer = null;
 let autosaveTimer = 0;
+/** @type {{ id: bigint | number, node: HTMLTextAreaElement } | null} */
+let textEditor = null;
+let textEditorOpening = false;
 
 /**
  * 浏览器没有可用的 WebGPU 时抛出，用来展示友好提示而不是原始异常。
@@ -221,6 +225,7 @@ function loadSample(engine, canvas) {
     '#7c5cff',
     3,
   );
+  engine.add_text(w * 0.12, h * 0.18, 'Hello 你好', 36, '#f4f7fb', 'left');
 }
 
 /**
@@ -419,7 +424,30 @@ function bindInput(canvas, engine) {
     scheduleAutosave(engine);
   });
 
+  canvas.addEventListener('dblclick', (event) => {
+    const point = canvasPoint(event, canvas);
+    const info = engine.begin_text_edit_at(point.x, point.y);
+    if (info) openTextEditor(engine, info);
+  });
+
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+
+  const editor = document.getElementById('text-editor');
+  if (editor instanceof HTMLTextAreaElement) {
+    editor.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeTextEditor(engine, false);
+      } else if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        closeTextEditor(engine, true);
+      }
+    });
+    editor.addEventListener('blur', () => {
+      if (textEditorOpening) return;
+      closeTextEditor(engine, true);
+    });
+  }
 
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
@@ -555,6 +583,9 @@ function bindInput(canvas, engine) {
       case 'h':
         setTool('pan');
         break;
+      case 't':
+        setTool('text');
+        break;
       default:
         break;
     }
@@ -671,6 +702,139 @@ function drawAlignmentGuides(engine) {
 }
 
 /**
+ * 把屏幕像素坐标换成舞台里的 CSS 像素。
+ *
+ * @param {number} x
+ * @param {number} y
+ * @returns {{ left: number, top: number, scaleX: number, scaleY: number }}
+ */
+function canvasCssPoint(x, y) {
+  if (!canvasEl) {
+    return { left: x, top: y, scaleX: 1, scaleY: 1 };
+  }
+  const rect = canvasEl.getBoundingClientRect();
+  const stage = canvasEl.parentElement?.getBoundingClientRect();
+  const scaleX = canvasEl.width > 0 ? rect.width / canvasEl.width : 1;
+  const scaleY = canvasEl.height > 0 ? rect.height / canvasEl.height : 1;
+  const originLeft = stage ? rect.left - stage.left : 0;
+  const originTop = stage ? rect.top - stage.top : 0;
+  return {
+    left: originLeft + x * scaleX,
+    top: originTop + y * scaleY,
+    scaleX,
+    scaleY,
+  };
+}
+
+/**
+ * 把 DOM 编辑框贴到文本的屏幕矩形上。
+ *
+ * @param {object} info `get_text_editor_metrics` 的返回值
+ */
+function placeTextEditor(info) {
+  if (!textEditor) return;
+  const point = canvasCssPoint(info.x, info.y);
+  const fontPx = Math.max(8, (info.screenFontSize || 16) * point.scaleY);
+  textEditor.node.style.left = `${point.left}px`;
+  textEditor.node.style.top = `${point.top}px`;
+  textEditor.node.style.width = `${Math.max(fontPx * 2, (info.width || 0) * point.scaleX)}px`;
+  textEditor.node.style.height = `${Math.max(fontPx * 1.4, (info.height || 0) * point.scaleY)}px`;
+  textEditor.node.style.fontSize = `${fontPx}px`;
+}
+
+/**
+ * 打开覆盖在文本上的输入框。
+ *
+ * @param {WasmCanvas} engine
+ * @param {object} info
+ */
+function openTextEditor(engine, info) {
+  const node = document.getElementById('text-editor');
+  if (!(node instanceof HTMLTextAreaElement) || info == null) return;
+  if (textEditor && textEditor.id !== info.id) {
+    closeTextEditor(engine, true);
+  }
+  textEditor = { id: info.id, node };
+  textEditorOpening = true;
+  node.hidden = false;
+  node.value = info.content ?? '';
+  node.style.color = info.color || '#f4f7fb';
+  node.style.fontFamily = info.fontFamily || 'sans-serif';
+  node.style.textAlign = info.align || 'left';
+  placeTextEditor(info);
+  engine.set_text_editing(info.id, true);
+  node.focus();
+  if (info.selectAll) node.select();
+  requestAnimationFrame(() => {
+    textEditorOpening = false;
+  });
+}
+
+/**
+ * 关闭编辑框。`commit` 为 true 时把内容写回引擎。
+ *
+ * @param {WasmCanvas} engine
+ * @param {boolean} commit
+ */
+function closeTextEditor(engine, commit) {
+  if (!textEditor) return;
+  const { id, node } = textEditor;
+  const value = node.value;
+  textEditor = null;
+  node.hidden = true;
+  if (commit) {
+    engine.commit_text_content(id, value);
+    scheduleAutosave(engine);
+  } else {
+    engine.set_text_editing(id, false);
+  }
+}
+
+/**
+ * 光栅化待绘制文本，并处理 T 工具留下的编辑请求。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncText(engine) {
+  const jobs = engine.take_text_raster_jobs();
+  const count = jobs.length ?? 0;
+  for (let i = 0; i < count; i += 1) {
+    const job = jobs[i];
+    try {
+      const raster = rasterizeText(job);
+      const pixels = new Uint8Array(raster.data.buffer, raster.data.byteOffset, raster.data.byteLength);
+      engine.upload_texture(job.textureId, raster.width, raster.height, pixels);
+      const accepted = engine.commit_text_raster(
+        job.id,
+        job.revision,
+        job.lod,
+        job.textureId,
+        raster.worldWidth,
+        raster.worldHeight,
+      );
+      if (!accepted) {
+        console.warn('Text raster rejected', job.textureId);
+      }
+    } catch (error) {
+      console.error('Text raster failed', error);
+      engine.abandon_text_raster(job.id);
+    }
+  }
+
+  const request = engine.take_text_edit_request();
+  if (request) openTextEditor(engine, request);
+
+  if (textEditor) {
+    const metrics = engine.get_text_editor_metrics(textEditor.id);
+    if (!metrics) {
+      closeTextEditor(engine, false);
+    } else {
+      placeTextEditor(metrics);
+    }
+  }
+}
+
+/**
  * 启动渲染循环。WebGPU 渲染失败时停下来并给出提示。
  *
  * @param {WasmCanvas} engine
@@ -683,6 +847,11 @@ function startLoop(engine) {
       const message = error instanceof Error ? error.message : String(error);
       showWebGPUMessage(message);
       return;
+    }
+    try {
+      syncText(engine);
+    } catch (error) {
+      console.error('Text sync failed', error);
     }
     updateHud(engine);
     requestAnimationFrame(loop);

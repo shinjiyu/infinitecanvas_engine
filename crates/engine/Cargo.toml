@@ -12,6 +12,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 png = "0.17"
 log = { workspace = true }
+web-time = "1.1.0"
+font8x8 = "0.3.1"
 
 [[bench]]
 name = "vertex_cache"

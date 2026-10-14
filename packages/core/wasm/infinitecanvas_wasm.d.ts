@@ -21,6 +21,10 @@ export class InfiniteCanvas {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * 光栅化失败后允许下一帧重新取任务。
+     */
+    abandon_text_raster(id: bigint): void;
+    /**
      * 添加圆形
      *
      * # 参数
@@ -106,6 +110,31 @@ export class InfiniteCanvas {
      */
     add_rectangle(x: number, y: number, width: number, height: number, fill_color: string | null | undefined, stroke_color: string | null | undefined, stroke_width: number): bigint;
     /**
+     * 添加文本元素。
+     *
+     * 位置是锚点：左对齐为左上角，居中为上边中点，右对齐为右上角。
+     * 这个接口和 `add_rectangle` 一样直接写入场景，不进入撤销栈。
+     * T 工具创建的文本会进入撤销栈。
+     *
+     * # 参数
+     * - `x`, `y`: 锚点（世界坐标）
+     * - `content`: 文本，支持换行
+     * - `font_size`: 世界单位字号，`<= 0` 时用 32
+     * - `color`: `#RRGGBB` 或 `#RRGGBBAA`，空则用浅色
+     * - `align`: `"left"` / `"center"` / `"right"`
+     *
+     * # 返回
+     * 元素 ID
+     */
+    add_text(x: number, y: number, content: string, font_size: number, color?: string | null, align?: string | null): bigint;
+    /**
+     * 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
+     *
+     * # 参数
+     * - `x`, `y`: 屏幕像素坐标（和 `handle_pointer_event` 用的是同一套）
+     */
+    begin_text_edit_at(x: number, y: number): any;
+    /**
      * 是否可以重做
      */
     can_redo(): boolean;
@@ -128,6 +157,25 @@ export class InfiniteCanvas {
     clear_scene(): void;
     clear_selection(): void;
     /**
+     * 提交编辑内容。
+     *
+     * 内容有变化时写入撤销栈。只剩空白时删除元素，撤销会把原文放回来。
+     *
+     * # 返回
+     * 元素存在并且这次调用处理完了编辑状态。
+     */
+    commit_text_content(id: bigint, content: string): boolean;
+    /**
+     * 把已经上传的纹理绑定到文本元素。
+     *
+     * `revision` 必须等于取任务时的版本，否则结果被丢弃并删除这张纹理。
+     * `world_width` / `world_height` 是纹理像素除以 `rasterScale`，用来固定世界尺寸。
+     *
+     * # 返回
+     * 是否接受了这张纹理。
+     */
+    commit_text_raster(id: bigint, revision: number, lod: number, texture_id: string, world_width: number, world_height: number): boolean;
+    /**
      * 指针下的光标。选择工具命中缩放/旋转手柄时返回对应光标。
      *
      * # 参数
@@ -140,9 +188,9 @@ export class InfiniteCanvas {
     /**
      * 导出场景为版本化 JSON
      *
-     * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
-     * 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
-     * `dirty` 是运行时标记，不会出现在 JSON 里。
+     * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）、
+     * 自由路径和文本都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+     * `dirty` 和文本光栅字段是运行时标记，不会出现在 JSON 里。
      *
      * # 返回
      * 紧凑 JSON 字符串
@@ -161,8 +209,8 @@ export class InfiniteCanvas {
      * - `selection_only`: `true` 时导出选中元素的包围盒；`false` 时导出当前视口
      *
      * # 返回
-     * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。图片纹理不在场景文件里，
-     * 导出为纯色占位。
+     * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
+     * 没有点阵的字符画方框。图片纹理不在场景文件里，导出为纯色占位。
      *
      * # 错误
      * 没有选中元素、区域为空或编码失败
@@ -262,6 +310,10 @@ export class InfiniteCanvas {
      * - snapThreshold: 吸附阈值（屏幕像素）
      */
     get_state(): any;
+    /**
+     * 查询文本在屏幕上的位置，编辑框跟着平移和缩放移动。
+     */
+    get_text_editor_metrics(id: bigint): any;
     /**
      * 获取当前工具的光标样式
      */
@@ -418,17 +470,36 @@ export class InfiniteCanvas {
      */
     set_snap_threshold(threshold_px: number): void;
     /**
+     * 编辑时隐藏 GPU 文本，避免和 DOM 输入框叠两层字。
+     */
+    set_text_editing(id: bigint, editing: boolean): boolean;
+    /**
      * 设置当前工具
      *
      * # 参数
-     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "pan", "line", "pen")
+     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen")
      *
-     * 直线快捷键 `l`，画笔快捷键 `p`。切换工具会丢掉尚未抬笔的预览。
+     * 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`。切换工具会丢掉尚未抬笔的预览。
      *
      * # 返回
      * 是否成功设置
      */
     set_tool(tool_name: string): boolean;
+    /**
+     * 取走 T 工具留下的编辑请求。没有请求时返回 `null`。
+     */
+    take_text_edit_request(): any;
+    /**
+     * 取出当前缩放档下还没光栅化的文本。
+     *
+     * 每个元素在同一内容版本和 LOD 上只返回一次。前端用 Canvas2D 画完后调用
+     * [`Self::commit_text_raster`]。失败时调用 [`Self::abandon_text_raster`] 以便重试。
+     *
+     * # 返回
+     * 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
+     * `color`, `align`, `fontFamily`, `paddingWorld`, `textureId`
+     */
+    take_text_raster_jobs(): Array<any>;
     /**
      * 撤销上一个操作
      *
@@ -472,16 +543,21 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_infinitecanvas_free: (a: number, b: number) => void;
+    readonly infinitecanvas_abandon_text_raster: (a: number, b: bigint) => void;
     readonly infinitecanvas_add_circle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
     readonly infinitecanvas_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
     readonly infinitecanvas_add_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
     readonly infinitecanvas_add_path: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
     readonly infinitecanvas_add_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
+    readonly infinitecanvas_add_text: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => bigint;
+    readonly infinitecanvas_begin_text_edit_at: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_can_redo: (a: number) => number;
     readonly infinitecanvas_can_undo: (a: number) => number;
     readonly infinitecanvas_clear: (a: number) => void;
     readonly infinitecanvas_clear_scene: (a: number) => void;
     readonly infinitecanvas_clear_selection: (a: number) => void;
+    readonly infinitecanvas_commit_text_content: (a: number, b: bigint, c: number, d: number) => number;
+    readonly infinitecanvas_commit_text_raster: (a: number, b: bigint, c: number, d: number, e: number, f: number, g: number, h: number) => number;
     readonly infinitecanvas_cursor_at: (a: number, b: number, c: number) => [number, number];
     readonly infinitecanvas_debug_clear_events: (a: number) => void;
     readonly infinitecanvas_debug_pending_event_count: (a: number) => number;
@@ -503,6 +579,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_selection_count: (a: number) => number;
     readonly infinitecanvas_get_snap_threshold: (a: number) => number;
     readonly infinitecanvas_get_state: (a: number) => any;
+    readonly infinitecanvas_get_text_editor_metrics: (a: number, b: bigint) => any;
     readonly infinitecanvas_get_tool_cursor: (a: number) => [number, number];
     readonly infinitecanvas_get_undo_count: (a: number) => number;
     readonly infinitecanvas_get_viewport_center_x: (a: number) => number;
@@ -531,7 +608,10 @@ export interface InitOutput {
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_snap_enabled: (a: number, b: number) => void;
     readonly infinitecanvas_set_snap_threshold: (a: number, b: number) => void;
+    readonly infinitecanvas_set_text_editing: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_tool: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_take_text_edit_request: (a: number) => any;
+    readonly infinitecanvas_take_text_raster_jobs: (a: number) => any;
     readonly infinitecanvas_undo: (a: number) => number;
     readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
     readonly infinitecanvas_zoom_at: (a: number, b: number, c: number, d: number) => void;

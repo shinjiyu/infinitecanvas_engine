@@ -6,7 +6,7 @@
 
 use infinitecanvas_engine::math::{Vec2, Vertex};
 use infinitecanvas_engine::{rebuild_all_vertices, Rectangle, Scene, VertexCache};
-use std::time::Instant;
+use web_time::Instant;
 
 const ELEMENTS: u64 = 100_000;
 const SAMPLES: usize = 8;

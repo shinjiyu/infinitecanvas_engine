@@ -1,14 +1,14 @@
 //! 场景容器
 //!
 //! 管理无限画布上的所有元素
-use crate::element::{Circle, Element, ElementId, Image, Line, Path, Rectangle};
+use crate::element::{Circle, Element, ElementId, Image, Line, Path, Rectangle, Text};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
 /// 元素枚举（支持不同类型元素）
 ///
 /// JSON 使用 `{"type":"line","data":{...}}` 这种相邻标签。
-/// `type` 为小写的 `rectangle`、`circle`、`image`、`line`、`path`。
+/// `type` 为小写的 `rectangle`、`circle`、`image`、`line`、`path`、`text`。
 /// 反序列化时未知字段会被忽略；缺省的可选字段使用各结构体的 serde 默认值。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "lowercase")]
@@ -18,6 +18,7 @@ pub enum AnyElement {
     Image(Image),
     Line(Line),
     Path(Path),
+    Text(Text),
 }
 
 impl AnyElement {
@@ -29,6 +30,7 @@ impl AnyElement {
             AnyElement::Image(i) => i.props().id,
             AnyElement::Line(line) => line.props().id,
             AnyElement::Path(path) => path.props().id,
+            AnyElement::Text(t) => t.props().id,
         }
     }
 
@@ -40,6 +42,7 @@ impl AnyElement {
             AnyElement::Image(i) => i,
             AnyElement::Line(line) => line,
             AnyElement::Path(path) => path,
+            AnyElement::Text(t) => t,
         }
     }
 
@@ -51,6 +54,7 @@ impl AnyElement {
             AnyElement::Image(i) => i,
             AnyElement::Line(line) => line,
             AnyElement::Path(path) => path,
+            AnyElement::Text(t) => t,
         }
     }
 }
@@ -253,6 +257,19 @@ impl Scene {
     /// 添加自由画笔路径
     pub fn add_path(&mut self, path: Path) -> ElementId {
         self.insert_element(AnyElement::Path(path))
+    }
+
+    /// 添加文本元素
+    ///
+    /// # 参数
+    /// - `text`: 已分配 ID 的文本元素
+    ///
+    /// # 返回
+    /// 元素 ID
+    pub fn add_text(&mut self, text: Text) -> ElementId {
+        let id = self.insert_element(AnyElement::Text(text));
+        self.mark_dirty(id);
+        id
     }
 
     /// 添加任意类型元素

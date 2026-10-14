@@ -15,9 +15,10 @@ Scene.mark_dirty(id) ──► VertexCache.sync
 | 矩形 / 圆形填充 | fill（三角形） | 6 或扇形顶点 |
 | 矩形 / 圆形细描边 | stroke（线段） | |
 | 直线 / 箭头 / 自由画笔 | fill（三角形） | 与旧收集器相同，三角形带 |
-| 图片 | textured | 按纹理合并相邻绘制 |
+| 图片 | textured | 按纹理合并相邻绘制，先画纯色底 |
+| 文本 | textured | 不画纯色底，避免挡住透明字形 |
 
-几何修改（平移、旋转、缩放、端点、箭头、采样点、透明度）必须调用 `Scene::mark_dirty`。只改视口不要调用。
+几何修改（平移、旋转、缩放、端点、箭头、采样点、透明度、文本内容或光栅结果）必须调用 `Scene::mark_dirty`。只改视口不要调用。文本的创建、改内容、撤销/重做和 `commit_text_raster` 都会标记。
 
 变换手柄写完整 `Transform`。实时拖动（含多选和取消）在应用变换列表时标记脏；`TransformElementsCommand` 的执行与撤销同样标记，顶点才会重生成。
 

@@ -2,6 +2,19 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #4: 文本元素
+
+- [x] Text 元素：内容、字号、颜色、对齐
+- [x] Canvas2D / OffscreenCanvas 光栅化，复用 TextureManager
+- [x] 按缩放 LOD 重新光栅化
+- [x] T 工具单击创建，双击 DOM 编辑
+- [x] 命中测试 + 创建/改内容撤销
+- [x] Headless Chrome 光栅化：`Hello` / `你` / `好` 都有墨迹，中英文字形不同，1× 与 2× 的世界尺寸一致
+- [x] 版本 1 JSON 往返：内容、字号、颜色、对齐、旋转、缩放；光栅字段 `#[serde(skip)]`
+- [x] PNG 用 font8x8 点阵画文本（无点阵的字符画方框）
+- [x] 双击计时改用 `web_time::Instant`
+- [x] 创建、改内容、光栅提交、撤销/重做调用 `Scene::mark_dirty`，顶点缓存在文本变化后更新
+
 ---
 
 ## M1: 核心渲染引擎 (11/11) - ✅ 已完成
@@ -101,7 +114,7 @@ pointer delta ──► 未吸附包围盒 ──► snap_bounds ──► 修�
 - [x] Demo 保存/打开与 localStorage 自动保存
 - [x] JSON round-trip 与 PNG 单元测试
 
-**依赖**: M1 完成。#7 已合并：`rotation` / `scale` 写在 `Transform` 上并参与往返。Text（#4）尚未合并，`text` 元素会拒绝导入。未知字段仍会被忽略。`dirty` 不写入 JSON。
+**依赖**: M1 完成。#7 已合并：`rotation` / `scale` 写在 `Transform` 上并参与往返。Text（#4）以 `type: "text"` 进入同一版本。`dirty` 和文本光栅字段都不写入 JSON。未知字段仍会被忽略。
 
 ---
 
