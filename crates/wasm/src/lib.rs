@@ -28,7 +28,8 @@ mod texture_manager;
 use infinitecanvas_engine::{
     export_selection_png, export_viewport_png,
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
-    math::{Color, Transform, Vec2},
+    math::{Color, Rect, Transform, Vec2},
+    snap::{bounds_union, snap_drag, AlignmentGuide, DragSnap, SnapSettings},
     transform_handles::{
         cursor_for, transforms_differ, HandleGesture, HandleMetrics, SelectionFrame,
     },
@@ -47,6 +48,7 @@ use input::{
 };
 use js_sys::{Array, Object, Reflect};
 use renderer::WebGPURenderer;
+use std::collections::HashSet;
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 
@@ -71,6 +73,10 @@ struct DragState {
     total_delta: Vec2,
     /// 被拖动的元素 ID 列表
     dragged_ids: Vec<ElementId>,
+    /// 按下时选区的世界包围盒。吸附以它为对齐主体，多选时是并集。
+    origin_bounds: Option<Rect>,
+    /// 当前帧生效的对齐参考线。松手或关闭吸附后清空。
+    guides: Vec<AlignmentGuide>,
     /// 自由画笔采样点（世界坐标）
     pen_points: Vec<Vec2>,
     /// 绘制过程中的预览元素；抬笔后才进入撤销栈
@@ -132,6 +138,8 @@ pub struct InfiniteCanvas {
     command_history: CommandHistory,
     tool_manager: ToolManager,
     perf_stats: PerformanceStats,
+    /// 拖拽吸附。默认开启，阈值是屏幕像素。
+    snap: SnapSettings,
 }
 
 #[wasm_bindgen]
@@ -171,6 +179,7 @@ impl InfiniteCanvas {
             command_history: CommandHistory::new(),
             tool_manager: ToolManager::new(),
             perf_stats: PerformanceStats::default(),
+            snap: SnapSettings::default(),
         })
     }
 
@@ -532,6 +541,7 @@ impl InfiniteCanvas {
             if self.tool_manager.current() != tool {
                 self.commit_handle_gesture();
                 self.cancel_drawing();
+                self.drag_state.guides.clear();
             }
             self.tool_manager.set_tool(tool);
             true
@@ -579,6 +589,8 @@ impl InfiniteCanvas {
     /// - isDragging: 是否正在拖动
     /// - isSelectionBoxActive: 是否正在框选
     /// - zoom: 当前缩放比例
+    /// - snapEnabled: 拖拽吸附是否开启
+    /// - snapThreshold: 吸附阈值（屏幕像素）
     #[wasm_bindgen]
     pub fn get_state(&self) -> JsValue {
         let obj = Object::new();
@@ -627,7 +639,82 @@ impl InfiniteCanvas {
             &JsValue::from_str("zoom"),
             &JsValue::from(self.viewport.zoom()),
         );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("snapEnabled"),
+            &JsValue::from(self.snap.enabled),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("snapThreshold"),
+            &JsValue::from(self.snap.threshold_px),
+        );
         obj.into()
+    }
+
+    /// 开启或关闭拖拽吸附。
+    ///
+    /// 关闭后元素跟着指针走，不再产生对齐参考线。
+    ///
+    /// # 参数
+    /// - `enabled`: `true` 开启吸附
+    #[wasm_bindgen]
+    pub fn set_snap_enabled(&mut self, enabled: bool) {
+        self.snap.enabled = enabled;
+        if !enabled {
+            self.drag_state.guides.clear();
+        }
+    }
+
+    /// 拖拽吸附是否开启。
+    #[wasm_bindgen]
+    pub fn is_snap_enabled(&self) -> bool {
+        self.snap.enabled
+    }
+
+    /// 设置吸附阈值（屏幕像素）。
+    ///
+    /// 非有限值会被忽略。有效值限制在 0 到 64 之间。
+    /// 世界距离会除以当前缩放，因此任意缩放下抓取范围保持同样的屏幕像素。
+    ///
+    /// # 参数
+    /// - `threshold_px`: 屏幕像素阈值
+    #[wasm_bindgen]
+    pub fn set_snap_threshold(&mut self, threshold_px: f32) {
+        self.snap.set_threshold_px(threshold_px);
+    }
+
+    /// 当前吸附阈值（屏幕像素）。
+    #[wasm_bindgen]
+    pub fn get_snap_threshold(&self) -> f32 {
+        self.snap.threshold_px
+    }
+
+    /// 当前生效的对齐参考线。
+    ///
+    /// 只在吸附开启且正在拖拽、并且选区进入阈值时非空。
+    /// 每条记录包含 `axis`（`"horizontal"` 或 `"vertical"`）和 `position`（世界坐标）。
+    ///
+    /// # 返回
+    /// 参考线数组。没有参考线时为空数组。
+    #[wasm_bindgen]
+    pub fn get_alignment_guides(&self) -> Array {
+        let array = Array::new();
+        for guide in &self.drag_state.guides {
+            let obj = Object::new();
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("axis"),
+                &JsValue::from_str(guide.axis.name()),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("position"),
+                &JsValue::from(guide.position),
+            );
+            array.push(&obj);
+        }
+        array
     }
 
     /// 获取选中元素的边界框
@@ -918,6 +1005,7 @@ impl InfiniteCanvas {
         self.cancel_handle_gesture();
         self.selection.clear(&mut self.scene);
         self.selection_box.cancel();
+        self.drag_state.guides.clear();
         self.scene.clear();
         log::info!("Scene cleared");
     }
@@ -1183,6 +1271,7 @@ impl InfiniteCanvas {
         self.cancel_handle_gesture();
         self.selection.clear(&mut self.scene);
         self.selection_box.cancel();
+        self.drag_state.guides.clear();
         self.scene.clear();
         log::info!("Cleared scene ({} elements removed)", count);
     }
@@ -1432,10 +1521,7 @@ impl InfiniteCanvas {
         }
         // 如果正在拖动，移动选中的元素
         if self.drag_state.is_dragging && self.drag_state.pointer_id == Some(event.pointer_id) {
-            let delta = event.world_position - self.drag_state.last_position;
-            self.move_selected_elements_internal(delta);
-            self.drag_state.last_position = event.world_position;
-            self.drag_state.total_delta += delta;
+            self.drag_selected_to_pointer(event.world_position);
         } else {
             // 否则更新框选
             self.selection_box
@@ -1744,6 +1830,8 @@ impl InfiniteCanvas {
         self.drag_state.last_position = position;
         self.drag_state.total_delta = Vec2::ZERO;
         self.drag_state.dragged_ids = self.selection.selected_ids();
+        self.drag_state.origin_bounds = self.dragged_origin_bounds();
+        self.drag_state.guides.clear();
     }
 
     /// 结束拖动（创建移动命令添加到历史）
@@ -1768,6 +1856,68 @@ impl InfiniteCanvas {
         self.drag_state.pointer_id = None;
         self.drag_state.total_delta = Vec2::ZERO;
         self.drag_state.dragged_ids.clear();
+        self.drag_state.origin_bounds = None;
+        self.drag_state.guides.clear();
+    }
+
+    /// 让选区跟着指针走，并在阈值内贴齐其他可见元素。
+    ///
+    /// 位移从按下时的包围盒重算，不在上一帧的吸附结果上累加，
+    /// 这样离开阈值后会回到指针对应的位置。关闭吸附时修正为 0。
+    fn drag_selected_to_pointer(&mut self, pointer: Vec2) {
+        let raw_delta = pointer - self.drag_state.start_position;
+        let snapped = match (self.snap.enabled, self.drag_state.origin_bounds) {
+            (true, Some(origin)) => {
+                let targets = self.snap_targets();
+                snap_drag(
+                    origin,
+                    raw_delta,
+                    &targets,
+                    &self.snap,
+                    self.viewport.zoom(),
+                )
+            }
+            _ => DragSnap {
+                translation: raw_delta,
+                guides: Vec::new(),
+            },
+        };
+        let correction = snapped.translation - self.drag_state.total_delta;
+        if correction != Vec2::ZERO {
+            self.move_selected_elements_internal(correction);
+        }
+        self.drag_state.total_delta = snapped.translation;
+        self.drag_state.last_position = pointer;
+        self.drag_state.guides = snapped.guides;
+    }
+
+    /// 按下时、被拖元素还没移动前的可见包围盒。
+    fn dragged_origin_bounds(&self) -> Option<Rect> {
+        let rects = self.drag_state.dragged_ids.iter().filter_map(|id| {
+            let element = self.scene.get(*id)?.as_element();
+            if element.props().visible {
+                Some(element.world_bounds())
+            } else {
+                None
+            }
+        });
+        bounds_union(rects)
+    }
+
+    /// 其他可见元素的世界包围盒。正在拖动的选区不参与，避免吸到自己。
+    fn snap_targets(&self) -> Vec<Rect> {
+        let dragged: HashSet<ElementId> = self.drag_state.dragged_ids.iter().copied().collect();
+        self.scene
+            .iter()
+            .filter_map(|element| {
+                let element = element.as_element();
+                let props = element.props();
+                if !props.visible || dragged.contains(&props.id) {
+                    return None;
+                }
+                Some(element.world_bounds())
+            })
+            .collect()
     }
 
     /// 把当前选中元素收成一个选中框。单选跟元素旋转对齐，多选用包围盒。
