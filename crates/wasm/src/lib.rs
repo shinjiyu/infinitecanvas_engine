@@ -28,18 +28,19 @@ mod texture_manager;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
-    apply_align, apply_distribute, apply_flip, apply_nudge, apply_rotate_quarter, apply_set_locked,
-    apply_set_visibility, apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility,
+    apply_align, apply_distribute, apply_flip, apply_nudge, apply_rename_frame,
+    apply_reparent_into_frame, apply_rotate_quarter, apply_set_locked, apply_set_visibility,
+    apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
     },
-    export_selection_png, export_svg, export_viewport_png,
+    export_frame_png, export_frame_svg, export_selection_png, export_svg, export_viewport_png,
     guides::{
         handle_outward, moving_edge, resize_edge_correction, ruler_band, ruler_ticks,
         GuideSnapshot, RulerBand, RulerOrientation, GUIDE_HIT_PX, RULER_THICKNESS_PX,
     },
-    hit_test::{hit_test_point, HitTestOptions, HitTestResult},
+    hit_test::{click_target, hit_test_point, HitTestOptions, HitTestResult},
     import_svg as import_svg_scene,
     math::{Color, Rect, Transform, Vec2},
     sample_paint_at,
@@ -53,11 +54,11 @@ use infinitecanvas_engine::{
     },
     zoom_viewport_to_scene, zoom_viewport_to_selection, AddElementCommand, AlignMode, AnyElement,
     Circle, CommandHistory, DistributeAxis, DuplicateElementsCommand, EditGuidesCommand, Element,
-    ElementId, ElementStyle, Event, EventQueue, FlipAxis, Image, Line, MoveCommand, NudgeDirection,
-    OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent, Polygon, QuarterTurn,
-    Rectangle, RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand, Scene,
-    SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign,
-    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
+    ElementId, ElementStyle, Event, EventQueue, FlipAxis, Frame, Image, Line, MoveCommand,
+    NudgeDirection, OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent,
+    Polygon, QuarterTurn, Rectangle, RemoveElementCommand, RemoveElementsCommand,
+    ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction,
+    Text, TextAlign, TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
     UpdateTextCommand, Viewport, ZOOM_STEP,
 };
 
@@ -1353,12 +1354,19 @@ impl InfiniteCanvas {
                 &JsValue::from_str("locked"),
                 &JsValue::from(props.locked),
             );
-            if let Some(group) = element.as_group() {
+            if let Some(child_ids) = element.container_children() {
                 let children = Array::new();
-                for child_id in &group.children {
+                for child_id in child_ids {
                     children.push(&JsValue::from(*child_id));
                 }
                 let _ = Reflect::set(&obj, &JsValue::from_str("childIds"), &children);
+            }
+            if let AnyElement::Frame(frame) = element {
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("name"),
+                    &JsValue::from_str(&frame.name),
+                );
             }
             if let AnyElement::Polygon(polygon) = element {
                 let _ = Reflect::set(
@@ -1494,6 +1502,74 @@ impl InfiniteCanvas {
 
         log::info!("Added circle {} at ({}, {})", id, x, y);
         id
+    }
+
+    /// 添加画板，并记入撤销栈。
+    ///
+    /// 中心是 `(x, y)`。空名称写成 `"画板"`。宽或高不是正数时返回 0，不入栈。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const id = canvas.add_frame(40, 30, 80, 60, "封面");
+    /// canvas.rename_frame(id, "内页");
+    /// ```
+    #[wasm_bindgen]
+    pub fn add_frame(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        name: Option<String>,
+    ) -> u64 {
+        if !x.is_finite()
+            || !y.is_finite()
+            || !width.is_finite()
+            || !height.is_finite()
+            || width <= 0.0
+            || height <= 0.0
+        {
+            return 0;
+        }
+        let id = self.scene.next_id();
+        let label = name
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "画板".to_string());
+        let frame = Frame::new(id, Vec2::new(x, y), Vec2::new(width, height)).with_name(label);
+        self.command_history.execute(
+            Box::new(AddElementCommand::new(AnyElement::Frame(frame))),
+            &mut self.scene,
+        );
+        id
+    }
+
+    /// 重命名画板。不是画板，或名称没变时返回 false，不入栈。
+    #[wasm_bindgen]
+    pub fn rename_frame(&mut self, id: u64, name: &str) -> bool {
+        apply_rename_frame(&mut self.command_history, &mut self.scene, id, name)
+    }
+
+    /// 画板名称。不是画板时返回 `null`。
+    #[wasm_bindgen]
+    pub fn frame_name(&self, id: u64) -> Option<String> {
+        match self.scene.get(id) {
+            Some(AnyElement::Frame(frame)) => Some(frame.name.clone()),
+            _ => None,
+        }
+    }
+
+    /// 把元素移进画板。空列表、目标不是画板、或没有元素移动时返回 false，不入栈。
+    #[wasm_bindgen]
+    pub fn reparent_into_frame(&mut self, ids: &Array, frame_id: u64) -> bool {
+        let ids = element_ids_from_js(ids);
+        apply_reparent_into_frame(&mut self.command_history, &mut self.scene, &ids, frame_id)
+    }
+
+    /// 把当前选择移进画板。空选返回 false，不入栈。
+    #[wasm_bindgen]
+    pub fn reparent_selection_into_frame(&mut self, frame_id: u64) -> bool {
+        let ids = self.selection.selected_ids();
+        apply_reparent_into_frame(&mut self.command_history, &mut self.scene, &ids, frame_id)
     }
 
     /// 添加正多边形，并记入撤销栈。
@@ -1917,6 +1993,21 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn export_svg(&self, selected_only: bool) -> String {
         export_svg(&self.scene, selected_only)
+    }
+
+    /// 把一张画板导出为 PNG。区域是画板的世界包围盒，不含额外留白。
+    ///
+    /// 只绘制这张画板和它的子孙。空画板仍按矩形尺寸导出。
+    #[wasm_bindgen]
+    pub fn export_frame_png(&self, frame_id: u64) -> Result<Vec<u8>, JsValue> {
+        export_frame_png(&self.scene, frame_id, self.viewport.zoom())
+            .map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// 把一张画板导出为 SVG。`viewBox` 是画板包围盒，超出部分隐藏。
+    #[wasm_bindgen]
+    pub fn export_frame_svg(&self, frame_id: u64) -> Result<String, JsValue> {
+        export_frame_svg(&self.scene, frame_id).map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
     /// 把 SVG 文本解析成场景元素，并记一条撤销记录。
@@ -3217,7 +3308,7 @@ impl InfiniteCanvas {
 
         match current_tool {
             Tool::Select => self.handle_select_tool_down(event),
-            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star => {
+            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star | Tool::Frame => {
                 self.handle_draw_tool_down(event, current_tool)
             }
             Tool::Line => self.handle_line_tool_down(event),
@@ -3236,7 +3327,7 @@ impl InfiniteCanvas {
 
         match current_tool {
             Tool::Select => self.handle_select_tool_move(event),
-            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star => {
+            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star | Tool::Frame => {
                 self.handle_draw_tool_move(event)
             }
             Tool::Line => self.handle_line_tool_move(event),
@@ -3255,7 +3346,7 @@ impl InfiniteCanvas {
 
         match current_tool {
             Tool::Select => self.handle_select_tool_up(event),
-            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star => {
+            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star | Tool::Frame => {
                 self.handle_draw_tool_up(event, current_tool)
             }
             Tool::Line => self.handle_line_tool_up(event),
@@ -3293,23 +3384,29 @@ impl InfiniteCanvas {
         if self.try_begin_handle_gesture(&event) {
             return;
         }
-        let options = HitTestOptions {
-            max_results: 1,
-            include_invisible: false,
-            include_locked: false,
+        let hit_id = if event.modifiers.alt {
+            // Alt：光标下最上层的画板优先于它上面的子元素。
+            click_target(&self.scene, event.world_position, true)
+        } else {
+            let options = HitTestOptions {
+                max_results: 1,
+                include_invisible: false,
+                include_locked: false,
+            };
+            hit_test_point(&self.scene, event.world_position, &options)
+                .first()
+                .map(|hit| hit.id)
         };
-        let hits = hit_test_point(&self.scene, event.world_position, &options);
         let additive = event.modifiers.ctrl || event.modifiers.meta || event.modifiers.shift;
 
-        if let Some(hit) = hits.first() {
+        if let Some(id) = hit_id {
             // 点击到已选中的元素：开始拖动
-            if self.selection.is_selected(hit.id) {
+            if self.selection.is_selected(id) {
                 self.start_drag(event.pointer_id, event.world_position);
                 self.selection_box.cancel();
             } else {
                 // 点击到未选中的元素：选中它，并开始拖动
-                self.selection
-                    .select_element(&mut self.scene, hit.id, additive);
+                self.selection.select_element(&mut self.scene, id, additive);
                 self.start_drag(event.pointer_id, event.world_position);
                 self.selection_box.cancel();
             }
@@ -3434,6 +3531,19 @@ impl InfiniteCanvas {
                     let circle = Circle::new(id, center, radius).with_style(style);
                     self.scene.add_circle(circle);
                     log::info!("Created circle {} at {:?}, radius {}", id, center, radius);
+                }
+                Tool::Frame => {
+                    let frame = Frame::new(id, center, Vec2::new(width, height)).with_name("画板");
+                    self.command_history.execute(
+                        Box::new(AddElementCommand::new(AnyElement::Frame(frame))),
+                        &mut self.scene,
+                    );
+                    log::info!(
+                        "Created frame {} at {:?}, size {:?}",
+                        id,
+                        center,
+                        (width, height)
+                    );
                 }
                 _ => {}
             }
@@ -4405,6 +4515,11 @@ fn scene_tree_node_to_js(node: &SceneTreeNode) -> Object {
         &obj,
         &JsValue::from_str("zIndex"),
         &JsValue::from(node.z_index),
+    );
+    let _ = Reflect::set(
+        &obj,
+        &JsValue::from_str("name"),
+        &JsValue::from_str(&node.name),
     );
     let children = Array::new();
     for child in &node.children {

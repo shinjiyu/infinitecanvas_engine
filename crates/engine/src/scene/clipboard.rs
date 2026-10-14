@@ -101,8 +101,8 @@ impl Scene {
                 element.as_element_mut().props_mut().parent = None;
             }
             element.as_element_mut().props_mut().selected = false;
-            if let Some(group) = element.as_group_mut() {
-                group.children.retain(|child| included.contains(child));
+            if let Some(children) = element.container_children_mut() {
+                children.retain(|child| included.contains(child));
             }
         }
         elements.sort_by_key(|element| element.id());
@@ -200,7 +200,10 @@ impl Scene {
             if spawned.contains(&parent) {
                 continue;
             }
-            if self.get(parent).and_then(AnyElement::as_group).is_none() {
+            if self
+                .get(parent)
+                .is_none_or(|element| !element.is_container())
+            {
                 self.set_parent(id, None);
                 continue;
             }
@@ -306,9 +309,8 @@ impl Scene {
                 props.dirty = true;
                 props.transform.translate(offset);
             }
-            if let Some(group) = element.as_group_mut() {
-                group.children = group
-                    .children
+            if let Some(children) = element.container_children_mut() {
+                *children = children
                     .iter()
                     .filter_map(|child| id_of.get(child).copied())
                     .collect();
@@ -401,8 +403,7 @@ fn remap_parent(
     match old_parent {
         Some(parent) if original_ids.contains(&parent) => id_of.get(&parent).copied(),
         Some(parent)
-            if keep_external_parent
-                && scene.get(parent).and_then(AnyElement::as_group).is_some() =>
+            if keep_external_parent && scene.get(parent).is_some_and(AnyElement::is_container) =>
         {
             Some(parent)
         }

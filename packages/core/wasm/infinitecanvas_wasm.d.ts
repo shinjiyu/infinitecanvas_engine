@@ -39,6 +39,18 @@ export class InfiniteCanvas {
      */
     add_circle(x: number, y: number, radius: number, fill_color: string | null | undefined, stroke_color: string | null | undefined, stroke_width: number): bigint;
     /**
+     * 添加画板，并记入撤销栈。
+     *
+     * 中心是 `(x, y)`。空名称写成 `"画板"`。宽或高不是正数时返回 0，不入栈。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const id = canvas.add_frame(40, 30, 80, 60, "封面");
+     * canvas.rename_frame(id, "内页");
+     * ```
+     */
+    add_frame(x: number, y: number, width: number, height: number, name?: string | null): bigint;
+    /**
      * 添加图片元素
      *
      * # 参数
@@ -374,6 +386,16 @@ export class InfiniteCanvas {
      */
     enter_group(element_id: bigint, group_id: bigint): boolean;
     /**
+     * 把一张画板导出为 PNG。区域是画板的世界包围盒，不含额外留白。
+     *
+     * 只绘制这张画板和它的子孙。空画板仍按矩形尺寸导出。
+     */
+    export_frame_png(frame_id: bigint): Uint8Array;
+    /**
+     * 把一张画板导出为 SVG。`viewBox` 是画板包围盒，超出部分隐藏。
+     */
+    export_frame_svg(frame_id: bigint): string;
+    /**
      * 导出场景为版本化 JSON
      *
      * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）、
@@ -450,6 +472,10 @@ export class InfiniteCanvas {
      * ```
      */
     flip_selection(axis: string): boolean;
+    /**
+     * 画板名称。不是画板时返回 `null`。
+     */
+    frame_name(id: bigint): string | undefined;
     /**
      * 当前生效的对齐参考线。
      *
@@ -863,6 +889,10 @@ export class InfiniteCanvas {
      */
     remove_element(id: bigint): boolean;
     /**
+     * 重命名画板。不是画板，或名称没变时返回 false，不入栈。
+     */
+    rename_frame(id: bigint, name: string): boolean;
+    /**
      * 渲染一帧
      *
      * # 返回
@@ -903,6 +933,14 @@ export class InfiniteCanvas {
      * ```
      */
     reorder_selection(action: string): boolean;
+    /**
+     * 把元素移进画板。空列表、目标不是画板、或没有元素移动时返回 false，不入栈。
+     */
+    reparent_into_frame(ids: Array<any>, frame_id: bigint): boolean;
+    /**
+     * 把当前选择移进画板。空选返回 false，不入栈。
+     */
+    reparent_selection_into_frame(frame_id: bigint): boolean;
     /**
      * 把当前选中元素顺时针或逆时针转 90°，并记入一条撤销记录。
      *
@@ -1281,6 +1319,7 @@ export interface InitOutput {
     readonly __wbg_infinitecanvas_free: (a: number, b: number) => void;
     readonly infinitecanvas_abandon_text_raster: (a: number, b: bigint) => void;
     readonly infinitecanvas_add_circle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
+    readonly infinitecanvas_add_frame: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
     readonly infinitecanvas_add_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
     readonly infinitecanvas_add_image_bytes: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [bigint, number, number];
     readonly infinitecanvas_add_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
@@ -1312,11 +1351,14 @@ export interface InitOutput {
     readonly infinitecanvas_distribute_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_duplicate_selection: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_enter_group: (a: number, b: bigint, c: bigint) => number;
+    readonly infinitecanvas_export_frame_png: (a: number, b: bigint) => [number, number, number, number];
+    readonly infinitecanvas_export_frame_svg: (a: number, b: bigint) => [number, number, number, number];
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
     readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
     readonly infinitecanvas_export_svg: (a: number, b: number) => [number, number];
     readonly infinitecanvas_fit_scene: (a: number) => number;
     readonly infinitecanvas_flip_selection: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_frame_name: (a: number, b: bigint) => [number, number];
     readonly infinitecanvas_get_alignment_guides: (a: number) => any;
     readonly infinitecanvas_get_current_tool: (a: number) => [number, number];
     readonly infinitecanvas_get_element_count: (a: number) => number;
@@ -1375,9 +1417,12 @@ export interface InitOutput {
     readonly infinitecanvas_push_hand_tool: (a: number) => void;
     readonly infinitecanvas_redo: (a: number) => number;
     readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
+    readonly infinitecanvas_rename_frame: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_render: (a: number) => [number, number];
     readonly infinitecanvas_reorder_element: (a: number, b: bigint, c: bigint, d: number) => number;
     readonly infinitecanvas_reorder_selection: (a: number, b: number, c: number) => number;
+    readonly infinitecanvas_reparent_into_frame: (a: number, b: any, c: bigint) => number;
+    readonly infinitecanvas_reparent_selection_into_frame: (a: number, b: bigint) => number;
     readonly infinitecanvas_rotate_selection_quarter: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_sample_style_at: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_scene_bounds: (a: number) => any;
