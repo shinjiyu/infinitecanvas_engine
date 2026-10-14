@@ -26,6 +26,7 @@ pub mod quadtree;
 pub mod scene;
 pub mod selection;
 pub mod selection_box;
+pub mod snap;
 pub mod tool;
 pub mod transform_handles;
 pub mod vertex_cache;
@@ -52,6 +53,10 @@ pub use quadtree::QuadTree;
 pub use scene::{AnyElement, Scene};
 pub use selection::SelectionManager;
 pub use selection_box::SelectionBox;
+pub use snap::{
+    bounds_union, snap_bounds, snap_drag, AlignmentGuide, DragSnap, GuideAxis, SnapResult,
+    SnapSettings,
+};
 pub use tool::{Tool, ToolManager};
 pub use vertex_cache::{
     rebuild_all_vertices, GpuVertexWrite, RebuiltGeometry, TexturedDraw, VertexBufferKind,

@@ -311,6 +311,20 @@ export class InfiniteCanvas {
         return v1;
     }
     /**
+     * 当前生效的对齐参考线。
+     *
+     * 只在吸附开启且正在拖拽、并且选区进入阈值时非空。
+     * 每条记录包含 `axis`（`"horizontal"` 或 `"vertical"`）和 `position`（世界坐标）。
+     *
+     * # 返回
+     * 参考线数组。没有参考线时为空数组。
+     * @returns {Array<any>}
+     */
+    get_alignment_guides() {
+        const ret = wasm.infinitecanvas_get_alignment_guides(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 获取当前工具名称
      * @returns {string}
      */
@@ -434,6 +448,14 @@ export class InfiniteCanvas {
         return ret >>> 0;
     }
     /**
+     * 当前吸附阈值（屏幕像素）。
+     * @returns {number}
+     */
+    get_snap_threshold() {
+        const ret = wasm.infinitecanvas_get_snap_threshold(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 获取完整的画布状态（用于 UI 同步）
      *
      * # 返回
@@ -447,6 +469,8 @@ export class InfiniteCanvas {
      * - isDragging: 是否正在拖动
      * - isSelectionBoxActive: 是否正在框选
      * - zoom: 当前缩放比例
+     * - snapEnabled: 拖拽吸附是否开启
+     * - snapThreshold: 吸附阈值（屏幕像素）
      * @returns {any}
      */
     get_state() {
@@ -626,6 +650,14 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 拖拽吸附是否开启。
+     * @returns {boolean}
+     */
+    is_snap_enabled() {
+        const ret = wasm.infinitecanvas_is_snap_enabled(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。
      *
      * 元素按网格铺开。第一次渲染会建立顶点缓存，之后平移/缩放只更新 uniform。
@@ -749,6 +781,31 @@ export class InfiniteCanvas {
     set_image_alpha(image_id, alpha) {
         const ret = wasm.infinitecanvas_set_image_alpha(this.__wbg_ptr, image_id, alpha);
         return ret !== 0;
+    }
+    /**
+     * 开启或关闭拖拽吸附。
+     *
+     * 关闭后元素跟着指针走，不再产生对齐参考线。
+     *
+     * # 参数
+     * - `enabled`: `true` 开启吸附
+     * @param {boolean} enabled
+     */
+    set_snap_enabled(enabled) {
+        wasm.infinitecanvas_set_snap_enabled(this.__wbg_ptr, enabled);
+    }
+    /**
+     * 设置吸附阈值（屏幕像素）。
+     *
+     * 非有限值会被忽略。有效值限制在 0 到 64 之间。
+     * 世界距离会除以当前缩放，因此任意缩放下抓取范围保持同样的屏幕像素。
+     *
+     * # 参数
+     * - `threshold_px`: 屏幕像素阈值
+     * @param {number} threshold_px
+     */
+    set_snap_threshold(threshold_px) {
+        wasm.infinitecanvas_set_snap_threshold(this.__wbg_ptr, threshold_px);
     }
     /**
      * 设置当前工具

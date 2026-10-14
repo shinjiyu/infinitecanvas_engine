@@ -485,6 +485,17 @@ function bindInput(canvas, engine) {
   });
   document.getElementById('png-btn')?.addEventListener('click', () => exportPng(engine, false));
   document.getElementById('png-selection-btn')?.addEventListener('click', () => exportPng(engine, true));
+  document.getElementById('snap-btn')?.addEventListener('click', () => {
+    engine.set_snap_enabled(!engine.is_snap_enabled());
+    syncSnapControls(engine);
+    drawAlignmentGuides(engine);
+  });
+  document.getElementById('snap-threshold')?.addEventListener('input', (event) => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    engine.set_snap_threshold(Number(input.value));
+    syncSnapControls(engine);
+  });
   document.querySelectorAll('[data-count]').forEach((button) => {
     button.addEventListener('click', () => {
       const count = Number(button.dataset.count);
@@ -592,6 +603,71 @@ function updateHud(engine) {
   const redoBtn = document.getElementById('redo-btn');
   if (undoBtn) undoBtn.disabled = !engine.can_undo();
   if (redoBtn) redoBtn.disabled = !engine.can_redo();
+  syncSnapControls(engine);
+  drawAlignmentGuides(engine);
+}
+
+/**
+ * 同步吸附开关和像素阈值。滑块正在拖动时不回写，避免抢光标。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncSnapControls(engine) {
+  const enabled = engine.is_snap_enabled();
+  document.getElementById('snap-btn')?.classList.toggle('active', enabled);
+  const threshold = engine.get_snap_threshold();
+  setText('snap-threshold-label', Math.round(threshold));
+  const slider = document.getElementById('snap-threshold');
+  if (slider instanceof HTMLInputElement && document.activeElement !== slider) {
+    slider.value = String(threshold);
+  }
+}
+
+/**
+ * 把当前对齐参考线画到 WebGPU 画布上方。坐标是世界坐标，按视口换到屏幕像素。
+ *
+ * @param {WasmCanvas} engine
+ */
+function drawAlignmentGuides(engine) {
+  const overlay = document.getElementById('guides');
+  if (!(overlay instanceof HTMLCanvasElement) || !canvasEl) return;
+  if (overlay.width !== canvasEl.width || overlay.height !== canvasEl.height) {
+    overlay.width = canvasEl.width;
+    overlay.height = canvasEl.height;
+  }
+  const ctx = overlay.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  const guides = engine.get_alignment_guides();
+  const count = guides.length ?? 0;
+  if (count === 0) return;
+
+  const zoom = engine.get_zoom();
+  const centerX = engine.get_viewport_center_x();
+  const centerY = engine.get_viewport_center_y();
+  const originX = overlay.width / 2;
+  const originY = overlay.height / 2;
+
+  ctx.save();
+  ctx.strokeStyle = '#f2c94c';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  for (let index = 0; index < count; index += 1) {
+    const guide = guides[index];
+    ctx.beginPath();
+    if (guide.axis === 'vertical') {
+      const x = (guide.position - centerX) * zoom + originX;
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, overlay.height);
+    } else {
+      const y = (guide.position - centerY) * zoom + originY;
+      ctx.moveTo(0, y);
+      ctx.lineTo(overlay.width, y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**

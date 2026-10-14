@@ -169,6 +169,16 @@ export class InfiniteCanvas {
      */
     export_png(selection_only: boolean): Uint8Array;
     /**
+     * 当前生效的对齐参考线。
+     *
+     * 只在吸附开启且正在拖拽、并且选区进入阈值时非空。
+     * 每条记录包含 `axis`（`"horizontal"` 或 `"vertical"`）和 `position`（世界坐标）。
+     *
+     * # 返回
+     * 参考线数组。没有参考线时为空数组。
+     */
+    get_alignment_guides(): Array<any>;
+    /**
      * 获取当前工具名称
      */
     get_current_tool(): string;
@@ -231,6 +241,10 @@ export class InfiniteCanvas {
     get_selection_box_bounds(): any;
     get_selection_count(): number;
     /**
+     * 当前吸附阈值（屏幕像素）。
+     */
+    get_snap_threshold(): number;
+    /**
      * 获取完整的画布状态（用于 UI 同步）
      *
      * # 返回
@@ -244,6 +258,8 @@ export class InfiniteCanvas {
      * - isDragging: 是否正在拖动
      * - isSelectionBoxActive: 是否正在框选
      * - zoom: 当前缩放比例
+     * - snapEnabled: 拖拽吸附是否开启
+     * - snapThreshold: 吸附阈值（屏幕像素）
      */
     get_state(): any;
     /**
@@ -304,6 +320,10 @@ export class InfiniteCanvas {
      * 检查是否正在框选
      */
     is_selection_box_active(): boolean;
+    /**
+     * 拖拽吸附是否开启。
+     */
+    is_snap_enabled(): boolean;
     /**
      * 用 `count` 个矩形替换当前场景，供压测页切换 1k/10k/100k。
      *
@@ -379,6 +399,25 @@ export class InfiniteCanvas {
      */
     set_image_alpha(image_id: bigint, alpha: number): boolean;
     /**
+     * 开启或关闭拖拽吸附。
+     *
+     * 关闭后元素跟着指针走，不再产生对齐参考线。
+     *
+     * # 参数
+     * - `enabled`: `true` 开启吸附
+     */
+    set_snap_enabled(enabled: boolean): void;
+    /**
+     * 设置吸附阈值（屏幕像素）。
+     *
+     * 非有限值会被忽略。有效值限制在 0 到 64 之间。
+     * 世界距离会除以当前缩放，因此任意缩放下抓取范围保持同样的屏幕像素。
+     *
+     * # 参数
+     * - `threshold_px`: 屏幕像素阈值
+     */
+    set_snap_threshold(threshold_px: number): void;
+    /**
      * 设置当前工具
      *
      * # 参数
@@ -449,6 +488,7 @@ export interface InitOutput {
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
     readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
+    readonly infinitecanvas_get_alignment_guides: (a: number) => any;
     readonly infinitecanvas_get_current_tool: (a: number) => [number, number];
     readonly infinitecanvas_get_element_count: (a: number) => number;
     readonly infinitecanvas_get_element_info: (a: number, b: bigint) => any;
@@ -461,6 +501,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_selection_bounds: (a: number) => any;
     readonly infinitecanvas_get_selection_box_bounds: (a: number) => any;
     readonly infinitecanvas_get_selection_count: (a: number) => number;
+    readonly infinitecanvas_get_snap_threshold: (a: number) => number;
     readonly infinitecanvas_get_state: (a: number) => any;
     readonly infinitecanvas_get_tool_cursor: (a: number) => [number, number];
     readonly infinitecanvas_get_undo_count: (a: number) => number;
@@ -476,6 +517,7 @@ export interface InitOutput {
     readonly infinitecanvas_init: (a: number, b: any) => any;
     readonly infinitecanvas_is_dragging: (a: number) => number;
     readonly infinitecanvas_is_selection_box_active: (a: number) => number;
+    readonly infinitecanvas_is_snap_enabled: (a: number) => number;
     readonly infinitecanvas_load_stress_scene: (a: number, b: number) => void;
     readonly infinitecanvas_move_selection: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_new: () => [number, number, number];
@@ -487,6 +529,8 @@ export interface InitOutput {
     readonly infinitecanvas_render: (a: number) => [number, number];
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
+    readonly infinitecanvas_set_snap_enabled: (a: number, b: number) => void;
+    readonly infinitecanvas_set_snap_threshold: (a: number, b: number) => void;
     readonly infinitecanvas_set_tool: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_undo: (a: number) => number;
     readonly infinitecanvas_upload_texture: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
