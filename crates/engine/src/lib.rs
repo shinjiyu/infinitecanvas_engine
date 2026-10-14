@@ -24,6 +24,7 @@ pub mod element;
 pub mod event;
 pub mod hit_test;
 pub mod minimap;
+pub mod orient;
 pub mod persist;
 pub mod quadtree;
 pub mod scene;
@@ -65,6 +66,7 @@ pub use minimap::{
     build_overview, drag_camera_center, fit_minimap, minimap_to_world, scene_bounds,
     viewport_minimap_rect, world_rect_to_minimap, world_to_minimap, MinimapFrame, MinimapOverview,
 };
+pub use orient::{apply_flip, apply_rotate_quarter, FlipAxis, OrientSelectionCommand, QuarterTurn};
 pub use persist::{
     export_selection_png, export_viewport_png, PersistError, SceneFile, SCENE_FORMAT_VERSION,
 };

@@ -2,6 +2,25 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #49: 翻转与 90° 旋转
+
+- [x] `OrientSelectionCommand`：水平/垂直翻转，顺时针/逆时针 90°，各一条历史
+- [x] 绕选区中心；单选即元素中心。只改平移、旋转和缩放符号，并标脏
+- [x] 选中组只写组根，子孙跟着走，不拆组。空选、锁定、隐藏不入栈
+- [x] 图片翻转不改 `size`，绝对缩放比不变
+- [x] WASM：`flip_selection(axis)`、`rotate_selection_quarter(dir)`
+- [x] Demo：工具栏和属性面板按钮；`Shift+H` / `Shift+V` / `Shift+R` / `Shift+Alt+R`
+- [ ] #26 快捷键帮助面板尚未合并，未登记进 `SHORTCUTS`
+
+```text
+Shift+H / Shift+V / Shift+R / Shift+Alt+R
+        │
+        ▼
+nudge_targets ──► OrientSelectionCommand ──► set_world_transform
+                                               ├─ 一条历史
+                                               └─ mark_dirty
+```
+
 ## Issue #45: 层级快捷键
 
 - [x] `ReorderSelectionCommand`：置顶 / 置底 / 前移 / 后移，同一父节点下的兄弟，一条历史
