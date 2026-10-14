@@ -245,6 +245,60 @@ function rootFrontIndex(rows, sourceId, tree) {
 }
 
 /**
+ * 把当前选中收成一组，并选中新组。
+ *
+ * 图层面板「成组」走这里，调用 `group_elements`。
+ * 少于两个、不同父节点或锁定时失败，场景不变。
+ *
+ * @param {{ get_selected_ids?: () => Array<bigint | number>, group_elements: (ids: unknown[]) => bigint | number, select_element: (id: bigint, additive: boolean) => boolean }} engine
+ * @param {{ setStatus?: (text: string, isError?: boolean) => void }} [hooks]
+ * @returns {boolean} 是否成组成功
+ */
+export function groupSelected(engine, hooks = {}) {
+  const ids = Array.from(engine.get_selected_ids?.() || []);
+  if (ids.length < 2) {
+    hooks.setStatus?.('成组至少选择两个元素', true);
+    return false;
+  }
+  const groupId = engine.group_elements(ids);
+  if (groupId && groupId !== 0n && groupId !== 0) {
+    engine.select_element(wasmId(groupId), false);
+    hooks.setStatus?.('已成组');
+    return true;
+  }
+  hooks.setStatus?.('无法成组：需要同一父节点下至少两个未锁定元素', true);
+  return false;
+}
+
+/**
+ * 解散当前唯一选中的分组。
+ *
+ * 图层面板「解组」走这里，调用 `ungroup`。
+ *
+ * @param {{ get_selected_ids?: () => Array<bigint | number>, get_element_info?: (id: bigint) => { type?: string } | null, ungroup: (id: bigint) => boolean }} engine
+ * @param {{ setStatus?: (text: string, isError?: boolean) => void }} [hooks]
+ * @returns {boolean} 是否解组成功
+ */
+export function ungroupSelected(engine, hooks = {}) {
+  const ids = Array.from(engine.get_selected_ids?.() || []);
+  if (ids.length !== 1) {
+    hooks.setStatus?.('解组请只选择一个分组', true);
+    return false;
+  }
+  const info = engine.get_element_info?.(wasmId(ids[0]));
+  if (!info || info.type !== 'Group') {
+    hooks.setStatus?.('当前选中的不是分组', true);
+    return false;
+  }
+  if (engine.ungroup(wasmId(ids[0]))) {
+    hooks.setStatus?.('已解组');
+    return true;
+  }
+  hooks.setStatus?.('无法解组', true);
+  return false;
+}
+
+/**
  * 挂上图层面板。页面里需要 `#layer-list`、`#layer-meta` 和成组/解组/压测按钮。
  *
  * @param {object} engine WASM `InfiniteCanvas`
@@ -319,41 +373,16 @@ export function attachLayerPanel(engine, hooks = {}) {
   };
 
   document.getElementById('layer-group-btn')?.addEventListener('click', () => {
-    const ids = selectedList();
-    if (ids.length < 2) {
-      setStatus('成组至少选择两个元素', true);
-      return;
-    }
-    const groupId = engine.group_elements(ids);
-    if (groupId && groupId !== 0n && groupId !== 0) {
-      engine.select_element(wasmId(groupId), false);
-      selectionFromPanel = true;
-      onEdit();
-      panel.sync(true);
-      setStatus('已成组');
-    } else {
-      setStatus('无法成组：需要同一父节点下至少两个未锁定元素', true);
-    }
+    if (!groupSelected(engine, { setStatus })) return;
+    selectionFromPanel = true;
+    onEdit();
+    panel.sync(true);
   });
 
   document.getElementById('layer-ungroup-btn')?.addEventListener('click', () => {
-    const ids = selectedList();
-    if (ids.length !== 1) {
-      setStatus('解组请只选择一个分组', true);
-      return;
-    }
-    const node = tree.byId.get(idKey(ids[0]));
-    if (!node || node.elementType !== 'Group') {
-      setStatus('当前选中的不是分组', true);
-      return;
-    }
-    if (engine.ungroup(wasmId(ids[0]))) {
-      onEdit();
-      panel.sync(true);
-      setStatus('已解组');
-    } else {
-      setStatus('无法解组', true);
-    }
+    if (!ungroupSelected(engine, { setStatus })) return;
+    onEdit();
+    panel.sync(true);
   });
 
   document.getElementById('layer-bench-btn')?.addEventListener('click', () => {

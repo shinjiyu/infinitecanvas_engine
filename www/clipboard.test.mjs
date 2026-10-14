@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
   PASTE_STEP,
   createPasteSession,
+  hasClipboardText,
   pasteOffset,
+  peekMemoryClipboard,
   readTextClipboard,
   screenToWorld,
   writeTextClipboard,
@@ -50,6 +52,13 @@ test('screen center maps to the viewport center', () => {
   assert.equal(corner.y, 300);
 });
 
+test('blank clipboard text does not count as paste content', () => {
+  assert.equal(hasClipboardText(''), false);
+  assert.equal(hasClipboardText('   '), false);
+  assert.equal(hasClipboardText('{"version":1}'), true);
+  assert.equal(hasClipboardText(null), false);
+});
+
 test('clipboard permission failure falls back to memory without throwing', async () => {
   const denied = {
     writeText: async () => {
@@ -61,4 +70,5 @@ test('clipboard permission failure falls back to memory without throwing', async
   };
   await writeTextClipboard('{"version":1,"elements":[]}', denied);
   assert.equal(await readTextClipboard(denied), '{"version":1,"elements":[]}');
+  assert.equal(hasClipboardText(peekMemoryClipboard()), true);
 });
