@@ -1,4 +1,5 @@
 //! 矩形元素
+use super::stroke::{color_with_opacity, stroke_triangles, transform_vertices};
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Rect, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -71,7 +72,7 @@ impl Rectangle {
             return Vec::new();
         }
 
-        let color = self.style.fill.unwrap();
+        let color = color_with_opacity(self.style.fill.unwrap(), self.style.opacity);
         let half_w = self.size.x / 2.0;
         let half_h = self.size.y / 2.0;
 
@@ -108,11 +109,11 @@ impl Rectangle {
     /// # 注意
     /// WebGPU 使用线条列表（line-list）渲染模式
     pub fn generate_stroke_vertices(&self) -> Vec<Vertex> {
-        if self.style.stroke.is_none() {
+        if self.style.stroke.is_none() || self.style.stroke_width <= 0.0 {
             return Vec::new();
         }
 
-        let color = self.style.stroke.unwrap();
+        let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
         let half_w = self.size.x / 2.0;
         let half_h = self.size.y / 2.0;
 
@@ -146,6 +147,33 @@ impl Rectangle {
             Vertex::new(world_corners[3].x, world_corners[3].y, color),
             Vertex::new(world_corners[0].x, world_corners[0].y, color),
         ]
+    }
+
+    /// 按线宽生成描边三角形，放进填充缓冲后画布才能看出线宽。
+    ///
+    /// WebGPU 的线段管线宽度固定为 1 像素，所以粗描边不走 [`Self::generate_stroke_vertices`]。
+    /// 线宽小于等于 0 或没有描边色时返回空。
+    pub(crate) fn stroke_ribbon_vertices(&self) -> Vec<Vertex> {
+        let Some(stroke) = self.style.stroke else {
+            return Vec::new();
+        };
+        if self.style.stroke_width <= 0.0 {
+            return Vec::new();
+        }
+        let color = color_with_opacity(stroke, self.style.opacity);
+        let half_w = self.size.x / 2.0;
+        let half_h = self.size.y / 2.0;
+        let points = [
+            Vec2::new(-half_w, -half_h),
+            Vec2::new(half_w, -half_h),
+            Vec2::new(half_w, half_h),
+            Vec2::new(-half_w, half_h),
+            Vec2::new(-half_w, -half_h),
+        ];
+        transform_vertices(
+            stroke_triangles(&points, self.style.stroke_width, color),
+            &self.props.transform,
+        )
     }
 
     /// 生成所有顶点（填充 + 描边）

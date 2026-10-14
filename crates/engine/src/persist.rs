@@ -929,6 +929,9 @@ mod tests {
                 assert_eq!(text.font_size, 32.0);
                 assert_eq!(text.align, TextAlign::Left);
                 assert_eq!(text.color.a, 1.0);
+                assert_eq!(text.opacity, 1.0);
+                assert_eq!(text.stroke, None);
+                assert_eq!(text.stroke_width, 0.0);
                 assert_eq!(text.props.transform.rotation, 0.0);
                 assert_eq!(text.props.transform.scale, Vec2::ONE);
                 assert!(text.props.visible);

@@ -2,6 +2,7 @@
  * InfiniteCanvas 首页 Demo。
  *
  * 把选择、直线、画笔、压力测试和纹理上传放在同一张画布上。
+ * 选中元素后右侧属性面板可改填充、描边、线宽和不透明度，文本还可改字号和颜色。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  *
@@ -37,6 +38,8 @@ let textEditor = null;
 let textEditorOpening = false;
 /** @type {ReturnType<typeof attachLayerPanel> | null} */
 let layerPanel = null;
+/** @type {string | null} 正在拖动的属性控件，避免每帧把滑块写回去 */
+let activeStyleControl = null;
 
 /**
  * 浏览器没有可用的 WebGPU 时抛出，用来展示友好提示而不是原始异常。
@@ -391,7 +394,212 @@ function setTool(toolName) {
  * @param {HTMLCanvasElement} canvas
  * @param {WasmCanvas} engine
  */
+/**
+ * 结束一次属性拖动，并把前后差值收成一条撤销记录。
+ *
+ * @param {WasmCanvas} engine
+ */
+function finishStyleEdit(engine) {
+  activeStyleControl = null;
+  engine.commit_style_preview();
+  scheduleAutosave(engine);
+  syncPropertyPanel(engine);
+}
+
+/**
+ * 把 `#rrggbbaa` 收成颜色输入框要的 `#rrggbb`。
+ *
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function cssHex(value) {
+  if (typeof value !== 'string' || value.length < 7) return null;
+  return value.slice(0, 7);
+}
+
+/**
+ * @param {string} colorId
+ * @param {string | null} checkId
+ * @param {string} mixedId
+ * @param {string | null} value
+ * @param {boolean} mixed
+ * @param {boolean} none
+ * @param {boolean} supported
+ */
+function syncColorRow(colorId, checkId, mixedId, value, mixed, none, supported) {
+  const mixedEl = document.getElementById(mixedId);
+  if (mixedEl) mixedEl.hidden = !mixed;
+  const color = document.getElementById(colorId);
+  if (color instanceof HTMLInputElement && activeStyleControl !== colorId) {
+    const hex = cssHex(value);
+    if (hex) color.value = hex;
+    color.disabled = !supported || Boolean(none);
+  }
+  if (!checkId) return;
+  const check = document.getElementById(checkId);
+  if (check instanceof HTMLInputElement && activeStyleControl !== checkId) {
+    check.indeterminate = Boolean(mixed);
+    check.checked = Boolean(supported) && !none && !mixed;
+    check.disabled = !supported;
+  }
+}
+
+/**
+ * @param {string} id
+ * @param {string} labelId
+ * @param {number | null} value
+ * @param {boolean} mixed
+ * @param {(value: number) => string} format
+ */
+function syncRange(id, labelId, value, mixed, format) {
+  const mixedEl = document.getElementById(`${id}-mixed`);
+  if (mixedEl) mixedEl.hidden = !mixed;
+  const input = document.getElementById(id);
+  if (!(input instanceof HTMLInputElement) || activeStyleControl === id) return;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    input.value = String(value);
+    setText(labelId, format(value));
+  } else if (mixed) {
+    setText(labelId, '多种');
+  }
+}
+
+/**
+ * 按当前选择显示或隐藏属性面板，并把公共样式填进控件。
+ * 多选不一致时标成「多种」，下一次编辑会写到全部选中元素。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncPropertyPanel(engine) {
+  const panel = document.getElementById('property-panel');
+  if (!panel || typeof engine.get_selection_style !== 'function') return;
+  const style = engine.get_selection_style();
+  const visible = Boolean(style && (style.hasShape || style.hasText));
+  panel.hidden = !visible;
+  if (!visible || !style) return;
+
+  setText('prop-count', style.count ?? 0);
+  const fillRow = document.getElementById('prop-fill-row');
+  if (fillRow) fillRow.hidden = !style.hasShape;
+  syncColorRow(
+    'prop-fill',
+    'prop-fill-enabled',
+    'prop-fill-mixed',
+    style.fill,
+    style.fillMixed,
+    style.fillNone,
+    style.fillSupported,
+  );
+  syncColorRow(
+    'prop-stroke',
+    'prop-stroke-enabled',
+    'prop-stroke-mixed',
+    style.stroke,
+    style.strokeMixed,
+    style.strokeNone,
+    style.strokeSupported,
+  );
+  syncRange(
+    'prop-stroke-width',
+    'prop-stroke-width-label',
+    style.strokeWidth,
+    style.strokeWidthMixed,
+    (value) => String(value),
+  );
+  syncRange(
+    'prop-opacity',
+    'prop-opacity-label',
+    style.opacity,
+    style.opacityMixed,
+    (value) => `${Math.round(value * 100)}%`,
+  );
+
+  const textFields = document.getElementById('prop-text-fields');
+  if (textFields) textFields.hidden = !style.hasText;
+  syncRange(
+    'prop-font-size',
+    'prop-font-size-label',
+    style.fontSize,
+    style.fontSizeMixed,
+    (value) => String(Math.round(value)),
+  );
+  syncColorRow(
+    'prop-text-color',
+    null,
+    'prop-text-color-mixed',
+    style.textColor,
+    style.textColorMixed,
+    false,
+    style.textColorSupported,
+  );
+}
+
+/**
+ * 绑定右侧属性面板。拖动过程中只预览，松手后记一条历史。
+ *
+ * @param {WasmCanvas} engine
+ */
+function bindPropertyPanel(engine) {
+  const bindRange = (id, key, labelId, format) => {
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement)) return;
+    input.addEventListener('input', () => {
+      const value = Number(input.value);
+      setText(labelId, format(value));
+      activeStyleControl = id;
+      engine.preview_selection_style({ [key]: value });
+    });
+    input.addEventListener('change', () => finishStyleEdit(engine));
+  };
+  bindRange('prop-stroke-width', 'strokeWidth', 'prop-stroke-width-label', (value) => String(value));
+  bindRange('prop-opacity', 'opacity', 'prop-opacity-label', (value) => `${Math.round(value * 100)}%`);
+  bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
+
+  const bindColor = (id, key) => {
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement)) return;
+    input.addEventListener('input', () => {
+      activeStyleControl = id;
+      engine.preview_selection_style({ [key]: input.value });
+    });
+    input.addEventListener('change', () => finishStyleEdit(engine));
+  };
+  bindColor('prop-fill', 'fill');
+  bindColor('prop-stroke', 'stroke');
+  bindColor('prop-text-color', 'textColor');
+
+  document.getElementById('prop-fill-enabled')?.addEventListener('change', (event) => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    const color = document.getElementById('prop-fill');
+    const hex = color instanceof HTMLInputElement ? color.value : '#000000';
+    engine.set_selection_style(input.checked ? { fill: hex } : { fill: null });
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+  });
+
+  document.getElementById('prop-stroke-enabled')?.addEventListener('change', (event) => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    const color = document.getElementById('prop-stroke');
+    const hex = color instanceof HTMLInputElement ? color.value : '#000000';
+    const widthInput = document.getElementById('prop-stroke-width');
+    const width = widthInput instanceof HTMLInputElement ? Number(widthInput.value) : 1;
+    if (input.checked) {
+      /** @type {Record<string, string | number | null>} */
+      const patch = { stroke: hex };
+      if (!Number.isFinite(width) || width <= 0) patch.strokeWidth = 1;
+      engine.set_selection_style(patch);
+    } else {
+      engine.set_selection_style({ stroke: null, strokeWidth: 0 });
+    }
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+  });
+}
+
 function bindInput(canvas, engine) {
+  bindPropertyPanel(engine);
   canvas.addEventListener('pointerdown', (event) => {
     const point = canvasPoint(event, canvas);
     engine.handle_pointer_event(
@@ -492,12 +700,16 @@ function bindInput(canvas, engine) {
   });
 
   document.getElementById('undo-btn')?.addEventListener('click', () => {
-    if (engine.can_undo()) engine.undo();
+    activeStyleControl = null;
+    engine.undo();
     scheduleAutosave(engine);
+    syncPropertyPanel(engine);
   });
   document.getElementById('redo-btn')?.addEventListener('click', () => {
-    if (engine.can_redo()) engine.redo();
+    activeStyleControl = null;
+    engine.redo();
     scheduleAutosave(engine);
+    syncPropertyPanel(engine);
   });
   document.getElementById('sample-btn')?.addEventListener('click', () => {
     loadSample(engine, canvas);
@@ -562,21 +774,25 @@ function bindInput(canvas, engine) {
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.target instanceof HTMLElement && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA')) {
-      return;
-    }
+    const inField = event.target instanceof HTMLElement
+      && (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA');
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
       event.preventDefault();
-      if (engine.can_undo()) engine.undo();
+      activeStyleControl = null;
+      engine.undo();
       scheduleAutosave(engine);
+      syncPropertyPanel(engine);
       return;
     }
     if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.key.toLowerCase() === 'z' && event.shiftKey))) {
       event.preventDefault();
-      if (engine.can_redo()) engine.redo();
+      activeStyleControl = null;
+      engine.redo();
       scheduleAutosave(engine);
+      syncPropertyPanel(engine);
       return;
     }
+    if (inField) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       saveSceneFile(engine);
@@ -664,6 +880,7 @@ function updateHud(engine) {
   const redoBtn = document.getElementById('redo-btn');
   if (undoBtn) undoBtn.disabled = !engine.can_undo();
   if (redoBtn) redoBtn.disabled = !engine.can_redo();
+  syncPropertyPanel(engine);
   syncSnapControls(engine);
   drawAlignmentGuides(engine);
   layerPanel?.sync();

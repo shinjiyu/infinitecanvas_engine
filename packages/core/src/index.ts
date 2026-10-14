@@ -133,6 +133,46 @@ export class InfiniteCanvas {
   }
 
   /**
+   * 读取当前选择的公共样式。多选不一致时对应字段为 mixed。
+   *
+   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape` 和 `hasText` 都是 false
+   */
+  getSelectionStyle(): Record<string, unknown> {
+    return this.requireWasm().get_selection_style() as Record<string, unknown>;
+  }
+
+  /**
+   * 修改当前选择的样式，并记一条撤销记录。
+   *
+   * 只写需要改的字段。`fill` / `stroke` 传 `null` 表示清掉。
+   *
+   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`
+   * @returns 是否写入了撤销栈
+   */
+  setSelectionStyle(patch: Record<string, unknown>): boolean {
+    return this.requireWasm().set_selection_style(patch);
+  }
+
+  /**
+   * 预览样式。连续拖动滑块时反复调用，松手后再 {@link commitStylePreview}。
+   *
+   * @param patch - 同 {@link setSelectionStyle}
+   * @returns 这次预览是否改变了元素
+   */
+  previewSelectionStyle(patch: Record<string, unknown>): boolean {
+    return this.requireWasm().preview_selection_style(patch);
+  }
+
+  /**
+   * 把进行中的样式预览收成一条撤销记录。
+   *
+   * @returns 是否入栈
+   */
+  commitStylePreview(): boolean {
+    return this.requireWasm().commit_style_preview();
+  }
+
+  /**
    * 销毁实例
    */
   destroy(): void {

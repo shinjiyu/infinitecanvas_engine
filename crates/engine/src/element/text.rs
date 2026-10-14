@@ -228,6 +228,10 @@ fn default_text_color() -> Color {
     DEFAULT_TEXT_COLOR
 }
 
+fn default_text_opacity() -> f32 {
+    1.0
+}
+
 fn default_font_family() -> String {
     DEFAULT_FONT_FAMILY.to_string()
 }
@@ -237,8 +241,8 @@ fn default_font_family() -> String {
 /// 位置是锚点，不是几何中心。左对齐时锚点在左上角，居中和右对齐分别在上边中点、右上角。
 ///
 /// 场景 JSON 只保存排版字段。`texture_id`、LOD、`revision`、`editing` 用 `#[serde(skip)]`，
-/// 导入后按当前缩放重新光栅化。缺省的 `font_size`、`color`、`align`、`font_family`、`size`
-/// 使用 serde 默认值；未知字段会被忽略。
+/// 导入后按当前缩放重新光栅化。缺省的 `font_size`、`color`、`opacity`、`stroke`、
+/// `stroke_width`、`align`、`font_family`、`size` 使用 serde 默认值；未知字段会被忽略。
 ///
 /// # 示例
 /// ```
@@ -264,6 +268,15 @@ pub struct Text {
     /// 文字颜色。JSON 中可省略，缺省为浅色。
     #[serde(default = "default_text_color")]
     pub color: Color,
+    /// 元素不透明度，乘在纹理 tint 上。JSON 中可省略，缺省为 1。
+    #[serde(default = "default_text_opacity")]
+    pub opacity: f32,
+    /// 描边色。JSON 中可省略。`None` 且线宽大于 0 时，光栅用填充色描边。
+    #[serde(default)]
+    pub stroke: Option<Color>,
+    /// 世界单位描边宽度。JSON 中可省略，缺省为 0（不描边）。
+    #[serde(default)]
+    pub stroke_width: f32,
     /// 水平对齐。JSON 中可省略，缺省为左对齐。值为 `left` / `center` / `right`。
     #[serde(default)]
     pub align: TextAlign,
@@ -309,6 +322,9 @@ impl Text {
             content,
             font_size,
             color: DEFAULT_TEXT_COLOR,
+            opacity: 1.0,
+            stroke: None,
+            stroke_width: 0.0,
             align: TextAlign::Left,
             font_family: DEFAULT_FONT_FAMILY.to_string(),
             texture_id: None,
@@ -361,6 +377,14 @@ impl Text {
         if self.font_family.trim().is_empty() {
             self.font_family = DEFAULT_FONT_FAMILY.to_string();
         }
+        if !self.opacity.is_finite() {
+            self.opacity = 1.0;
+        } else {
+            self.opacity = self.opacity.clamp(0.0, 1.0);
+        }
+        if !self.stroke_width.is_finite() || self.stroke_width < 0.0 {
+            self.stroke_width = 0.0;
+        }
         if !self.size.x.is_finite()
             || !self.size.y.is_finite()
             || self.size.x <= 0.0
@@ -386,7 +410,7 @@ impl Text {
     /// # 参数
     /// - `world`: 世界坐标
     pub fn color_at(&self, world: Vec2) -> Option<Color> {
-        if !self.props.visible || self.color.a <= 0.0 {
+        if !self.props.visible || self.color.a <= 0.0 || self.opacity <= 0.0 {
             return None;
         }
         let local = local_point(&self.props.transform, world)?;
@@ -409,7 +433,9 @@ impl Text {
         let u = rel_x / cell_w - char_index as f32;
         let v = (local.y - bounds.y) / cell_h - line_index as f32;
         if glyph_covers(ch, u, v) {
-            Some(self.color)
+            let mut color = self.color;
+            color.a = (color.a * self.opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+            Some(color)
         } else {
             None
         }
@@ -479,6 +505,48 @@ impl Text {
         self.content = content;
         self.size = estimate_size(&self.content, self.font_size);
         self.invalidate_raster()
+    }
+
+    /// 写入属性面板改过的外观。
+    ///
+    /// 字号、填充色或描边变化时丢掉纹理，下一帧按新参数光栅化。
+    /// 只改不透明度时保留纹理，绘制用 tint。
+    pub(crate) fn set_paint(
+        &mut self,
+        font_size: f32,
+        color: Color,
+        opacity: f32,
+        stroke: Option<Color>,
+        stroke_width: f32,
+    ) {
+        let font_size = if font_size.is_finite() {
+            font_size.max(1.0)
+        } else {
+            self.font_size
+        };
+        let stroke_width = if stroke_width.is_finite() {
+            stroke_width.max(0.0)
+        } else {
+            self.stroke_width
+        };
+        let opacity = if opacity.is_finite() {
+            opacity.clamp(0.0, 1.0)
+        } else {
+            self.opacity
+        };
+        let raster_changed = self.font_size != font_size
+            || self.color != color
+            || self.stroke != stroke
+            || self.stroke_width != stroke_width;
+        self.font_size = font_size;
+        self.color = color;
+        self.opacity = opacity;
+        self.stroke = stroke;
+        self.stroke_width = stroke_width;
+        if raster_changed {
+            self.size = estimate_size(&self.content, self.font_size);
+            let _ = self.invalidate_raster();
+        }
     }
 
     /// 进入或离开 DOM 编辑。编辑期间不请求光栅化，避免把旧字形画在输入框下面。
@@ -574,8 +642,8 @@ impl Text {
             transform.transform_point(Vec2::new(bounds.x, bounds.y + bounds.height)),
             transform.transform_point(Vec2::new(bounds.x + bounds.width, bounds.y + bounds.height)),
         ];
-        // 白色 tint，字形颜色已经在纹理里。
-        let color = Color::WHITE;
+        // 字形颜色在纹理里。tint 的 alpha 是元素不透明度，拖动滑块不必重新光栅化。
+        let color = Color::new(1.0, 1.0, 1.0, self.opacity.clamp(0.0, 1.0));
         let v0 = Vertex::with_uv(corners[0].x, corners[0].y, color, 0.0, 0.0);
         let v1 = Vertex::with_uv(corners[1].x, corners[1].y, color, 1.0, 0.0);
         let v2 = Vertex::with_uv(corners[2].x, corners[2].y, color, 0.0, 1.0);

@@ -280,8 +280,15 @@ pub(crate) fn transform_vertices(vertices: Vec<Vertex>, transform: &Transform) -
 
 /// 描边颜色：优先描边色，否则填充色，并乘上不透明度。
 pub(crate) fn paint_color(style: &ElementStyle) -> Color {
-    let mut color = style.stroke.or(style.fill).unwrap_or(Color::BLACK);
-    color.a = (color.a * style.opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    color_with_opacity(
+        style.stroke.or(style.fill).unwrap_or(Color::BLACK),
+        style.opacity,
+    )
+}
+
+/// 把元素不透明度乘进颜色 alpha。
+pub(crate) fn color_with_opacity(mut color: Color, opacity: f32) -> Color {
+    color.a = (color.a * opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
     color
 }
 

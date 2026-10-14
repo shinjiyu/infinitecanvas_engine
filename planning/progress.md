@@ -2,6 +2,24 @@
 
 **更新时间**: 2026-10-14
 
+## 属性面板 (#35)
+
+- [x] `SetStyle`：填充、描边、线宽、不透明度；文本额外字号和颜色
+- [x] 执行 / 撤销 / 重做调用 `Scene::mark_dirty`；文本字号、颜色、描边会重新光栅化
+- [x] 多选不一致时 `selection_style` 返回 mixed，一次补丁写到全部目标
+- [x] 滑块预览只在松手时入栈一条历史
+- [x] 样式经场景 JSON 往返；旧 JSON 用 `serde(default)` 导入
+- [x] Demo 右侧属性面板，未选中时隐藏
+
+```text
+属性面板 ──preview / commit──► SetStyle ──► mark_dirty
+                                    │
+                                    ├─ 形状：ElementStyle → 顶点缓存
+                                    └─ 文本：字号/颜色/描边 → 重新光栅
+```
+
+---
+
 ## Issue #4: 文本元素
 
 - [x] Text 元素：内容、字号、颜色、对齐

@@ -28,6 +28,7 @@ pub mod scene_tree;
 pub mod selection;
 pub mod selection_box;
 pub mod snap;
+pub mod style;
 pub mod svg;
 pub mod tool;
 pub mod transform_handles;
@@ -37,7 +38,7 @@ pub mod viewport;
 // 重导出核心类型
 pub use command::{
     AddElementCommand, Command, CommandHistory, MoveCommand, RemoveElementCommand,
-    ReorderOutlineCommand, TransformElementsCommand, UpdateTextCommand,
+    ReorderOutlineCommand, SetStyleCommand, TransformElementsCommand, UpdateTextCommand,
 };
 pub use element::{
     Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Rectangle,
@@ -61,6 +62,10 @@ pub use selection_box::SelectionBox;
 pub use snap::{
     bounds_union, snap_bounds, snap_drag, AlignmentGuide, DragSnap, GuideAxis, SnapResult,
     SnapSettings,
+};
+pub use style::{
+    apply_style_snapshot, capture_style, selection_style, style_locked, style_target_ids,
+    SelectionStyle, StyleField, StylePatch, StyleSnapshot, TextPaint,
 };
 pub use svg::export_svg;
 pub use tool::{Tool, ToolManager};
