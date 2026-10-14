@@ -209,6 +209,27 @@
 
     .snap-threshold input { width: 100%; }
 
+    #text-editor {
+      position: absolute;
+      z-index: 4;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      border: 1px solid #7eb6ff;
+      border-radius: 2px;
+      background: rgba(20, 22, 28, 0.92);
+      color: #f4f7fb;
+      resize: none;
+      overflow: hidden;
+      line-height: 1.4;
+      font-family: "WenQuanYi Micro Hei", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      white-space: pre;
+    }
+
+    #text-editor[hidden] {
+      display: none;
+    }
+
     .fallback {
       position: absolute;
       inset: 0;
@@ -311,6 +332,7 @@
           <button type="button" class="tool" data-tool="pen">画笔 <kbd>P</kbd></button>
           <button type="button" class="tool" data-tool="rectangle">矩形 <kbd>R</kbd></button>
           <button type="button" class="tool" data-tool="circle">圆形 <kbd>O</kbd></button>
+          <button type="button" class="tool" data-tool="text">文本 <kbd>T</kbd></button>
           <button type="button" class="tool" data-tool="pan">平移 <kbd>H</kbd></button>
         </div>
         <div class="group">
@@ -352,12 +374,13 @@
             <input id="snap-threshold" type="range" min="0" max="32" step="1" value="6">
           </label>
         </div>
-        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头。Ctrl+S 保存 JSON，场景会自动写入本地。</p>
+        <p class="hint">拖拽时在阈值内贴齐其他元素的边缘和中心，并画出参考线。多选按包围盒对齐。选中后拖动手柄缩放（Shift 等比例）或旋转（Shift 按 15° 吸附），Ctrl+Z 撤销。滚轮缩放，按住空格临时平移。Shift / Ctrl 点击多选。直线按住 Shift 带箭头，画笔自由绘制。T 单击创建文本，双击已有文本编辑。Enter 确认，Esc 取消。Ctrl+S 保存 JSON，场景会自动写入本地。</p>
       </aside>
 
       <div id="stage">
         <canvas id="canvas" width="960" height="640"></canvas>
         <canvas id="guides" width="960" height="640" aria-hidden="true"></canvas>
+        <textarea id="text-editor" hidden rows="1" spellcheck="false" aria-label="编辑文本"></textarea>
         <div id="webgpu-fallback" class="fallback" hidden>
           <div class="fallback-card" role="alert">
             <p class="eyebrow">WebGPU</p>

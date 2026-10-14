@@ -10,7 +10,7 @@
 //! ```
 //!
 //! 直线、箭头和自由画笔路径的三角形带放进填充缓冲（与原先的收集器一致），
-//! 矩形/圆形的 1px 描边仍走线条缓冲，图片走纹理缓冲。
+//! 矩形/圆形的 1px 描边仍走线条缓冲。图片和文本走纹理缓冲；只有图片先画纯色底。
 
 use crate::scene::{AnyElement, Scene};
 use crate::ElementId;
@@ -48,6 +48,8 @@ pub struct TexturedDraw {
     pub vertex_offset: u32,
     /// 顶点数量
     pub vertex_count: u32,
+    /// 图片先画纯色底。文本纹理有透明背景，纯色底会挡住字形。
+    pub underlay: bool,
 }
 
 /// [`VertexCache::sync`] 的结果。缓冲内容用缓存上的切片读取。
@@ -83,6 +85,7 @@ struct Slot {
     tex_offset: u32,
     tex_count: u32,
     texture_id: Option<String>,
+    underlay: bool,
 }
 
 struct Mesh {
@@ -90,6 +93,7 @@ struct Mesh {
     stroke: Vec<Vertex>,
     textured: Vec<Vertex>,
     texture_id: Option<String>,
+    underlay: bool,
 }
 
 const ZERO_VERTEX: Vertex = Vertex {
@@ -300,6 +304,7 @@ impl VertexCache {
             tex_offset: self.textured.len() as u32,
             tex_count: mesh.textured.len() as u32,
             texture_id: mesh.texture_id,
+            underlay: mesh.underlay,
         };
         self.fill.extend(mesh.fill);
         self.stroke.extend(mesh.stroke);
@@ -337,8 +342,9 @@ impl VertexCache {
         if repack {
             return true;
         }
-        let texture_changed = slot.texture_id != mesh.texture_id;
+        let texture_changed = slot.texture_id != mesh.texture_id || slot.underlay != mesh.underlay;
         slot.texture_id = mesh.texture_id;
+        slot.underlay = mesh.underlay;
         self.slots.insert(id, slot);
         if texture_changed
             || writes
@@ -364,7 +370,7 @@ impl VertexCache {
             };
             if let Some(last) = self.textured_draws.last_mut() {
                 let adjacent = last.vertex_offset + last.vertex_count == slot.tex_offset;
-                if last.texture_id == texture_id && adjacent {
+                if last.texture_id == texture_id && adjacent && last.underlay == slot.underlay {
                     last.vertex_count += slot.tex_count;
                     continue;
                 }
@@ -373,6 +379,7 @@ impl VertexCache {
                 texture_id,
                 vertex_offset: slot.tex_offset,
                 vertex_count: slot.tex_count,
+                underlay: slot.underlay,
             });
         }
     }
@@ -412,12 +419,14 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             stroke: rect.generate_stroke_vertices(),
             textured: Vec::new(),
             texture_id: None,
+            underlay: false,
         },
         AnyElement::Circle(circle) => Mesh {
             fill: circle.generate_fill_vertices(),
             stroke: circle.generate_stroke_vertices(),
             textured: Vec::new(),
             texture_id: None,
+            underlay: false,
         },
         AnyElement::Image(image) => {
             if !image.props.visible {
@@ -426,6 +435,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                     stroke: Vec::new(),
                     textured: Vec::new(),
                     texture_id: None,
+                    underlay: false,
                 };
             }
             Mesh {
@@ -433,6 +443,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
                 stroke: Vec::new(),
                 textured: image.generate_vertices(),
                 texture_id: Some(image.texture_id.clone()),
+                underlay: true,
             }
         }
         AnyElement::Line(line) => Mesh {
@@ -440,12 +451,21 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             stroke: Vec::new(),
             textured: Vec::new(),
             texture_id: None,
+            underlay: false,
         },
         AnyElement::Path(path) => Mesh {
             fill: path.generate_vertices(),
             stroke: Vec::new(),
             textured: Vec::new(),
             texture_id: None,
+            underlay: false,
+        },
+        AnyElement::Text(text) => Mesh {
+            fill: Vec::new(),
+            stroke: Vec::new(),
+            textured: text.generate_vertices(),
+            texture_id: text.texture_id.clone(),
+            underlay: false,
         },
     }
 }
@@ -524,8 +544,8 @@ mod tests {
     use super::*;
     use crate::transform_handles::{HandleGesture, HandleKind, ResizeHandle, SelectionFrame};
     use crate::{
-        Circle, Command, ElementStyle, Image, Line, MoveCommand, Path, Rectangle, Scene,
-        TransformElementsCommand,
+        Circle, Command, ElementStyle, Image, Line, MoveCommand, Path, Rectangle, Scene, Text,
+        TransformElementsCommand, UpdateTextCommand,
     };
     use infinitecanvas_math::{Color, Vec2};
 
@@ -1004,5 +1024,79 @@ mod tests {
 
         let again = cache.sync(&mut restored);
         assert!(again.geometry_unchanged);
+    }
+
+    #[test]
+    fn text_change_updates_vertices() {
+        let mut scene = Scene::new();
+        let mut text = Text::new(1, Vec2::new(10.0, 20.0), "A").with_font_size(32.0);
+        text.commit_raster(text.revision, 0, "tex-a".into(), Vec2::new(30.0, 12.0))
+            .unwrap();
+        scene.add_text(text);
+
+        let mut cache = VertexCache::new();
+        let first = cache.sync(&mut scene);
+        assert!(first.full_upload);
+        let before = cache.textured().to_vec();
+        assert_eq!(before.len(), 6);
+        assert!(!cache.textured_draws().is_empty());
+        assert!(!cache.textured_draws()[0].underlay);
+        assert!(!scene.has_dirty_elements());
+
+        let mut edited = match scene.get(1).unwrap() {
+            AnyElement::Text(text) => text.clone(),
+            _ => panic!("text"),
+        };
+        let before_visual = edited.visual();
+        assert!(edited.set_content("Hello").is_some());
+        let after_visual = edited.visual();
+        let mut command = UpdateTextCommand::new(1, before_visual, after_visual);
+        command.execute(&mut scene);
+        assert!(scene.has_dirty_elements());
+
+        let sync = cache.sync(&mut scene);
+        assert_eq!(sync.regenerated, 1);
+        assert!(!sync.geometry_unchanged);
+        assert!(cache.textured().is_empty());
+        assert_ne!(cache.textured(), before.as_slice());
+
+        {
+            let Some(AnyElement::Text(text)) = scene.get_mut(1) else {
+                panic!("text");
+            };
+            text.commit_raster(text.revision, 0, "tex-b".into(), Vec2::new(80.0, 24.0))
+                .unwrap();
+        }
+        scene.mark_dirty(1);
+        let sync = cache.sync(&mut scene);
+        assert_eq!(sync.regenerated, 1);
+        let expected = match scene.get(1).unwrap() {
+            AnyElement::Text(text) => text.generate_vertices(),
+            _ => panic!("text"),
+        };
+        assert_eq!(cache.textured(), expected.as_slice());
+        assert_ne!(cache.textured(), before.as_slice());
+        assert_eq!(expected.len(), 6);
+
+        command.undo(&mut scene);
+        assert!(scene.has_dirty_elements());
+        let sync = cache.sync(&mut scene);
+        assert_eq!(sync.regenerated, 1);
+        assert!(cache.textured().is_empty());
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => assert_eq!(text.content, "A"),
+            _ => panic!("text"),
+        }
+
+        command.execute(&mut scene);
+        cache.sync(&mut scene);
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.content, "Hello");
+                assert!(text.texture_id.is_none());
+            }
+            _ => panic!("text"),
+        }
+        assert!(cache.textured().is_empty());
     }
 }

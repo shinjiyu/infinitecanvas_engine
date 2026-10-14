@@ -22,6 +22,8 @@ pub enum Tool {
     Line,
     /// 画笔工具 - 自由绘制路径
     Pen,
+    /// 文本工具 - 单击创建，双击已有文本进入编辑
+    Text,
 }
 
 impl std::str::FromStr for Tool {
@@ -38,6 +40,7 @@ impl std::str::FromStr for Tool {
             "pan" | "hand" | "h" => Ok(Tool::Pan),
             "line" | "l" => Ok(Tool::Line),
             "pen" | "path" | "p" => Ok(Tool::Pen),
+            "text" | "t" => Ok(Tool::Text),
             _ => Err(()),
         }
     }
@@ -54,6 +57,7 @@ impl Tool {
             Tool::Hand => "hand",
             Tool::Line => "line",
             Tool::Pen => "pen",
+            Tool::Text => "text",
         }
     }
 
@@ -67,6 +71,7 @@ impl Tool {
             Tool::Hand => "grab",
             Tool::Line => "crosshair",
             Tool::Pen => "crosshair",
+            Tool::Text => "text",
         }
     }
 
@@ -159,6 +164,10 @@ mod tests {
         assert_eq!("p".parse::<Tool>(), Ok(Tool::Pen));
         assert_eq!("pen".parse::<Tool>(), Ok(Tool::Pen));
         assert_eq!("path".parse::<Tool>(), Ok(Tool::Pen));
+        assert_eq!(Tool::from_str("text"), Ok(Tool::Text));
+        assert_eq!(Tool::from_str("t"), Ok(Tool::Text));
+        assert_eq!(Tool::Text.cursor(), "text");
+        assert!(!Tool::Text.is_drawing_tool());
         assert!(Tool::from_str("unknown").is_err());
         assert!(Tool::Line.is_drawing_tool());
         assert!(Tool::Pen.is_drawing_tool());

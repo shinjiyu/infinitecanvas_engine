@@ -643,12 +643,15 @@ impl WebGPURenderer {
             }
 
             if textured_count > 0 {
-                // 与原先一致：先用纯色管线画一遍几何，再绑纹理。
+                // 图片先用纯色管线铺一层。文本纹理带透明背景，纯色底会挡住字形，所以跳过。
                 render_pass.set_pipeline(&self.fill_pipeline);
                 render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, self.textured_buffer.slice(..));
                 for index in 0..textured_count {
                     let draw = &self.vertex_cache.textured_draws()[index];
+                    if !draw.underlay {
+                        continue;
+                    }
                     let end = draw.vertex_offset + draw.vertex_count;
                     render_pass.draw(draw.vertex_offset..end, 0..1);
                     draw_calls += 1;

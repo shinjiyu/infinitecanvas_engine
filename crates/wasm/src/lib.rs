@@ -26,6 +26,10 @@ mod renderer;
 mod texture_manager;
 
 use infinitecanvas_engine::{
+    element::text::{
+        lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
+        DEFAULT_TEXT_CONTENT,
+    },
     export_selection_png, export_viewport_png,
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
     math::{Color, Rect, Transform, Vec2},
@@ -33,9 +37,11 @@ use infinitecanvas_engine::{
     transform_handles::{
         cursor_for, transforms_differ, HandleGesture, HandleMetrics, SelectionFrame,
     },
-    AddElementCommand, AnyElement, Circle, CommandHistory, ElementId, ElementStyle, Event,
-    EventQueue, Image, Line, MoveCommand, Path, PointerButton, PointerEvent, Rectangle, Scene,
-    SelectionBox, SelectionManager, Tool, ToolManager, TransformElementsCommand, Viewport,
+    AddElementCommand, AnyElement, Circle, CommandHistory, Element, ElementId, ElementStyle, Event,
+    EventQueue, Image, Line, MoveCommand, Path, PointerButton, PointerEvent, Rectangle,
+    RemoveElementCommand, Scene, SelectionBox, SelectionManager, Text, TextAlign,
+    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
+    UpdateTextCommand, Viewport,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -51,6 +57,7 @@ use renderer::WebGPURenderer;
 use std::collections::HashSet;
 use std::str::FromStr;
 use wasm_bindgen::prelude::*;
+use web_time::Instant;
 
 const BUILD_SIGNATURE: &str = match option_env!("BUILD_SIGNATURE") {
     Some(sig) => sig,
@@ -89,6 +96,12 @@ struct HandleInteraction {
     gesture: HandleGesture,
     live_frame: SelectionFrame,
     latest: Vec<(ElementId, Transform)>,
+}
+
+/// T 工具或双击产生的编辑请求。前端取走后打开 DOM 输入框。
+struct TextEditRequest {
+    id: ElementId,
+    select_all: bool,
 }
 
 /// 性能统计
@@ -137,6 +150,8 @@ pub struct InfiniteCanvas {
     handle_drag: Option<HandleInteraction>,
     command_history: CommandHistory,
     tool_manager: ToolManager,
+    text_clicks: TextClickResolver,
+    pending_text_edit: Option<TextEditRequest>,
     perf_stats: PerformanceStats,
     /// 拖拽吸附。默认开启，阈值是屏幕像素。
     snap: SnapSettings,
@@ -178,6 +193,8 @@ impl InfiniteCanvas {
             handle_drag: None,
             command_history: CommandHistory::new(),
             tool_manager: ToolManager::new(),
+            text_clicks: TextClickResolver::new(),
+            pending_text_edit: None,
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
         })
@@ -479,8 +496,10 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn undo(&mut self) -> bool {
         self.commit_handle_gesture();
+        let textures = self.snapshot_text_textures();
         let undone = self.command_history.undo(&mut self.scene);
         if undone {
+            self.release_text_textures_except(textures);
             self.sync_selection_after_history();
         }
         undone
@@ -493,8 +512,10 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn redo(&mut self) -> bool {
         self.commit_handle_gesture();
+        let textures = self.snapshot_text_textures();
         let redone = self.command_history.redo(&mut self.scene);
         if redone {
+            self.release_text_textures_except(textures);
             self.sync_selection_after_history();
         }
         redone
@@ -529,9 +550,9 @@ impl InfiniteCanvas {
     /// 设置当前工具
     ///
     /// # 参数
-    /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "pan", "line", "pen")
+    /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen")
     ///
-    /// 直线快捷键 `l`，画笔快捷键 `p`。切换工具会丢掉尚未抬笔的预览。
+    /// 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`。切换工具会丢掉尚未抬笔的预览。
     ///
     /// # 返回
     /// 是否成功设置
@@ -823,6 +844,33 @@ impl InfiniteCanvas {
                 &JsValue::from_str("scaleY"),
                 &JsValue::from(props.transform.scale.y),
             );
+            if let AnyElement::Text(text) = element {
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("content"),
+                    &JsValue::from_str(&text.content),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("fontSize"),
+                    &JsValue::from(text.font_size),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("color"),
+                    &JsValue::from_str(&text.color.to_hex()),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("align"),
+                    &JsValue::from_str(text.align.as_str()),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("fontFamily"),
+                    &JsValue::from_str(&text.font_family),
+                );
+            }
             obj.into()
         } else {
             JsValue::NULL
@@ -990,10 +1038,12 @@ impl InfiniteCanvas {
     /// 是否成功删除
     #[wasm_bindgen]
     pub fn remove_element(&mut self, id: u64) -> bool {
+        let textures = self.snapshot_text_textures();
         let _ = self.selection.deselect(&mut self.scene, id);
         let removed = self.scene.remove(id).is_some();
         if removed {
             self.selection.remove_id(id);
+            self.release_text_textures_except(textures);
             log::info!("Removed element {}", id);
         }
         removed
@@ -1003,10 +1053,13 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn clear_scene(&mut self) {
         self.cancel_handle_gesture();
+        let textures = self.snapshot_text_textures();
         self.selection.clear(&mut self.scene);
         self.selection_box.cancel();
         self.drag_state.guides.clear();
+        self.pending_text_edit = None;
         self.scene.clear();
+        self.release_text_textures_except(textures);
         log::info!("Scene cleared");
     }
 
@@ -1018,9 +1071,9 @@ impl InfiniteCanvas {
 
     /// 导出场景为版本化 JSON
     ///
-    /// 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
-    /// 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
-    /// `dirty` 是运行时标记，不会出现在 JSON 里。
+    /// 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）、
+    /// 自由路径和文本都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+    /// `dirty` 和文本光栅字段是运行时标记，不会出现在 JSON 里。
     ///
     /// # 返回
     /// 紧凑 JSON 字符串
@@ -1052,11 +1105,14 @@ impl InfiniteCanvas {
     pub fn import_json(&mut self, json: &str) -> Result<(), JsValue> {
         let scene = Scene::from_json(json).map_err(|err| JsValue::from_str(&err.to_string()))?;
         self.cancel_handle_gesture();
+        let textures = self.snapshot_text_textures();
+        self.pending_text_edit = None;
         self.scene = scene;
         self.selection.sync_from_scene(&self.scene);
         self.selection_box.cancel();
         self.command_history.clear();
         self.drag_state = DragState::default();
+        self.release_text_textures_except(textures);
         if let Some(renderer) = &mut self.webgpu_renderer {
             renderer.invalidate_geometry();
         }
@@ -1070,8 +1126,8 @@ impl InfiniteCanvas {
     /// - `selection_only`: `true` 时导出选中元素的包围盒；`false` 时导出当前视口
     ///
     /// # 返回
-    /// RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。图片纹理不在场景文件里，
-    /// 导出为纯色占位。
+    /// RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
+    /// 没有点阵的字符画方框。图片纹理不在场景文件里，导出为纯色占位。
     ///
     /// # 错误
     /// 没有选中元素、区域为空或编码失败
@@ -1269,11 +1325,311 @@ impl InfiniteCanvas {
     pub fn clear(&mut self) {
         let count = self.scene.count();
         self.cancel_handle_gesture();
+        let textures = self.snapshot_text_textures();
         self.selection.clear(&mut self.scene);
         self.selection_box.cancel();
         self.drag_state.guides.clear();
+        self.pending_text_edit = None;
         self.scene.clear();
+        self.release_text_textures_except(textures);
         log::info!("Cleared scene ({} elements removed)", count);
+    }
+
+    /// 添加文本元素。
+    ///
+    /// 位置是锚点：左对齐为左上角，居中为上边中点，右对齐为右上角。
+    /// 这个接口和 `add_rectangle` 一样直接写入场景，不进入撤销栈。
+    /// T 工具创建的文本会进入撤销栈。
+    ///
+    /// # 参数
+    /// - `x`, `y`: 锚点（世界坐标）
+    /// - `content`: 文本，支持换行
+    /// - `font_size`: 世界单位字号，`<= 0` 时用 32
+    /// - `color`: `#RRGGBB` 或 `#RRGGBBAA`，空则用浅色
+    /// - `align`: `"left"` / `"center"` / `"right"`
+    ///
+    /// # 返回
+    /// 元素 ID
+    #[wasm_bindgen]
+    pub fn add_text(
+        &mut self,
+        x: f32,
+        y: f32,
+        content: String,
+        font_size: f32,
+        color: Option<String>,
+        align: Option<String>,
+    ) -> u64 {
+        let id = self.scene.next_id();
+        let size = if font_size > 0.0 {
+            font_size
+        } else {
+            DEFAULT_FONT_SIZE
+        };
+        let mut text = Text::new(id, Vec2::new(x, y), content)
+            .with_font_size(size)
+            .with_color(DEFAULT_TEXT_COLOR);
+        if let Some(parsed) = color.and_then(|value| Color::from_hex(&value).ok()) {
+            text = text.with_color(parsed);
+        }
+        if let Some(parsed) = align.and_then(|value| TextAlign::parse(&value)) {
+            text = text.with_align(parsed);
+        }
+        self.scene.add_text(text);
+        self.scene.mark_dirty(id);
+        log::info!("Added text {} at ({}, {})", id, x, y);
+        id
+    }
+
+    /// 取出当前缩放档下还没光栅化的文本。
+    ///
+    /// 每个元素在同一内容版本和 LOD 上只返回一次。前端用 Canvas2D 画完后调用
+    /// [`Self::commit_text_raster`]。失败时调用 [`Self::abandon_text_raster`] 以便重试。
+    ///
+    /// # 返回
+    /// 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
+    /// `color`, `align`, `fontFamily`, `paddingWorld`, `textureId`
+    #[wasm_bindgen]
+    pub fn take_text_raster_jobs(&mut self) -> Array {
+        let lod = lod_bucket(self.viewport.zoom());
+        let ids: Vec<ElementId> = self.scene.iter().map(|element| element.id()).collect();
+        let jobs = Array::new();
+        for id in ids {
+            let Some(AnyElement::Text(text)) = self.scene.get_mut(id) else {
+                continue;
+            };
+            if !text.needs_raster(lod) {
+                continue;
+            }
+            let params = raster_params(text.font_size, lod, &text.content);
+            let texture_id = raster_texture_id(id, text.revision, lod);
+            let content = text.content.clone();
+            let color = text.color.to_hex();
+            let align = text.align.as_str();
+            let font_family = text.font_family.clone();
+            let revision = text.revision as f64;
+            text.mark_raster_pending(lod);
+
+            let obj = Object::new();
+            let _ = Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from(id));
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("revision"),
+                &JsValue::from(revision),
+            );
+            let _ = Reflect::set(&obj, &JsValue::from_str("lod"), &JsValue::from(lod));
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("rasterScale"),
+                &JsValue::from(params.scale),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("content"),
+                &JsValue::from_str(&content),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("fontSizePx"),
+                &JsValue::from(params.font_size_px),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("color"),
+                &JsValue::from_str(&color),
+            );
+            let _ = Reflect::set(&obj, &JsValue::from_str("align"), &JsValue::from_str(align));
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("fontFamily"),
+                &JsValue::from_str(&font_family),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("paddingWorld"),
+                &JsValue::from(params.padding_world),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("textureId"),
+                &JsValue::from_str(&texture_id),
+            );
+            jobs.push(&obj);
+        }
+        jobs
+    }
+
+    /// 把已经上传的纹理绑定到文本元素。
+    ///
+    /// `revision` 必须等于取任务时的版本，否则结果被丢弃并删除这张纹理。
+    /// `world_width` / `world_height` 是纹理像素除以 `rasterScale`，用来固定世界尺寸。
+    ///
+    /// # 返回
+    /// 是否接受了这张纹理。
+    #[wasm_bindgen]
+    pub fn commit_text_raster(
+        &mut self,
+        id: u64,
+        revision: f64,
+        lod: i32,
+        texture_id: String,
+        world_width: f32,
+        world_height: f32,
+    ) -> bool {
+        let uploaded = self
+            .webgpu_renderer
+            .as_ref()
+            .is_some_and(|renderer| renderer.has_texture(&texture_id));
+        if !uploaded {
+            if let Some(AnyElement::Text(text)) = self.scene.get_mut(id) {
+                text.abandon_raster();
+            }
+            return false;
+        }
+
+        let textures = self.snapshot_text_textures();
+        let revision = if revision.is_finite() && revision > 0.0 {
+            revision as u64
+        } else {
+            0
+        };
+        let committed = match self.scene.get_mut(id) {
+            Some(AnyElement::Text(text)) => text
+                .commit_raster(
+                    revision,
+                    lod,
+                    texture_id.clone(),
+                    Vec2::new(world_width, world_height),
+                )
+                .is_some(),
+            _ => false,
+        };
+        if committed {
+            self.release_text_textures_except(textures);
+            self.scene.mark_dirty(id);
+            true
+        } else {
+            let still_used = self.snapshot_text_textures().contains(&texture_id);
+            if !still_used {
+                if let Some(renderer) = &mut self.webgpu_renderer {
+                    renderer.remove_texture(&texture_id);
+                }
+            }
+            false
+        }
+    }
+
+    /// 光栅化失败后允许下一帧重新取任务。
+    #[wasm_bindgen]
+    pub fn abandon_text_raster(&mut self, id: u64) {
+        if let Some(AnyElement::Text(text)) = self.scene.get_mut(id) {
+            text.abandon_raster();
+        }
+    }
+
+    /// 取走 T 工具留下的编辑请求。没有请求时返回 `null`。
+    #[wasm_bindgen]
+    pub fn take_text_edit_request(&mut self) -> JsValue {
+        let Some(request) = self.pending_text_edit.take() else {
+            return JsValue::NULL;
+        };
+        self.text_edit_payload(request.id, request.select_all)
+    }
+
+    /// 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
+    ///
+    /// # 参数
+    /// - `x`, `y`: 屏幕像素坐标（和 `handle_pointer_event` 用的是同一套）
+    #[wasm_bindgen]
+    pub fn begin_text_edit_at(&mut self, x: f32, y: f32) -> JsValue {
+        let world = self.viewport.screen_to_world(Vec2::new(x, y));
+        let hits = hit_test_point(
+            &self.scene,
+            world,
+            &HitTestOptions {
+                max_results: 1,
+                include_invisible: false,
+            },
+        );
+        let Some(hit) = hits.first() else {
+            return JsValue::NULL;
+        };
+        if hit.element_type != "Text" {
+            return JsValue::NULL;
+        }
+        let _ = self
+            .selection
+            .select_element(&mut self.scene, hit.id, false);
+        self.pending_text_edit = None;
+        self.text_edit_payload(hit.id, false)
+    }
+
+    /// 查询文本在屏幕上的位置，编辑框跟着平移和缩放移动。
+    #[wasm_bindgen]
+    pub fn get_text_editor_metrics(&self, id: u64) -> JsValue {
+        self.text_edit_payload(id, false)
+    }
+
+    /// 编辑时隐藏 GPU 文本，避免和 DOM 输入框叠两层字。
+    #[wasm_bindgen]
+    pub fn set_text_editing(&mut self, id: u64, editing: bool) -> bool {
+        let updated = if let Some(AnyElement::Text(text)) = self.scene.get_mut(id) {
+            text.set_editing(editing);
+            true
+        } else {
+            false
+        };
+        if updated {
+            self.scene.mark_dirty(id);
+        }
+        updated
+    }
+
+    /// 提交编辑内容。
+    ///
+    /// 内容有变化时写入撤销栈。只剩空白时删除元素，撤销会把原文放回来。
+    ///
+    /// # 返回
+    /// 元素存在并且这次调用处理完了编辑状态。
+    #[wasm_bindgen]
+    pub fn commit_text_content(&mut self, id: u64, content: String) -> bool {
+        let Some(AnyElement::Text(_)) = self.scene.get(id) else {
+            return false;
+        };
+        if content.trim().is_empty() {
+            if let Some(AnyElement::Text(text)) = self.scene.get_mut(id) {
+                text.set_editing(false);
+            }
+            let textures = self.snapshot_text_textures();
+            let _ = self.selection.deselect(&mut self.scene, id);
+            self.selection.remove_id(id);
+            self.command_history
+                .execute(Box::new(RemoveElementCommand::new(id)), &mut self.scene);
+            self.release_text_textures_except(textures);
+            return true;
+        }
+
+        let textures = self.snapshot_text_textures();
+        let edited = {
+            let Some(AnyElement::Text(text)) = self.scene.get_mut(id) else {
+                return false;
+            };
+            text.set_editing(false);
+            if text.content == content {
+                None
+            } else {
+                let before = text.visual();
+                let _ = text.set_content(content);
+                Some((before, text.visual()))
+            }
+        };
+        if let Some((before, after)) = edited {
+            self.command_history
+                .push_executed(Box::new(UpdateTextCommand::new(id, before, after)));
+        }
+        self.scene.mark_dirty(id);
+        self.release_text_textures_except(textures);
+        true
     }
 
     // ========== 视口操作 API ==========
@@ -1453,6 +1809,7 @@ impl InfiniteCanvas {
             Tool::Line => self.handle_line_tool_down(event),
             Tool::Pen => self.handle_pen_tool_down(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_down(event),
+            Tool::Text => self.handle_text_tool_down(event),
         }
     }
 
@@ -1465,6 +1822,7 @@ impl InfiniteCanvas {
             Tool::Line => self.handle_line_tool_move(event),
             Tool::Pen => self.handle_pen_tool_move(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_move(event),
+            Tool::Text => self.handle_text_tool_move(event),
         }
     }
 
@@ -1477,6 +1835,7 @@ impl InfiniteCanvas {
             Tool::Line => self.handle_line_tool_up(event),
             Tool::Pen => self.handle_pen_tool_up(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_up(event),
+            Tool::Text => self.handle_text_tool_up(event),
         }
     }
 
@@ -1799,6 +2158,88 @@ impl InfiniteCanvas {
         }
     }
 
+    // ========== 文本工具 ==========
+
+    fn handle_text_tool_down(&mut self, event: PointerEvent) {
+        self.drag_state.is_dragging = true;
+        self.drag_state.pointer_id = Some(event.pointer_id);
+        self.drag_state.start_position = event.world_position;
+        self.drag_state.last_position = event.world_position;
+        self.drag_state.total_delta = Vec2::ZERO;
+    }
+
+    fn handle_text_tool_move(&mut self, event: PointerEvent) {
+        if self.drag_state.is_dragging && self.drag_state.pointer_id == Some(event.pointer_id) {
+            self.drag_state.last_position = event.world_position;
+        }
+    }
+
+    fn handle_text_tool_up(&mut self, event: PointerEvent) {
+        if !self.drag_state.is_dragging || self.drag_state.pointer_id != Some(event.pointer_id) {
+            return;
+        }
+        self.drag_state.is_dragging = false;
+        self.drag_state.pointer_id = None;
+
+        let start = self.drag_state.start_position;
+        let zoom = self.viewport.zoom().max(0.01);
+        // 拖动不是创建。阈值按屏幕像素算，避免缩小后轻轻一抖就被当成拖动。
+        if (event.world_position - start).length() > 6.0 / zoom {
+            return;
+        }
+
+        let hit_text = hit_test_point(
+            &self.scene,
+            start,
+            &HitTestOptions {
+                max_results: 8,
+                include_invisible: false,
+            },
+        )
+        .into_iter()
+        .find(|hit| hit.element_type == "Text")
+        .map(|hit| hit.id);
+
+        match self.text_clicks.resolve(start, hit_text, Instant::now()) {
+            TextPlacement::Edit { id, select_all } => {
+                if self.is_text(id) {
+                    let _ = self.selection.select_element(&mut self.scene, id, false);
+                    self.pending_text_edit = Some(TextEditRequest { id, select_all });
+                } else {
+                    self.create_text_element(start);
+                }
+            }
+            TextPlacement::Create(position) => {
+                self.create_text_element(position);
+            }
+        }
+    }
+
+    /// 用撤销命令创建一段默认文本，并请求前端打开编辑框。
+    fn create_text_element(&mut self, position: Vec2) -> ElementId {
+        let id = self.scene.next_id();
+        let text = Text::new(id, position, DEFAULT_TEXT_CONTENT)
+            .with_font_size(DEFAULT_FONT_SIZE)
+            .with_color(DEFAULT_TEXT_COLOR);
+        self.command_history.execute(
+            Box::new(AddElementCommand::new(AnyElement::Text(text))),
+            &mut self.scene,
+        );
+        self.scene.mark_dirty(id);
+        let _ = self.selection.select_element(&mut self.scene, id, false);
+        self.text_clicks.remember(id, position, Instant::now());
+        self.pending_text_edit = Some(TextEditRequest {
+            id,
+            select_all: true,
+        });
+        log::info!("Created text {} at {:?}", id, position);
+        id
+    }
+
+    fn is_text(&self, id: ElementId) -> bool {
+        matches!(self.scene.get(id), Some(AnyElement::Text(_)))
+    }
+
     // ========== 平移工具事件处理 ==========
 
     fn handle_pan_tool_down(&mut self, event: PointerEvent) {
@@ -2073,6 +2514,94 @@ fn polyline_length(points: &[Vec2]) -> f32 {
         .windows(2)
         .map(|window| (window[1] - window[0]).length())
         .sum()
+}
+
+impl InfiniteCanvas {
+    fn snapshot_text_textures(&self) -> HashSet<String> {
+        self.scene
+            .iter()
+            .filter_map(|element| match element {
+                AnyElement::Text(text) => text.texture_id.clone(),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn release_text_textures_except(&mut self, before: HashSet<String>) {
+        let after = self.snapshot_text_textures();
+        let Some(renderer) = &mut self.webgpu_renderer else {
+            return;
+        };
+        for id in before {
+            if !after.contains(&id) {
+                renderer.remove_texture(&id);
+            }
+        }
+    }
+
+    /// 编辑框需要的屏幕几何。元素不存在或不是文本时返回 `null`。
+    fn text_edit_payload(&self, id: ElementId, select_all: bool) -> JsValue {
+        let Some(AnyElement::Text(text)) = self.scene.get(id) else {
+            return JsValue::NULL;
+        };
+        let bounds = text.world_bounds();
+        let origin = self.viewport.world_to_screen(Vec2::new(bounds.x, bounds.y));
+        let zoom = self.viewport.zoom();
+        let obj = Object::new();
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("id"),
+            &JsValue::from(text.props.id),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("content"),
+            &JsValue::from_str(&text.content),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("fontSize"),
+            &JsValue::from(text.font_size),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("screenFontSize"),
+            &JsValue::from(text.font_size * zoom),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("color"),
+            &JsValue::from_str(&text.color.to_hex()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("align"),
+            &JsValue::from_str(text.align.as_str()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("fontFamily"),
+            &JsValue::from_str(&text.font_family),
+        );
+        let _ = Reflect::set(&obj, &JsValue::from_str("x"), &JsValue::from(origin.x));
+        let _ = Reflect::set(&obj, &JsValue::from_str("y"), &JsValue::from(origin.y));
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("width"),
+            &JsValue::from(bounds.width * zoom),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("height"),
+            &JsValue::from(bounds.height * zoom),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("selectAll"),
+            &JsValue::from(select_all),
+        );
+        obj.into()
+    }
 }
 
 fn hit_results_to_js_array(hits: Vec<HitTestResult>) -> Array {

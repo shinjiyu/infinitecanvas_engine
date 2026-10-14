@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Text raster</title>
+</head>
+<body>
+  <pre id="result">running</pre>
+  <script type="module">
+    import { countInk, rasterizeText } from './text-raster.js';
+
+    const fontFamily = '"WenQuanYi Micro Hei", "Noto Sans CJK SC", "Droid Sans Fallback", sans-serif';
+    const base = {
+      fontSizePx: 48,
+      rasterScale: 1,
+      color: '#ffffff',
+      align: 'left',
+      fontFamily,
+      paddingWorld: 4,
+    };
+
+    function inkOf(content, extra = {}) {
+      const raster = rasterizeText({ ...base, ...extra, content });
+      return { raster, ink: countInk(raster.data) };
+    }
+
+    const hello = inkOf('Hello');
+    const ni = inkOf('你');
+    const hao = inkOf('好');
+    const both = inkOf('Hello 你好');
+    const h = inkOf('H');
+    const e = inkOf('e');
+    const small = rasterizeText({ ...base, content: 'Hello 你好', fontSizePx: 32, rasterScale: 1 });
+    const large = rasterizeText({ ...base, content: 'Hello 你好', fontSizePx: 64, rasterScale: 2 });
+    const worldDelta = Math.abs(small.worldWidth - large.worldWidth) / small.worldWidth;
+
+    const same = (a, b) => a.length === b.length && a.every((value, index) => value === b[index]);
+    const report = {
+      helloInk: hello.ink,
+      niInk: ni.ink,
+      haoInk: hao.ink,
+      bothInk: both.ink,
+      hInk: h.ink,
+      eInk: e.ink,
+      niDiffersFromHao: !same(ni.raster.data, hao.raster.data),
+      hDiffersFromE: !same(h.raster.data, e.raster.data),
+      worldWidthDelta: worldDelta,
+      smallWorld: [small.worldWidth, small.worldHeight],
+      largeWorld: [large.worldWidth, large.worldHeight],
+      bothSize: [both.raster.width, both.raster.height],
+    };
+    const ok = report.helloInk > 20
+      && report.niInk > 20
+      && report.haoInk > 20
+      && report.bothInk > report.helloInk
+      && report.hInk > 10
+      && report.eInk > 10
+      && report.niDiffersFromHao
+      && report.hDiffersFromE
+      && report.worldWidthDelta < 0.08;
+    report.ok = ok;
+    const node = document.getElementById('result');
+    node.textContent = JSON.stringify(report);
+    document.title = ok ? 'TEXT_RASTER_OK' : 'TEXT_RASTER_FAIL';
+  </script>
+</body>
+</html>

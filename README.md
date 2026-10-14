@@ -25,32 +25,34 @@ Only behavior that exists in this repository is listed here.
 ### Rendering
 
 - WebGPU renderer on wgpu 27 (`crates/wasm`). Initialization fails if WebGPU is unavailable. There is no Canvas 2D fallback.
-- Rectangle, circle, line, freehand path, and image elements, with fill, stroke, and a textured pipeline. A line can end in an arrow.
+- Rectangle, circle, line, freehand path, image, and text elements, with fill, stroke, and a textured pipeline. A line can end in an arrow.
 - Image upload from JavaScript (`upload_texture`, `add_image`) and per-image alpha (`set_image_alpha`).
+- Text is rasterized with Canvas2D / OffscreenCanvas into a texture (`add_text`, `take_text_raster_jobs`, `commit_text_raster`). Zoom changes pick a new LOD so the glyphs stay sharp. The landing page binds `T` to create text and double-click to edit it.
 - Viewport pan and zoom (`pan`, `zoom_at`), clamped to 0.1×–10×, plus screen/world conversion.
 - Vertices outside the viewport are skipped while collecting geometry.
 - Solid fills go out in one draw and solid strokes in another. Each image texture is its own draw. Selection outlines and the marquee rectangle are drawn after the scene.
 
 ### Interaction
 
-- Pointer events drive select, marquee select, drag-move, resize and rotate handles, and drawing, according to the active tool. Drawing tools cover rectangle, circle, line (Shift adds an arrow), pen, and pan.
+- Pointer events drive select, marquee select, drag-move, resize and rotate handles, and drawing, according to the active tool. Drawing tools cover rectangle, circle, line (Shift adds an arrow), pen, text placement, and pan.
+- Dragging snaps the selection bounds to other visible elements' edges and centers inside a screen-pixel threshold (`set_snap_enabled`, `set_snap_threshold`, `get_alignment_guides`). The landing page draws those guides. Multi-select snaps the union bounds.
 - Hit testing walks the flat scene from the highest z-index and inverse-transforms rotation and scale. It does not consult the QuadTree.
-- Command history for add, remove, move, and transform, exposed as `undo` and `redo`.
-- Tools: Select, Line, Pen, Rectangle, Circle, Pan, and a temporary Hand tool (`push_hand_tool` / `pop_temporary_tool`).
-- `www/index.html` binds V / L / P / R / O / H, Space, and Ctrl+Z / Ctrl+Y. Those shortcuts live in the page script. The WASM dispatcher applies pointer events; keyboard and wheel events are queued and otherwise ignored.
+- Command history for add, remove, move, transform, and text content edits, exposed as `undo` and `redo`.
+- Tools: Select, Line, Pen, Rectangle, Circle, Text, Pan, and a temporary Hand tool (`push_hand_tool` / `pop_temporary_tool`).
+- `www/index.html` binds V / L / P / R / O / H / T, Space, and Ctrl+Z / Ctrl+Y / Ctrl+S / Ctrl+O. Those shortcuts live in the page script. The WASM dispatcher applies pointer events; keyboard and wheel events are queued and otherwise ignored.
 
 ### Scene and math
 
-- Flat scene of `Rectangle`, `Circle`, `Image`, `Line`, and `Path`. No groups, inherited transforms, or text. Rotation (radians) and scale live on each element's `Transform` (`ElementProps::rotation`).
+- Flat scene of `Rectangle`, `Circle`, `Image`, `Line`, `Path`, and `Text`. No groups or inherited transforms. Rotation (radians) and scale live on each element's `Transform` (`ElementProps::rotation`).
 - `infinitecanvas-math` provides `Vec2`, glam matrices, `Rect`, `Transform`, `Color`, and `Vertex`.
 - `QuadTree` supports insert, point query, and range query, and has unit tests. Rendering and hit testing do not call it.
 
 ### Persistence
 
-- `Scene::to_json` / `Scene::from_json` write version 1 JSON (`version`, `next_id`, `elements`). Rectangle, circle, image, line (including `arrow`), and path round-trip, including `props.transform.rotation` and `scale`.
-- Missing optional fields use serde defaults (rotation 0, scale 1, arrow off, visible, opacity 1, color alpha 1). Unknown fields are ignored, so later optional fields can be added without a version bump. An unknown `version`, malformed JSON, a duplicate id, or an unknown element type such as `text` is an error.
+- `Scene::to_json` / `Scene::from_json` write version 1 JSON (`version`, `next_id`, `elements`). Rectangle, circle, image, line (including `arrow`), path, and text round-trip, including `props.transform.rotation` and `scale`. Text stores `content`, `font_size`, `color`, `align`, `font_family`, and `size`. Raster bookkeeping (`texture_id`, LOD, revision, `editing`) is `#[serde(skip)]` and is rebuilt after import.
+- Missing optional fields use serde defaults (rotation 0, scale 1, arrow off, visible, opacity 1, color alpha 1, text align left, text size estimated from the content). Unknown fields are ignored, so later optional fields can be added without a version bump. An unknown `version`, malformed JSON, a duplicate id, or an unknown element type such as `group` is an error.
 - WASM exposes the same document as `export_json` and `import_json`. Import replaces the scene, rebuilds selection from the `selected` flags, and clears the undo stack.
-- `export_png(selectionOnly)` encodes an RGBA PNG of the current viewport, or of the selected elements' bounds when `selectionOnly` is true. Lines, arrows, and paths are rasterized at their stroke width. Image elements use a flat placeholder because GPU textures are not part of the scene file.
+- `export_png(selectionOnly)` encodes an RGBA PNG of the current viewport, or of the selected elements' bounds when `selectionOnly` is true. Lines, arrows, and paths are rasterized at their stroke width. Text is drawn with the public-domain `font8x8` bitmap (Latin, Greek, hiragana, and the other blocks that crate ships). Characters it does not cover, including CJK, are a box outline — the Canvas2D texture used on screen is not stored in the scene file. Image elements use a flat placeholder for the same reason.
 - The landing demo (`www/index.html`) saves and opens that JSON (Ctrl+S / Ctrl+O) and downloads a viewport or selection PNG. It also writes the JSON to `localStorage` under `infinitecanvas.scene.v1`.
 
 ### Collaboration
@@ -101,7 +103,7 @@ No benchmark log is checked in. Published numbers are **TBD** until a run is rec
 | Elements sustained at 60 FPS | TBD |
 | Frame time | TBD |
 | Memory | TBD |
-| Release WASM binary (`infinitecanvas_wasm_bg.wasm`) | 2,645,351 bytes |
+| Release WASM binary (`infinitecanvas_wasm_bg.wasm`) | 2,971,270 bytes |
 
 The binary size is from `wasm-pack build --target web --out-dir ../../packages/core/wasm` on 2026-10-14 (rustc 1.99.0, wasm-pack 0.13.1, wasm-opt). It is the optimized release artifact, not a frame-rate measurement.
 
@@ -117,7 +119,7 @@ The binary size is from `wasm-pack build --target web --out-dir ../../packages/c
 | --- | --- |
 | M1 Core rendering | Done: WebGPU rectangles, circles, lines, freehand paths, images, viewport |
 | M2 Interaction | Done: hit test, selection, marquee, drag, undo/redo, tools |
-| M3 Scene management | Viewport culling, batched solid draws, performance counters, and a QuadTree module. No scene graph, dirty rectangles, or vertex cache |
+| M3 Scene management | Viewport culling, batched solid draws, a persistent vertex cache with per-element dirty flags, performance counters, and a QuadTree module. No scene graph |
 | M4 Collaboration | Rooms, cursors, selection sync, and create-element broadcast. No CRDT, permissions, conflict handling, or replay |
 
 ## Quick start
@@ -151,7 +153,7 @@ Open [http://localhost:5179/infinitecanvas_engine/](http://localhost:5179/infini
 
 The root `package.json` scripts still call `pnpm`. CI, this section, and the build guide use `npm ci` and the workspace scripts above. Do not mix in `pnpm install` or `pnpm dev`.
 
-`cargo test --workspace` compiles and tests the host crates, including `infinitecanvas-wasm`. Drawing still happens in a browser with WebGPU (desktop Chrome 113+, Edge 113+, or Safari 18+). Other pages: `www/test-selection.html`, `www/test-stress.html`, `www/test-texture.html`, and `www/test-collab-canvas.html`.
+`cargo test --workspace` compiles and tests the host crates, including `infinitecanvas-wasm`. Drawing still happens in a browser with WebGPU (desktop Chrome 113+, Edge 113+, or Safari 18+). Other pages: `www/test-selection.html`, `www/test-stress.html`, `www/test-texture.html`, `www/test-text-raster.html`, and `www/test-collab-canvas.html`.
 
 Collaboration server (optional, port 8080):
 

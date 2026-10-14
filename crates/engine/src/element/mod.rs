@@ -7,12 +7,17 @@ pub mod line;
 pub mod path;
 pub mod rect;
 mod stroke;
+pub mod text;
 
 pub use circle::Circle;
 pub use image::Image;
 pub use line::Line;
 pub use path::Path;
 pub use rect::Rectangle;
+pub use text::{
+    estimate_size, lod_bucket, lod_scale, padding_world, raster_params, raster_texture_id,
+    RasterParams, Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
+};
 
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};
 use serde::{Deserialize, Serialize};

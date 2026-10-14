@@ -28,6 +28,13 @@ export class InfiniteCanvas {
         wasm.__wbg_infinitecanvas_free(ptr, 0);
     }
     /**
+     * 光栅化失败后允许下一帧重新取任务。
+     * @param {bigint} id
+     */
+    abandon_text_raster(id) {
+        wasm.infinitecanvas_abandon_text_raster(this.__wbg_ptr, id);
+    }
+    /**
      * 添加圆形
      *
      * # 参数
@@ -177,6 +184,53 @@ export class InfiniteCanvas {
         return BigInt.asUintN(64, ret);
     }
     /**
+     * 添加文本元素。
+     *
+     * 位置是锚点：左对齐为左上角，居中为上边中点，右对齐为右上角。
+     * 这个接口和 `add_rectangle` 一样直接写入场景，不进入撤销栈。
+     * T 工具创建的文本会进入撤销栈。
+     *
+     * # 参数
+     * - `x`, `y`: 锚点（世界坐标）
+     * - `content`: 文本，支持换行
+     * - `font_size`: 世界单位字号，`<= 0` 时用 32
+     * - `color`: `#RRGGBB` 或 `#RRGGBBAA`，空则用浅色
+     * - `align`: `"left"` / `"center"` / `"right"`
+     *
+     * # 返回
+     * 元素 ID
+     * @param {number} x
+     * @param {number} y
+     * @param {string} content
+     * @param {number} font_size
+     * @param {string | null} [color]
+     * @param {string | null} [align]
+     * @returns {bigint}
+     */
+    add_text(x, y, content, font_size, color, align) {
+        const ptr0 = passStringToWasm0(content, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(color) ? 0 : passStringToWasm0(color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(align) ? 0 : passStringToWasm0(align, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len2 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_add_text(this.__wbg_ptr, x, y, ptr0, len0, font_size, ptr1, len1, ptr2, len2);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
+     *
+     * # 参数
+     * - `x`, `y`: 屏幕像素坐标（和 `handle_pointer_event` 用的是同一套）
+     * @param {number} x
+     * @param {number} y
+     * @returns {any}
+     */
+    begin_text_edit_at(x, y) {
+        const ret = wasm.infinitecanvas_begin_text_edit_at(this.__wbg_ptr, x, y);
+        return ret;
+    }
+    /**
      * 是否可以重做
      * @returns {boolean}
      */
@@ -211,6 +265,45 @@ export class InfiniteCanvas {
     }
     clear_selection() {
         wasm.infinitecanvas_clear_selection(this.__wbg_ptr);
+    }
+    /**
+     * 提交编辑内容。
+     *
+     * 内容有变化时写入撤销栈。只剩空白时删除元素，撤销会把原文放回来。
+     *
+     * # 返回
+     * 元素存在并且这次调用处理完了编辑状态。
+     * @param {bigint} id
+     * @param {string} content
+     * @returns {boolean}
+     */
+    commit_text_content(id, content) {
+        const ptr0 = passStringToWasm0(content, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_commit_text_content(this.__wbg_ptr, id, ptr0, len0);
+        return ret !== 0;
+    }
+    /**
+     * 把已经上传的纹理绑定到文本元素。
+     *
+     * `revision` 必须等于取任务时的版本，否则结果被丢弃并删除这张纹理。
+     * `world_width` / `world_height` 是纹理像素除以 `rasterScale`，用来固定世界尺寸。
+     *
+     * # 返回
+     * 是否接受了这张纹理。
+     * @param {bigint} id
+     * @param {number} revision
+     * @param {number} lod
+     * @param {string} texture_id
+     * @param {number} world_width
+     * @param {number} world_height
+     * @returns {boolean}
+     */
+    commit_text_raster(id, revision, lod, texture_id, world_width, world_height) {
+        const ptr0 = passStringToWasm0(texture_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_commit_text_raster(this.__wbg_ptr, id, revision, lod, ptr0, len0, world_width, world_height);
+        return ret !== 0;
     }
     /**
      * 指针下的光标。选择工具命中缩放/旋转手柄时返回对应光标。
@@ -254,9 +347,9 @@ export class InfiniteCanvas {
     /**
      * 导出场景为版本化 JSON
      *
-     * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）
-     * 和自由路径都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
-     * `dirty` 是运行时标记，不会出现在 JSON 里。
+     * 文档含 `version`、`next_id` 和 `elements`。矩形、圆、图片、直线（含箭头）、
+     * 自由路径和文本都会写入；变换的 `rotation` 与 `scale` 在 `props.transform` 里。
+     * `dirty` 和文本光栅字段是运行时标记，不会出现在 JSON 里。
      *
      * # 返回
      * 紧凑 JSON 字符串
@@ -293,8 +386,8 @@ export class InfiniteCanvas {
      * - `selection_only`: `true` 时导出选中元素的包围盒；`false` 时导出当前视口
      *
      * # 返回
-     * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。图片纹理不在场景文件里，
-     * 导出为纯色占位。
+     * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
+     * 没有点阵的字符画方框。图片纹理不在场景文件里，导出为纯色占位。
      *
      * # 错误
      * 没有选中元素、区域为空或编码失败
@@ -475,6 +568,15 @@ export class InfiniteCanvas {
      */
     get_state() {
         const ret = wasm.infinitecanvas_get_state(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * 查询文本在屏幕上的位置，编辑框跟着平移和缩放移动。
+     * @param {bigint} id
+     * @returns {any}
+     */
+    get_text_editor_metrics(id) {
+        const ret = wasm.infinitecanvas_get_text_editor_metrics(this.__wbg_ptr, id);
         return ret;
     }
     /**
@@ -808,12 +910,22 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_set_snap_threshold(this.__wbg_ptr, threshold_px);
     }
     /**
+     * 编辑时隐藏 GPU 文本，避免和 DOM 输入框叠两层字。
+     * @param {bigint} id
+     * @param {boolean} editing
+     * @returns {boolean}
+     */
+    set_text_editing(id, editing) {
+        const ret = wasm.infinitecanvas_set_text_editing(this.__wbg_ptr, id, editing);
+        return ret !== 0;
+    }
+    /**
      * 设置当前工具
      *
      * # 参数
-     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "pan", "line", "pen")
+     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen")
      *
-     * 直线快捷键 `l`，画笔快捷键 `p`。切换工具会丢掉尚未抬笔的预览。
+     * 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`。切换工具会丢掉尚未抬笔的预览。
      *
      * # 返回
      * 是否成功设置
@@ -825,6 +937,29 @@ export class InfiniteCanvas {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.infinitecanvas_set_tool(this.__wbg_ptr, ptr0, len0);
         return ret !== 0;
+    }
+    /**
+     * 取走 T 工具留下的编辑请求。没有请求时返回 `null`。
+     * @returns {any}
+     */
+    take_text_edit_request() {
+        const ret = wasm.infinitecanvas_take_text_edit_request(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * 取出当前缩放档下还没光栅化的文本。
+     *
+     * 每个元素在同一内容版本和 LOD 上只返回一次。前端用 Canvas2D 画完后调用
+     * [`Self::commit_text_raster`]。失败时调用 [`Self::abandon_text_raster`] 以便重试。
+     *
+     * # 返回
+     * 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
+     * `color`, `align`, `fontFamily`, `paddingWorld`, `textureId`
+     * @returns {Array<any>}
+     */
+    take_text_raster_jobs() {
+        const ret = wasm.infinitecanvas_take_text_raster_jobs(this.__wbg_ptr);
+        return ret;
     }
     /**
      * 撤销上一个操作
@@ -1713,12 +1848,20 @@ function __wbg_get_imports() {
             const ret = Date.now();
             return ret;
         },
+        __wbg_now_e7c6795a7f81e10f: function(arg0) {
+            const ret = arg0.now();
+            return ret;
+        },
         __wbg_of_d5dbecdc59e02e34: function(arg0) {
             const ret = Array.of(arg0);
             return ret;
         },
         __wbg_onSubmittedWorkDone_7d532ba1f20a64b3: function(arg0) {
             const ret = arg0.onSubmittedWorkDone();
+            return ret;
+        },
+        __wbg_performance_3fcf6e32a7e1ed0a: function(arg0) {
+            const ret = arg0.performance;
             return ret;
         },
         __wbg_pixelStorei_af18e636b3e7b725: function(arg0, arg1, arg2) {
@@ -2601,12 +2744,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2441, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2484, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 346, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 372, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

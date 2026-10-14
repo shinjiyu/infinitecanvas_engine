@@ -6,14 +6,14 @@
 //! Scene ── to_json ──▶ { version, next_id, elements[] }
 //!                          │  type + data
 //!                          ▼
-//!                     rectangle / circle / image / line / path
+//!                     rectangle / circle / image / line / path / text
 //! Scene ◀─ from_json ── 缺省字段用 serde default，未知字段忽略
 //! ```
 //!
 //! 只接受 [`SCENE_FORMAT_VERSION`]。新增可选字段时保持同一版本，并为字段加上
 //! `#[serde(default)]`。新增元素种类时扩展解码分支；未知种类会报错，避免静默丢数据。
 
-use crate::element::{Circle, Element, Image, Rectangle};
+use crate::element::{Circle, Element, Image, Rectangle, Text};
 use crate::scene::{AnyElement, Scene};
 use crate::{ElementId, Viewport};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};
@@ -63,7 +63,7 @@ pub enum PersistError {
         /// 本引擎接受的版本
         supported: u32,
     },
-    /// 文件里出现了尚未实现的元素种类（例如以后的 `text`）
+    /// 文件里出现了尚未实现的元素种类（例如 `group`）
     UnknownElementType(String),
     /// 两个元素使用了同一个 ID
     DuplicateId(ElementId),
@@ -240,6 +240,12 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
         "path" => serde_json::from_value(data)
             .map(AnyElement::Path)
             .map_err(|err| PersistError::Json(err.to_string())),
+        "text" => {
+            let mut text: Text =
+                serde_json::from_value(data).map_err(|err| PersistError::Json(err.to_string()))?;
+            text.finish_load();
+            Ok(AnyElement::Text(text))
+        }
         other => Err(PersistError::UnknownElementType(other.to_string())),
     }
 }
@@ -247,7 +253,8 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
 /// 把当前视口栅格化成 RGBA PNG
 ///
 /// 一个世界单位对应 `viewport.zoom()` 个像素，并限制在 [`MAX_PNG_DIMENSION`] 以内。
-/// 直线、箭头和自由路径按半线宽上色，不含点选余量。图片元素用纯色占位。
+/// 直线、箭头和自由路径按半线宽上色，不含点选余量。文本用 `font8x8` 点阵上色，
+/// 没有点阵的字符画成方框。图片元素用纯色占位。
 ///
 /// # 参数
 /// - `scene`: 要导出的场景
@@ -376,7 +383,9 @@ fn paint_bounds(element: &AnyElement) -> Rect {
         AnyElement::Circle(circle) => {
             circle.style.stroke_width.abs() * scale_extent(&circle.props.transform)
         }
-        AnyElement::Line(_) | AnyElement::Path(_) | AnyElement::Image(_) => 0.0,
+        AnyElement::Line(_) | AnyElement::Path(_) | AnyElement::Image(_) | AnyElement::Text(_) => {
+            0.0
+        }
     };
     base.inflate(extra.max(0.0))
 }
@@ -423,6 +432,7 @@ fn sample_element(element: &AnyElement, world: Vec2) -> Option<Color> {
         AnyElement::Image(image) => sample_image(image, world),
         AnyElement::Line(line) => line.color_at(world),
         AnyElement::Path(path) => path.color_at(world),
+        AnyElement::Text(text) => text.color_at(world),
     }
 }
 
@@ -570,7 +580,9 @@ mod tests {
         channel, export_selection_png, export_viewport_png, PersistError, IMAGE_PNG_PLACEHOLDER,
         MAX_PNG_DIMENSION, SCENE_FORMAT_VERSION,
     };
-    use crate::element::{Circle, Element, ElementStyle, Image, Line, Path, Rectangle};
+    use crate::element::{
+        Circle, Element, ElementStyle, Image, Line, Path, Rectangle, Text, TextAlign,
+    };
     use crate::{AnyElement, Scene, Viewport};
     use infinitecanvas_math::{Color, Rect, Transform, Vec2};
     use serde_json::{json, Value};
@@ -830,10 +842,92 @@ mod tests {
     }
 
     #[test]
+    fn text_json_round_trip_keeps_content_style_rotation_and_scale() {
+        let mut scene = Scene::new();
+        let id = scene.next_id();
+        let mut text = Text::new(id, Vec2::new(12.0, -3.0), "Hello 你好")
+            .with_font_size(18.0)
+            .with_color(Color::new(0.2, 0.4, 0.6, 0.8))
+            .with_align(TextAlign::Center);
+        text.set_rotation(0.7);
+        text.props.transform.scale = Vec2::new(1.5, 0.8);
+        text.props.z_index = 3;
+        scene.add_text(text);
+
+        let json = scene.to_json().unwrap();
+        let value: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["version"], 1);
+        assert_eq!(value["elements"][0]["type"], "text");
+        assert_eq!(value["elements"][0]["data"]["content"], "Hello 你好");
+        assert_eq!(value["elements"][0]["data"]["font_size"], 18.0);
+        assert_eq!(value["elements"][0]["data"]["align"], "center");
+        assert_eq!(
+            value["elements"][0]["data"]["props"]["transform"]["rotation"],
+            0.7
+        );
+        let scale = &value["elements"][0]["data"]["props"]["transform"]["scale"];
+        let scale_x = scale["x"].as_f64().or_else(|| scale[0].as_f64());
+        assert_eq!(scale_x, Some(1.5));
+        assert!(!json.contains("texture_id"));
+        assert!(!json.contains("raster_lod"));
+        assert!(!json.contains("\"editing\""));
+        assert!(!json.contains("\"revision\""));
+        assert!(!json.contains("\"dirty\""));
+
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(restored, scene);
+        assert_eq!(restored.to_json().unwrap(), json);
+        match restored.get(id).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.content, "Hello 你好");
+                assert_eq!(text.font_size, 18.0);
+                assert_eq!(text.color, Color::new(0.2, 0.4, 0.6, 0.8));
+                assert_eq!(text.align, TextAlign::Center);
+                assert_eq!(text.rotation(), 0.7);
+                assert_eq!(text.props.transform.scale, Vec2::new(1.5, 0.8));
+                assert!(text.texture_id.is_none());
+                assert_eq!(text.revision, 1);
+            }
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn text_missing_optionals_and_unknown_fields_use_defaults() {
+        let json = json!({
+            "version": 1,
+            "elements": [{
+                "type": "text",
+                "data": {
+                    "props": { "id": 7 },
+                    "future_field": { "ignored": true },
+                    "texture_id": "stale"
+                }
+            }]
+        });
+        let scene = Scene::from_json(&json.to_string()).unwrap();
+        assert_eq!(scene.peek_next_id(), 8);
+        match scene.get(7).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.content, "");
+                assert_eq!(text.font_size, 32.0);
+                assert_eq!(text.align, TextAlign::Left);
+                assert_eq!(text.color.a, 1.0);
+                assert_eq!(text.props.transform.rotation, 0.0);
+                assert_eq!(text.props.transform.scale, Vec2::ONE);
+                assert!(text.props.visible);
+                assert!(text.size.x > 0.0 && text.size.y > 0.0);
+                assert!(text.texture_id.is_none());
+            }
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn unknown_element_type_is_rejected() {
-        let json = r#"{"version":1,"elements":[{"type":"text","data":{"props":{"id":1}}}]}"#;
+        let json = r#"{"version":1,"elements":[{"type":"group","data":{"props":{"id":1}}}]}"#;
         match Scene::from_json(json).unwrap_err() {
-            PersistError::UnknownElementType(kind) => assert_eq!(kind, "text"),
+            PersistError::UnknownElementType(kind) => assert_eq!(kind, "group"),
             other => panic!("expected unknown type, got {other:?}"),
         }
     }
@@ -971,6 +1065,35 @@ mod tests {
             255,
         ];
         assert_pixel(sample_pixel(&scene, Vec2::new(5.0, 5.0)), placeholder);
+    }
+
+    #[test]
+    fn png_draws_text_glyphs_with_rotation_and_scale() {
+        let plain = Text::new(1, Vec2::new(30.0, 40.0), "H")
+            .with_font_size(64.0)
+            .with_color(Color::RED);
+        let ink_local = plain.glyph_sample_local(0, 0, 0, 0).unwrap();
+        let gap_local = plain.glyph_sample_local(0, 0, 2, 0).unwrap();
+        let plain_ink = plain.props.transform.transform_point(ink_local);
+        let plain_gap = plain.props.transform.transform_point(gap_local);
+        let mut plain_scene = Scene::new();
+        plain_scene.add_text(plain);
+        assert_pixel(sample_pixel(&plain_scene, plain_ink), [255, 0, 0, 255]);
+        assert_pixel(sample_pixel(&plain_scene, plain_gap), [0, 0, 0, 0]);
+
+        let mut turned = Text::new(1, Vec2::new(30.0, 40.0), "H")
+            .with_font_size(64.0)
+            .with_color(Color::RED);
+        turned.set_rotation(std::f32::consts::FRAC_PI_2);
+        turned.props.transform.scale = Vec2::new(2.0, 1.5);
+        let turned_ink = turned.props.transform.transform_point(ink_local);
+        let turned_gap = turned.props.transform.transform_point(gap_local);
+        assert_ne!(turned_ink, plain_ink);
+        let mut turned_scene = Scene::new();
+        turned_scene.add_text(turned);
+        assert_pixel(sample_pixel(&turned_scene, turned_ink), [255, 0, 0, 255]);
+        assert_pixel(sample_pixel(&turned_scene, turned_gap), [0, 0, 0, 0]);
+        assert_pixel(sample_pixel(&turned_scene, plain_ink), [0, 0, 0, 0]);
     }
 
     #[test]
