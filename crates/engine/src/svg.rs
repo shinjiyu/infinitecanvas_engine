@@ -4,7 +4,7 @@
 //! Scene
 //!   │ elements_in_paint_order   ← 与 PNG 同一套遍历
 //!   ▼
-//! rect | circle | line+arrow | polyline | text
+//! rect | circle | polygon | line+arrow | polyline | text
 //! image → <image href=data URL>（无字节的纹理仍是注释）
 //! group → <g id> 包住子孙，不再套一层组变换
 //!         隐藏组：子孙不导出，也不计入 viewBox
@@ -19,8 +19,8 @@
 //! 文本写成 `<text>` / `<tspan>`。锚点与 [`TextAlign`] 相同：左上、上边中点或右上角。
 
 use crate::element::{
-    Circle, ElementId, ElementStyle, Image, Line, Path, Rectangle, StrokeCap, StrokeJoin, Text,
-    TextAlign,
+    Circle, ElementId, ElementStyle, Image, Line, Path, Polygon, Rectangle, StrokeCap, StrokeJoin,
+    Text, TextAlign,
 };
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
@@ -375,6 +375,7 @@ fn write_element(element: &AnyElement) -> Option<String> {
     match element {
         AnyElement::Rectangle(rect) => Some(write_rectangle(rect)),
         AnyElement::Circle(circle) => Some(write_circle(circle)),
+        AnyElement::Polygon(polygon) => Some(write_polygon(polygon)),
         AnyElement::Line(line) => Some(write_line(line)),
         AnyElement::Path(path) => write_path(path),
         AnyElement::Text(text) => write_text(text),
@@ -433,6 +434,31 @@ fn write_circle(circle: &Circle) -> String {
         circle.props.id,
         &circle.props.transform,
         circle.style.opacity,
+        &shape,
+    )
+}
+
+fn write_polygon(polygon: &Polygon) -> String {
+    let mut points = String::new();
+    for (index, point) in polygon.local_points().iter().enumerate() {
+        if index > 0 {
+            points.push(' ');
+        }
+        points.push_str(&format!("{},{}", fmt_num(point.x), fmt_num(point.y)));
+    }
+    let mut shape = format!("    <polygon points=\"{points}\"");
+    push_fill_stroke(
+        &mut shape,
+        polygon.style.fill,
+        polygon.style.stroke,
+        polygon.style.stroke_width,
+    );
+    push_shape_line_style(&mut shape, &polygon.style);
+    shape.push_str("/>\n");
+    wrap_group(
+        polygon.props.id,
+        &polygon.props.transform,
+        polygon.style.opacity,
         &shape,
     )
 }
@@ -672,6 +698,11 @@ fn stroke_overflow(element: &AnyElement) -> f32 {
             circle.style.stroke_width,
             &circle.props.transform,
         ),
+        AnyElement::Polygon(polygon) => half_stroke(
+            polygon.style.stroke,
+            polygon.style.stroke_width,
+            &polygon.props.transform,
+        ),
         AnyElement::Line(line) if line.arrow() => arrow_overflow(line),
         AnyElement::Line(_)
         | AnyElement::Path(_)
@@ -832,6 +863,22 @@ mod tests {
                 "</svg>\n",
             )
         );
+    }
+
+    #[test]
+    fn polygon_and_star_export_as_polygon_points() {
+        let mut scene = Scene::new();
+        scene.add_polygon(
+            Polygon::hexagon(1, Vec2::ZERO, 10.0).with_style(ElementStyle::fill_only(Color::RED)),
+        );
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains("<polygon points=\""));
+        assert!(svg.contains("0,-10"));
+        let mut starred = Scene::new();
+        starred.add_polygon(Polygon::star(1, Vec2::ZERO, 10.0));
+        let star_svg = export_svg(&starred, false);
+        assert!(star_svg.contains("<polygon points=\""));
+        assert_ne!(svg, star_svg);
     }
 
     #[test]

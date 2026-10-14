@@ -195,6 +195,40 @@ export class InfiniteCanvas {
         return BigInt.asUintN(64, ret);
     }
     /**
+     * 添加正多边形，并记入撤销栈。
+     *
+     * # 参数
+     * - `x, y`: 中心点
+     * - `radius`: 外接圆半径
+     * - `sides`: 边数，钳到 3–64。缺省调用方应传 6
+     * - `fill_color` / `stroke_color` / `stroke_width`: 与 [`Self::add_rectangle`] 相同
+     *
+     * # 返回
+     * 元素 ID
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const id = canvas.add_polygon(0, 0, 40, 6, "#f59e0b", null, 1);
+     * canvas.undo();
+     * ```
+     * @param {number} x
+     * @param {number} y
+     * @param {number} radius
+     * @param {number} sides
+     * @param {string | null | undefined} fill_color
+     * @param {string | null | undefined} stroke_color
+     * @param {number} stroke_width
+     * @returns {bigint}
+     */
+    add_polygon(x, y, radius, sides, fill_color, stroke_color, stroke_width) {
+        var ptr0 = isLikeNone(fill_color) ? 0 : passStringToWasm0(fill_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(stroke_color) ? 0 : passStringToWasm0(stroke_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_add_polygon(this.__wbg_ptr, x, y, radius, sides, ptr0, len0, ptr1, len1, stroke_width);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
      * 添加矩形
      *
      * # 参数
@@ -221,6 +255,38 @@ export class InfiniteCanvas {
         var ptr1 = isLikeNone(stroke_color) ? 0 : passStringToWasm0(stroke_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         var len1 = WASM_VECTOR_LEN;
         const ret = wasm.infinitecanvas_add_rectangle(this.__wbg_ptr, x, y, width, height, ptr0, len0, ptr1, len1, stroke_width);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
+     * 添加星形，并记入撤销栈。
+     *
+     * # 参数
+     * - `points`: 角数，钳到 3–64。五角星传 5
+     * - `inner_radius`: 内点半径相对外接圆的比例，钳到 0.05–0.95
+     *
+     * # 返回
+     * 元素 ID
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const id = canvas.add_star(0, 0, 40, 5, 0.5, "#a855f7", null, 1);
+     * ```
+     * @param {number} x
+     * @param {number} y
+     * @param {number} radius
+     * @param {number} points
+     * @param {number} inner_radius
+     * @param {string | null | undefined} fill_color
+     * @param {string | null | undefined} stroke_color
+     * @param {number} stroke_width
+     * @returns {bigint}
+     */
+    add_star(x, y, radius, points, inner_radius, fill_color, stroke_color, stroke_width) {
+        var ptr0 = isLikeNone(fill_color) ? 0 : passStringToWasm0(fill_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(stroke_color) ? 0 : passStringToWasm0(stroke_color, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ret = wasm.infinitecanvas_add_star(this.__wbg_ptr, x, y, radius, points, inner_radius, ptr0, len0, ptr1, len1, stroke_width);
         return BigInt.asUintN(64, ret);
     }
     /**
@@ -924,6 +990,7 @@ export class InfiniteCanvas {
      * - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
      *   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
      * - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
+     * - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
      *
      * # 示例（JavaScript）
      * ```js
@@ -1706,7 +1773,9 @@ export class InfiniteCanvas {
      * 把补丁写进当前选择并记一条撤销记录。
      *
      * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
-     * `strokeWidth`、`opacity`、`fontSize`、`cornerRadius` 是数字。`cornerRadius` 也可以写成 `corner_radius`。
+     * `strokeWidth`、`opacity`、`fontSize`、`cornerRadius`、`sides`、`innerRadius` 是数字。
+     * `cornerRadius` 也可以写成 `corner_radius`。`sides` 也可以写成 `points`，并钳到 3–64。
+     * `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
      * `textColor` 是十六进制颜色。圆角只写到矩形上。
      * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
      * 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
@@ -1757,7 +1826,7 @@ export class InfiniteCanvas {
      * 设置当前工具
      *
      * # 参数
-     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen", "eyedropper")
+     * - `tool_name`: 工具名称 ("select", "rectangle", "circle", "polygon", "star", "text", "pan", "line", "pen", "eyedropper")
      *
      * 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`，吸管快捷键 `i`。
      * 吸管不带 Shift、Ctrl 或 Alt，避免和 V / L / P / R / O / T / H 以及翻转键抢键。
@@ -3786,12 +3855,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2753, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2764, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 462, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 469, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },

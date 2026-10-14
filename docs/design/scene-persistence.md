@@ -11,7 +11,7 @@ infinitecanvas-wasm::InfiniteCanvas
     │ export_viewport_png / export_selection_png
     │ export_svg
     ▼
-Scene ── elements: rectangle | circle | image | line | path | text | group
+Scene ── elements: rectangle | circle | polygon | image | line | path | text | group
          assets:   图片像素，data URL，同一张图一份
          PNG 与 SVG 共用 elements_in_paint_order（z_index，再按 id）
 ```
@@ -23,12 +23,12 @@ Scene ── elements: rectangle | circle | image | line | path | text | group
 | `version` | 必须是 `1`，缺失或其它值都拒绝 |
 | `next_id` | 可省略。小于等于已有最大 ID 时抬到 `max_id + 1` |
 | `assets[]` | 可省略。图片资源 `{ id, mime, width, height, data }`。`data` 是 data URL，同一张图只写一次 |
-| `elements[]` | `{ "type", "data" }`。`type` 为 `rectangle`、`circle`、`image`、`line`、`path`、`text`、`group` |
+| `elements[]` | `{ "type", "data" }`。`type` 为 `rectangle`、`circle`、`polygon`、`image`、`line`、`path`、`text`、`group`。`star` 是 `polygon` 的导入别名 |
 | `guides[]` | 可省略。手动参考线 `{ id, axis, position }`。`axis` 为 `horizontal`（世界 y）或 `vertical`（世界 x）。没有参考线时不写这个字段 |
 
 `data.props.transform` 含 `translation`、`rotation`（弧度，即 `ElementProps::rotation`）、`scale`。直线的 `arrow` 缺省为 `false`。路径的 `points` 缺省为空。文本的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 可省略；对齐缺省为 `left`，字号缺省为 32，尺寸缺省时按内容估算。`texture_id`、LOD、`revision`、`editing` 用 `#[serde(skip)]`，不进文件。PNG 采样先把世界点逆变换回局部空间，所以旋转和非均匀缩放与命中测试一致。
 
-省略的可选字段使用 serde 默认值（旋转 0、缩放 1、可见、不透明度 1、颜色 alpha 1）。形状的 `style.fill` / `stroke` / `stroke_width` / `opacity` 可省略，缺省与 `ElementStyle::new` 相同。`style.stroke_dash` 缺省为空数组（实线），`style.stroke_cap` 缺省 `butt`，`style.stroke_join` 缺省 `miter`；三者与缺省值相同时不写入文件。矩形的 `corner_radius` 可省略，缺省为 0；为 0 时不写出该字段。文本的 `opacity` 缺省 1，`stroke` 缺省无，`stroke_width` 缺省 0。文本描边没有虚线、线帽和线结。`props.parent` 和 `props.locked` 也可省略，缺省为根节点和未锁定，文本与其它元素相同。文档或元素上的未知字段会被忽略，因此以后增加可选字段不必升版本。未知元素种类会报错，避免静默丢掉数据。
+省略的可选字段使用 serde 默认值（旋转 0、缩放 1、可见、不透明度 1、颜色 alpha 1）。形状的 `style.fill` / `stroke` / `stroke_width` / `opacity` 可省略，缺省与 `ElementStyle::new` 相同。`style.stroke_dash` 缺省为空数组（实线），`style.stroke_cap` 缺省 `butt`，`style.stroke_join` 缺省 `miter`；三者与缺省值相同时不写入文件。矩形的 `corner_radius` 可省略，缺省为 0；为 0 时不写出该字段。多边形的 `kind` 缺省为 `polygon`，`sides`（别名 `points`）缺省为 6 并钳到 3–64，`inner_radius` 缺省为 0.5 并钳到 0.05–0.95。`type: "star"` 读成星形；若同时省略边数，角数用 5。旧文档没有 `polygon` 时不受影响。文本的 `opacity` 缺省 1，`stroke` 缺省无，`stroke_width` 缺省 0。文本描边没有虚线、线帽和线结。`props.parent` 和 `props.locked` 也可省略，缺省为根节点和未锁定，文本与其它元素相同。文档或元素上的未知字段会被忽略，因此以后增加可选字段不必升版本。未知元素种类会报错，避免静默丢掉数据。
 
 ## PNG
 

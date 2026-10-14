@@ -27,8 +27,12 @@ pub enum Tool {
     /// 吸管 - 单击采样最上层可见叶子的填充和描边，写到当前选择
     ///
     /// 快捷键是不带修饰键的 `I`。`Shift+I`、`Ctrl/Cmd+I`、`Alt+I` 不进入这个工具，
-    /// 也不占用 V / L / P / R / O / T / H。
+    /// 也不占用 V / L / P / R / O / T / H / N / K。
     Eyedropper,
+    /// 正多边形工具 - 拖拽外接圆，默认六边形
+    Polygon,
+    /// 星形工具 - 拖拽外接圆，默认五角星
+    Star,
 }
 
 impl std::str::FromStr for Tool {
@@ -47,6 +51,8 @@ impl std::str::FromStr for Tool {
             "pen" | "path" | "p" => Ok(Tool::Pen),
             "text" | "t" => Ok(Tool::Text),
             "eyedropper" | "dropper" | "i" => Ok(Tool::Eyedropper),
+            "polygon" | "hexagon" | "n" => Ok(Tool::Polygon),
+            "star" | "k" => Ok(Tool::Star),
             _ => Err(()),
         }
     }
@@ -65,6 +71,8 @@ impl Tool {
             Tool::Pen => "pen",
             Tool::Text => "text",
             Tool::Eyedropper => "eyedropper",
+            Tool::Polygon => "polygon",
+            Tool::Star => "star",
         }
     }
 
@@ -80,6 +88,7 @@ impl Tool {
             Tool::Pen => "crosshair",
             Tool::Text => "text",
             Tool::Eyedropper => "crosshair",
+            Tool::Polygon | Tool::Star => "crosshair",
         }
     }
 
@@ -87,7 +96,7 @@ impl Tool {
     pub fn is_drawing_tool(&self) -> bool {
         matches!(
             self,
-            Tool::Rectangle | Tool::Circle | Tool::Line | Tool::Pen
+            Tool::Rectangle | Tool::Circle | Tool::Line | Tool::Pen | Tool::Polygon | Tool::Star
         )
     }
 }
@@ -204,6 +213,12 @@ mod tests {
         assert_eq!(Tool::Eyedropper.name(), "eyedropper");
         assert_eq!(Tool::Eyedropper.cursor(), "crosshair");
         assert!(!Tool::Eyedropper.is_drawing_tool());
+        assert_eq!(Tool::from_str("polygon"), Ok(Tool::Polygon));
+        assert_eq!(Tool::from_str("n"), Ok(Tool::Polygon));
+        assert_eq!(Tool::from_str("star"), Ok(Tool::Star));
+        assert_eq!(Tool::from_str("k"), Ok(Tool::Star));
+        assert!(Tool::Polygon.is_drawing_tool());
+        assert_eq!(Tool::Star.cursor(), "crosshair");
         assert_eq!(Tool::Text.cursor(), "text");
         assert!(!Tool::Text.is_drawing_tool());
         assert!(Tool::from_str("unknown").is_err());

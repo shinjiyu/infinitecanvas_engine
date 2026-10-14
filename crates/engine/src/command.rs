@@ -614,8 +614,13 @@ impl AddElementCommand {
 impl Command for AddElementCommand {
     fn execute(&mut self, scene: &mut Scene) {
         if let Some(element) = self.element.take() {
+            let mark_polygon = matches!(element, AnyElement::Polygon(_));
+            let id = element.id();
             scene.restore_assets(std::mem::take(&mut self.parked));
             scene.add(element);
+            if mark_polygon {
+                scene.mark_dirty(id);
+            }
         }
     }
 
@@ -1474,7 +1479,10 @@ struct StyleChange {
 
 /// 修改一个或多个元素的填充、描边、线宽和不透明度。
 ///
-/// 矩形还可以改 `corner_radius`（钳到短边一半）。文本还会记录字号和文字颜色。
+/// 矩形还可以改 `corner_radius`（钳到短边一半）。
+/// 正多边形和星形还可以改 `sides`（钳到 3–64）；星形还可以改 `inner_radius`
+/// （相对外接圆，钳到 0.05–0.95）。这两项和填充描边同属一条 `SetStyle` 记录。
+/// 文本还会记录字号和文字颜色。
 /// 图片只接受不透明度，写到 `Image::alpha`，
 /// 不改 `asset_id`，也不动资源表。执行和撤销都会 [`Scene::mark_dirty`]，
 /// 顶点缓存和文本光栅因此会刷新。拖动滑块时由调用方合成一条命令：

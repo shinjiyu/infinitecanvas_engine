@@ -1542,6 +1542,7 @@ function syncPropertyPanel(engine) {
     (value) => `${Math.round(value * 100)}%`,
   );
   syncCornerRadius(style);
+  syncPolygonFields(style);
 
   const textFields = document.getElementById('prop-text-fields');
   if (textFields) textFields.hidden = !style.hasText;
@@ -1712,6 +1713,7 @@ function bindPropertyPanel(engine) {
   bindRange('prop-stroke-width', 'strokeWidth', 'prop-stroke-width-label', (value) => String(value));
   bindRange('prop-opacity', 'opacity', 'prop-opacity-label', (value) => `${Math.round(value * 100)}%`);
   bindCornerRadius(engine);
+  bindPolygonFields(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
 
   const bindColor = (id, key) => {
@@ -1800,6 +1802,80 @@ function syncCornerRadius(style) {
 /**
  * @param {WasmCanvas} engine
  */
+/**
+ * 边数在选中多边形或星形时出现。内径比只在选中星形时出现。
+ * 滑块和数字框写同一个字段，松手收成一条 `SetStyle` 历史。
+ *
+ * @param {Record<string, unknown>} style
+ */
+function syncPolygonFields(style) {
+  const sidesRow = document.getElementById('prop-sides-row');
+  if (sidesRow) sidesRow.hidden = !style.sidesSupported;
+  const sidesMixed = document.getElementById('prop-sides-mixed');
+  if (sidesMixed) sidesMixed.hidden = !style.sidesMixed;
+  const sidesLabel = document.getElementById('prop-sides-label');
+  if (sidesLabel) {
+    sidesLabel.textContent = style.hasStar && !style.hasPolygon ? '角数' : '边数';
+  }
+  const sidesActive =
+    activeStyleControl === 'prop-sides' || activeStyleControl === 'prop-sides-number';
+  if (!sidesActive && typeof style.sides === 'number' && Number.isFinite(style.sides)) {
+    const range = document.getElementById('prop-sides');
+    const number = document.getElementById('prop-sides-number');
+    const shown = String(Math.round(style.sides));
+    if (range instanceof HTMLInputElement) range.value = shown;
+    if (number instanceof HTMLInputElement) number.value = shown;
+  }
+
+  const innerRow = document.getElementById('prop-inner-radius-row');
+  if (innerRow) innerRow.hidden = !style.innerRadiusSupported;
+  const innerMixed = document.getElementById('prop-inner-radius-mixed');
+  if (innerMixed) innerMixed.hidden = !style.innerRadiusMixed;
+  const innerActive =
+    activeStyleControl === 'prop-inner-radius' ||
+    activeStyleControl === 'prop-inner-radius-number';
+  if (
+    !innerActive &&
+    typeof style.innerRadius === 'number' &&
+    Number.isFinite(style.innerRadius)
+  ) {
+    const range = document.getElementById('prop-inner-radius');
+    const number = document.getElementById('prop-inner-radius-number');
+    if (range instanceof HTMLInputElement) range.value = String(style.innerRadius);
+    if (number instanceof HTMLInputElement) number.value = String(style.innerRadius);
+  }
+}
+
+/**
+ * @param {WasmCanvas} engine
+ */
+function bindPolygonFields(engine) {
+  const bindPair = (rangeId, numberId, key, integer) => {
+    const range = document.getElementById(rangeId);
+    const number = document.getElementById(numberId);
+    const preview = (source, value) => {
+      if (!Number.isFinite(value)) return;
+      const next = integer ? Math.round(value) : value;
+      if (integer && (next < 3 || next > 64)) return;
+      if (!integer && (next < 0.05 || next > 0.95)) return;
+      activeStyleControl = source;
+      if (range instanceof HTMLInputElement && source !== rangeId) range.value = String(next);
+      if (number instanceof HTMLInputElement && source !== numberId) number.value = String(next);
+      engine.preview_selection_style({ [key]: next });
+    };
+    if (range instanceof HTMLInputElement) {
+      range.addEventListener('input', () => preview(rangeId, Number(range.value)));
+      range.addEventListener('change', () => finishStyleEdit(engine));
+    }
+    if (number instanceof HTMLInputElement) {
+      number.addEventListener('input', () => preview(numberId, Number(number.value)));
+      number.addEventListener('change', () => finishStyleEdit(engine));
+    }
+  };
+  bindPair('prop-sides', 'prop-sides-number', 'sides', true);
+  bindPair('prop-inner-radius', 'prop-inner-radius-number', 'innerRadius', false);
+}
+
 function bindCornerRadius(engine) {
   const range = document.getElementById('prop-corner-radius');
   const number = document.getElementById('prop-corner-radius-number');

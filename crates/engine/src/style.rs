@@ -12,10 +12,13 @@
 //!                                      │
 //!                                      ├─ 文本字号 / 颜色 / 描边变化时丢掉光栅
 //!                                      ├─ 矩形圆角（其它元素忽略该字段）
+//!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
 //!                                      └─ 图片只改 alpha
 //! ```
 
-use crate::element::{ElementId, ElementStyle, Rectangle, StrokeCap, StrokeJoin};
+use crate::element::{
+    ElementId, ElementStyle, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin,
+};
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::Color;
 
@@ -49,6 +52,7 @@ pub struct TextPaint {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StyleSnapshot {
     /// 圆、直线或路径。矩形用 [`StyleSnapshot::Rectangle`]，以便带上圆角。
+    /// 多边形和星形用 [`StyleSnapshot::Polygon`]。
     Shape(ElementStyle),
     /// 矩形的画笔和圆角。一次补丁同时改这两项，撤销仍是一条记录。
     Rectangle {
@@ -56,6 +60,17 @@ pub enum StyleSnapshot {
         style: ElementStyle,
         /// 四角相同的半径。0 为直角。
         corner_radius: f32,
+    },
+    /// 正多边形或星形的画笔、边数和内径比。一次补丁仍是一条撤销记录。
+    Polygon {
+        /// 填充、描边、线宽、不透明度。
+        style: ElementStyle,
+        /// 边数或角数，已钳到 3–64。
+        sides: u32,
+        /// 星形内径比。正多边形保留原值，补丁不改它。
+        inner_radius: f32,
+        /// 种类不随样式补丁改变，只为了快照能比较。
+        kind: PolygonKind,
     },
     /// 文本。
     Text(TextPaint),
@@ -88,6 +103,12 @@ pub struct StylePatch {
     pub stroke_join: Option<StrokeJoin>,
     /// 矩形圆角半径，单位与矩形尺寸相同。只写到矩形上，并钳到短边一半。
     pub corner_radius: Option<f32>,
+    /// 正多边形边数或星形角数。只写到 [`Polygon`] 上，并钳到 3–64。
+    ///
+    /// 和填充、描边放在同一次 [`crate::SetStyleCommand`] 里，拖动滑块松手仍是一条撤销。
+    pub sides: Option<u32>,
+    /// 星形内径比（相对外接圆）。只写到星形上，并钳到 0.05–0.95。正多边形忽略。
+    pub inner_radius: Option<f32>,
 }
 
 /// 当前选择的公共样式。
@@ -113,6 +134,14 @@ pub struct SelectionStyle {
     pub stroke_join: StyleField<StrokeJoin>,
     /// 矩形圆角。选择里没有矩形时为 [`StyleField::Absent`]。
     pub corner_radius: StyleField<f32>,
+    /// 多边形边数或星形角数。选择里没有多边形或星形时为 [`StyleField::Absent`]。
+    pub sides: StyleField<f32>,
+    /// 星形内径比。选择里没有星形时为 [`StyleField::Absent`]。正多边形不参与。
+    pub inner_radius: StyleField<f32>,
+    /// 选择里有正多边形（不含星形）。
+    pub has_polygon: bool,
+    /// 选择里有星形。
+    pub has_star: bool,
     /// 选择里有形状（含组内的形状）。
     pub has_shape: bool,
     /// 选择里有矩形（含组内的矩形）。圆角只对它们生效。
@@ -146,6 +175,22 @@ impl StyleSnapshot {
                 apply_shape_paint(style, patch);
                 if let Some(radius) = patch.corner_radius.filter(|value| value.is_finite()) {
                     *corner_radius = radius.max(0.0);
+                }
+            }
+            Self::Polygon {
+                style,
+                sides,
+                inner_radius,
+                kind,
+            } => {
+                apply_shape_paint(style, patch);
+                if let Some(next) = patch.sides {
+                    *sides = Polygon::clamp_sides(next);
+                }
+                if *kind == PolygonKind::Star {
+                    if let Some(ratio) = patch.inner_radius.filter(|value| value.is_finite()) {
+                        *inner_radius = Polygon::clamp_inner_radius(ratio);
+                    }
                 }
             }
             Self::Text(text) => {
@@ -224,6 +269,12 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             corner_radius: rect.effective_corner_radius(),
         }),
         AnyElement::Circle(circle) => Some(StyleSnapshot::Shape(circle.style.clone())),
+        AnyElement::Polygon(polygon) => Some(StyleSnapshot::Polygon {
+            style: polygon.style.clone(),
+            sides: polygon.sides(),
+            inner_radius: polygon.inner_radius(),
+            kind: polygon.kind(),
+        }),
         AnyElement::Line(line) => Some(StyleSnapshot::Shape(line.style.clone())),
         AnyElement::Path(path) => Some(StyleSnapshot::Shape(path.style.clone())),
         AnyElement::Text(text) => Some(StyleSnapshot::Text(TextPaint {
@@ -245,6 +296,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
     let applied = match scene.get_mut(id) {
         Some(AnyElement::Rectangle(rect)) => assign_rectangle(rect, snapshot),
         Some(AnyElement::Circle(circle)) => assign_shape(&mut circle.style, snapshot),
+        Some(AnyElement::Polygon(polygon)) => assign_polygon(polygon, snapshot),
         Some(AnyElement::Line(line)) => assign_shape(&mut line.style, snapshot),
         Some(AnyElement::Path(path)) => assign_shape(&mut path.style, snapshot),
         Some(AnyElement::Text(text)) => {
@@ -288,7 +340,11 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut caps = Vec::new();
     let mut joins = Vec::new();
     let mut radii = Vec::new();
+    let mut side_counts = Vec::new();
+    let mut inner_radii = Vec::new();
     let mut has_shape = false;
+    let mut has_polygon = false;
+    let mut has_star = false;
     let mut has_rect = false;
     let mut has_text = false;
     let mut has_image = false;
@@ -326,6 +382,31 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 joins.push(style.stroke_join);
                 radii.push(corner_radius);
             }
+            Some(StyleSnapshot::Polygon {
+                style,
+                sides,
+                inner_radius,
+                kind,
+            }) => {
+                has_shape = true;
+                push_shape_paint(
+                    &mut fills,
+                    &mut strokes,
+                    &mut widths,
+                    &mut opacities,
+                    &style,
+                );
+                dashes.push(style.stroke_dash);
+                caps.push(style.stroke_cap);
+                joins.push(style.stroke_join);
+                side_counts.push(sides as f32);
+                if kind == PolygonKind::Star {
+                    has_star = true;
+                    inner_radii.push(inner_radius);
+                } else {
+                    has_polygon = true;
+                }
+            }
             Some(StyleSnapshot::Text(text)) => {
                 has_text = true;
                 strokes.push(text.stroke);
@@ -353,6 +434,10 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         stroke_cap: fold(caps),
         stroke_join: fold(joins),
         corner_radius: fold(radii),
+        sides: fold(side_counts),
+        inner_radius: fold(inner_radii),
+        has_polygon,
+        has_star,
         has_shape,
         has_rect,
         has_text,
@@ -430,6 +515,27 @@ fn assign_rectangle(rect: &mut Rectangle, snapshot: &StyleSnapshot) -> bool {
     }
 }
 
+fn assign_polygon(polygon: &mut Polygon, snapshot: &StyleSnapshot) -> bool {
+    match snapshot {
+        StyleSnapshot::Polygon {
+            style,
+            sides,
+            inner_radius,
+            ..
+        } => {
+            polygon.style = style.clone();
+            polygon.set_sides(*sides);
+            polygon.set_inner_radius(*inner_radius);
+            true
+        }
+        StyleSnapshot::Shape(style) => {
+            polygon.style = style.clone();
+            true
+        }
+        _ => false,
+    }
+}
+
 fn assign_shape(style: &mut ElementStyle, snapshot: &StyleSnapshot) -> bool {
     if let StyleSnapshot::Shape(next) = snapshot {
         *style = next.clone();
@@ -483,7 +589,11 @@ mod tests {
     /// 圆、直线、路径是 [`StyleSnapshot::Shape`]，矩形是 [`StyleSnapshot::Rectangle`]。
     fn shape_style(scene: &Scene, id: ElementId) -> ElementStyle {
         match capture_style(scene, id) {
-            Some(StyleSnapshot::Shape(style) | StyleSnapshot::Rectangle { style, .. }) => style,
+            Some(
+                StyleSnapshot::Shape(style)
+                | StyleSnapshot::Rectangle { style, .. }
+                | StyleSnapshot::Polygon { style, .. },
+            ) => style,
             other => panic!("shape {id}, got {other:?}"),
         }
     }

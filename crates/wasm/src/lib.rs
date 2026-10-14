@@ -53,7 +53,7 @@ use infinitecanvas_engine::{
     zoom_viewport_to_scene, zoom_viewport_to_selection, AddElementCommand, AlignMode, AnyElement,
     Circle, CommandHistory, DistributeAxis, DuplicateElementsCommand, EditGuidesCommand, Element,
     ElementId, ElementStyle, Event, EventQueue, FlipAxis, Image, Line, MoveCommand, NudgeDirection,
-    OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent, QuarterTurn,
+    OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent, Polygon, QuarterTurn,
     Rectangle, RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand, Scene,
     SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign,
     TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
@@ -860,7 +860,7 @@ impl InfiniteCanvas {
     /// 设置当前工具
     ///
     /// # 参数
-    /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "text", "pan", "line", "pen", "eyedropper")
+    /// - `tool_name`: 工具名称 ("select", "rectangle", "circle", "polygon", "star", "text", "pan", "line", "pen", "eyedropper")
     ///
     /// 直线快捷键 `l`，画笔快捷键 `p`，文本快捷键 `t`，吸管快捷键 `i`。
     /// 吸管不带 Shift、Ctrl 或 Alt，避免和 V / L / P / R / O / T / H 以及翻转键抢键。
@@ -1359,6 +1359,28 @@ impl InfiniteCanvas {
                 }
                 let _ = Reflect::set(&obj, &JsValue::from_str("childIds"), &children);
             }
+            if let AnyElement::Polygon(polygon) = element {
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("kind"),
+                    &JsValue::from_str(polygon.kind().as_str()),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("sides"),
+                    &JsValue::from(polygon.sides()),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("innerRadius"),
+                    &JsValue::from(polygon.inner_radius()),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("radius"),
+                    &JsValue::from(polygon.radius()),
+                );
+            }
             if let AnyElement::Text(text) = element {
                 let _ = Reflect::set(
                     &obj,
@@ -1470,6 +1492,89 @@ impl InfiniteCanvas {
         self.scene.add_circle(circle);
 
         log::info!("Added circle {} at ({}, {})", id, x, y);
+        id
+    }
+
+    /// 添加正多边形，并记入撤销栈。
+    ///
+    /// # 参数
+    /// - `x, y`: 中心点
+    /// - `radius`: 外接圆半径
+    /// - `sides`: 边数，钳到 3–64。缺省调用方应传 6
+    /// - `fill_color` / `stroke_color` / `stroke_width`: 与 [`Self::add_rectangle`] 相同
+    ///
+    /// # 返回
+    /// 元素 ID
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const id = canvas.add_polygon(0, 0, 40, 6, "#f59e0b", null, 1);
+    /// canvas.undo();
+    /// ```
+    #[wasm_bindgen]
+    pub fn add_polygon(
+        &mut self,
+        x: f32,
+        y: f32,
+        radius: f32,
+        sides: u32,
+        fill_color: Option<String>,
+        stroke_color: Option<String>,
+        stroke_width: f32,
+    ) -> u64 {
+        let id = self.scene.next_id();
+        let mut style = ElementStyle::new();
+        style.fill = fill_color.and_then(|hex| Color::from_hex(&hex).ok());
+        style.stroke = stroke_color.and_then(|hex| Color::from_hex(&hex).ok());
+        style.stroke_width = stroke_width;
+        let polygon = Polygon::regular(id, Vec2::new(x, y), radius, sides).with_style(style);
+        self.command_history.execute(
+            Box::new(AddElementCommand::new(AnyElement::Polygon(polygon))),
+            &mut self.scene,
+        );
+        log::info!("Added polygon {} at ({}, {}), sides {}", id, x, y, sides);
+        id
+    }
+
+    /// 添加星形，并记入撤销栈。
+    ///
+    /// # 参数
+    /// - `points`: 角数，钳到 3–64。五角星传 5
+    /// - `inner_radius`: 内点半径相对外接圆的比例，钳到 0.05–0.95
+    ///
+    /// # 返回
+    /// 元素 ID
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// const id = canvas.add_star(0, 0, 40, 5, 0.5, "#a855f7", null, 1);
+    /// ```
+    #[wasm_bindgen]
+    pub fn add_star(
+        &mut self,
+        x: f32,
+        y: f32,
+        radius: f32,
+        points: u32,
+        inner_radius: f32,
+        fill_color: Option<String>,
+        stroke_color: Option<String>,
+        stroke_width: f32,
+    ) -> u64 {
+        let id = self.scene.next_id();
+        let mut style = ElementStyle::new();
+        style.fill = fill_color.and_then(|hex| Color::from_hex(&hex).ok());
+        style.stroke = stroke_color.and_then(|hex| Color::from_hex(&hex).ok());
+        style.stroke_width = stroke_width;
+        let mut star = Polygon::star(id, Vec2::new(x, y), radius)
+            .with_style(style)
+            .with_inner_radius(inner_radius);
+        star.set_sides(points);
+        self.command_history.execute(
+            Box::new(AddElementCommand::new(AnyElement::Polygon(star))),
+            &mut self.scene,
+        );
+        log::info!("Added star {} at ({}, {}), points {}", id, x, y, points);
         id
     }
 
@@ -3070,7 +3175,9 @@ impl InfiniteCanvas {
 
         match current_tool {
             Tool::Select => self.handle_select_tool_down(event),
-            Tool::Rectangle | Tool::Circle => self.handle_draw_tool_down(event, current_tool),
+            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star => {
+                self.handle_draw_tool_down(event, current_tool)
+            }
             Tool::Line => self.handle_line_tool_down(event),
             Tool::Pen => self.handle_pen_tool_down(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_down(event),
@@ -3087,7 +3194,9 @@ impl InfiniteCanvas {
 
         match current_tool {
             Tool::Select => self.handle_select_tool_move(event),
-            Tool::Rectangle | Tool::Circle => self.handle_draw_tool_move(event),
+            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star => {
+                self.handle_draw_tool_move(event)
+            }
             Tool::Line => self.handle_line_tool_move(event),
             Tool::Pen => self.handle_pen_tool_move(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_move(event),
@@ -3104,7 +3213,9 @@ impl InfiniteCanvas {
 
         match current_tool {
             Tool::Select => self.handle_select_tool_up(event),
-            Tool::Rectangle | Tool::Circle => self.handle_draw_tool_up(event, current_tool),
+            Tool::Rectangle | Tool::Circle | Tool::Polygon | Tool::Star => {
+                self.handle_draw_tool_up(event, current_tool)
+            }
             Tool::Line => self.handle_line_tool_up(event),
             Tool::Pen => self.handle_pen_tool_up(event),
             Tool::Pan | Tool::Hand => self.handle_pan_tool_up(event),
@@ -3206,6 +3317,7 @@ impl InfiniteCanvas {
     // ========== 绘制工具事件处理 ==========
 
     fn handle_draw_tool_down(&mut self, event: PointerEvent, _tool: Tool) {
+        self.discard_preview();
         // 开始绘制：记录起始点
         self.drag_state.is_dragging = true;
         self.drag_state.pointer_id = Some(event.pointer_id);
@@ -3220,7 +3332,10 @@ impl InfiniteCanvas {
     fn handle_draw_tool_move(&mut self, event: PointerEvent) {
         if self.drag_state.is_dragging && self.drag_state.pointer_id == Some(event.pointer_id) {
             self.drag_state.last_position = event.world_position;
-            // 绘制预览由渲染器处理
+            let tool = self.tool_manager.current();
+            if matches!(tool, Tool::Polygon | Tool::Star) {
+                let _ = self.update_regular_preview(tool, event.world_position);
+            }
         }
     }
 
@@ -3231,6 +3346,18 @@ impl InfiniteCanvas {
 
         let start = self.drag_state.start_position;
         let end = event.world_position;
+
+        if matches!(tool, Tool::Polygon | Tool::Star) {
+            let created = self.update_regular_preview(tool, end);
+            self.drag_state.is_dragging = false;
+            self.drag_state.pointer_id = None;
+            if created {
+                self.commit_preview();
+            } else {
+                self.discard_preview();
+            }
+            return;
+        }
 
         // 计算矩形尺寸
         let min_x = start.x.min(end.x);
@@ -3275,6 +3402,49 @@ impl InfiniteCanvas {
 
         self.drag_state.is_dragging = false;
         self.drag_state.pointer_id = None;
+    }
+
+    /// 拖拽过程中更新正多边形或星形预览。尺寸太小时返回 false，调用方丢掉预览。
+    fn update_regular_preview(&mut self, tool: Tool, end: Vec2) -> bool {
+        let start = self.drag_state.start_position;
+        let width = (end.x - start.x).abs();
+        let height = (end.y - start.y).abs();
+        const MIN_SIZE: f32 = 5.0;
+        if width <= MIN_SIZE || height <= MIN_SIZE {
+            return false;
+        }
+        let radius = width.min(height) / 2.0;
+        let center = Vec2::new(
+            start.x.min(end.x) + width * 0.5,
+            start.y.min(end.y) + height * 0.5,
+        );
+        if let Some(id) = self.drag_state.preview_id {
+            if let Some(AnyElement::Polygon(polygon)) = self.scene.get_mut(id) {
+                polygon.props.transform.translation = center;
+                polygon.set_radius(radius);
+                self.scene.mark_dirty(id);
+                return true;
+            }
+        }
+        let id = self.scene.next_id();
+        let (polygon, label) = match tool {
+            Tool::Star => (
+                Polygon::star(id, center, radius).with_style(ElementStyle::fill_only(
+                    Color::from_hex("#a855f7").unwrap_or(Color::BLUE),
+                )),
+                "star",
+            ),
+            _ => (
+                Polygon::hexagon(id, center, radius).with_style(ElementStyle::fill_only(
+                    Color::from_hex("#f59e0b").unwrap_or(Color::BLUE),
+                )),
+                "polygon",
+            ),
+        };
+        self.scene.add_polygon(polygon);
+        self.drag_state.preview_id = Some(id);
+        log::trace!("Preview {label} {id} radius {radius}");
+        true
     }
 
     // ========== 直线 / 画笔 ==========
@@ -3419,7 +3589,7 @@ impl InfiniteCanvas {
         self.command_history
             .execute(Box::new(AddElementCommand::new(element)), &mut self.scene);
         self.selection.select_element(&mut self.scene, id, false);
-        log::info!("Committed stroke {}", id);
+        log::info!("Committed element {}", id);
     }
 
     fn discard_preview(&mut self) {

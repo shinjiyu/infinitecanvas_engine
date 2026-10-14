@@ -2,6 +2,22 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #65: 多边形与星形
+
+- [x] `Polygon`：`kind` 为正多边形或星形。默认六边形（6）和五角星（5）。边数钳到 3–64
+- [x] 星形 `inner_radius` 是内点相对外接圆的比例，默认 0.5，钳到 0.05–0.95
+- [x] 填充扇形、描边、命中和轴对齐包围盒。旋转和缩放走现有 `transform`
+- [x] 创建走 `AddElementCommand` 并 `Scene::mark_dirty`。改边数或内径是一条 `SetStyle`
+- [x] JSON `type: polygon`，`kind` / `sides` / `inner_radius` 都有 `serde(default)`。`type: star` 可导入。旧文档仍有效
+- [x] Demo：工具栏多边形（N）和星形（K）。属性面板在选中时显示边数，星形另显示内径。N / K 不占用 V/L/P/R/O/T/H/I
+
+```text
+N / K 拖拽 ──► AddElementCommand ──► Polygon
+属性面板边数 / 内径 ── preview / commit ──► SetStyle.sides / inner_radius
+                                              ├─ 边数 3–64，内径只写星形
+                                              └─ mark_dirty ──► 扇形顶点
+```
+
 ## Issue #64: 背景网格开关
 
 - [x] 世界坐标网格，间距 20；缩小到不足 8px 时间距 ×5，仍落在 20 的倍数上

@@ -28,6 +28,8 @@ export const OVERSCAN = 8;
 const TYPE_LABELS = {
   Rectangle: '矩形',
   Circle: '圆形',
+  Polygon: '多边形',
+  Star: '星形',
   Image: '图片',
   Line: '直线',
   Path: '路径',

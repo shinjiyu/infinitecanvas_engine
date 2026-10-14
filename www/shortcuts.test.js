@@ -530,6 +530,11 @@ test('text editing shortcuts stay inside the text editor', () => {
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'Enter' }), 'down') , null);
   assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'Escape' }), 'down')?.handler, 'escape');
   assert.equal(helpEntries(SHORTCUTS, false).some((row) => row.id === 'tool-text'), true);
+  assert.equal(helpEntries(SHORTCUTS, false).find((row) => row.id === 'tool-polygon')?.toolLabel, '多边形');
+  assert.equal(helpEntries(SHORTCUTS, false).find((row) => row.id === 'tool-star')?.chords[0], 'K');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'n' }), 'down')?.tool, 'polygon');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'k' }), 'down')?.tool, 'star');
+  assert.equal(matchShortcut(SHORTCUTS, keyEvent({ key: 'n', ctrlKey: true }), 'down'), null);
   assert.equal(helpEntries(SHORTCUTS, false).find((row) => row.id === 'text-commit')?.toolLabel, '文本');
 });
 

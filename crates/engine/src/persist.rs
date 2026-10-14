@@ -6,7 +6,7 @@
 //! Scene ── to_json ──▶ { version, next_id, assets[], elements[], guides[] }
 //!                          │  type + data          │ data URL，同一张图只写一次
 //!                          ▼                       ▼
-//!                     rectangle / circle / image / line / path / text / group
+//!                     rectangle / circle / polygon / image / line / path / text / group
 //! Scene ◀─ from_json ── 缺省字段用 serde default，未知字段忽略
 //! ```
 //!
@@ -14,7 +14,7 @@
 //! `#[serde(default)]`。新增元素种类时扩展解码分支；未知种类会报错，避免静默丢数据。
 
 use crate::asset::{AssetError, AssetRecord, AssetTable};
-use crate::element::{Circle, Element, Image, Rectangle, Text};
+use crate::element::{Circle, Element, Image, Polygon, PolygonKind, Rectangle, Text};
 use crate::guides::{GuideStore, ManualGuide};
 use crate::scene::{AnyElement, Scene};
 use crate::snap::GuideAxis;
@@ -265,6 +265,7 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
         "circle" => serde_json::from_value(data)
             .map(AnyElement::Circle)
             .map_err(|err| PersistError::Json(err.to_string())),
+        "polygon" | "star" => decode_polygon(&raw.kind, data),
         "image" => {
             let mut image: Image =
                 serde_json::from_value(data).map_err(|err| PersistError::Json(err.to_string()))?;
@@ -288,6 +289,21 @@ fn decode_element(value: Value) -> Result<AnyElement, PersistError> {
             .map_err(|err| PersistError::Json(err.to_string())),
         other => Err(PersistError::UnknownElementType(other.to_string())),
     }
+}
+
+/// `polygon` 按数据里的 `kind` 读。`star` 强制为星形；缺省边数时用 5 而不是 6。
+fn decode_polygon(kind: &str, data: Value) -> Result<AnyElement, PersistError> {
+    let sides_missing = data.get("sides").is_none() && data.get("points").is_none();
+    let mut polygon: Polygon =
+        serde_json::from_value(data).map_err(|err| PersistError::Json(err.to_string()))?;
+    polygon.normalize();
+    if kind == "star" {
+        polygon.set_kind(PolygonKind::Star);
+        if sides_missing {
+            polygon.set_sides(crate::element::polygon::DEFAULT_STAR_POINTS);
+        }
+    }
+    Ok(AnyElement::Polygon(polygon))
 }
 
 /// 把当前视口栅格化成 RGBA PNG
@@ -490,6 +506,9 @@ fn paint_bounds(element: &AnyElement) -> Rect {
         AnyElement::Circle(circle) => {
             circle.style.stroke_width.abs() * scale_extent(&circle.props.transform)
         }
+        AnyElement::Polygon(polygon) => {
+            polygon.style.stroke_width.abs() * scale_extent(&polygon.props.transform)
+        }
         AnyElement::Line(_)
         | AnyElement::Path(_)
         | AnyElement::Image(_)
@@ -538,6 +557,7 @@ fn sample_element(scene: &Scene, element: &AnyElement, world: Vec2) -> Option<Co
     match element {
         AnyElement::Rectangle(rect) => sample_rectangle(rect, world),
         AnyElement::Circle(circle) => sample_circle(circle, world),
+        AnyElement::Polygon(polygon) => sample_polygon(polygon, world),
         AnyElement::Image(image) => sample_image(scene, image, world),
         AnyElement::Line(line) => line.color_at(world),
         AnyElement::Path(path) => path.color_at(world),
@@ -592,6 +612,14 @@ fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
         }
     }
     None
+}
+
+fn sample_polygon(polygon: &Polygon, world: Vec2) -> Option<Color> {
+    if !polygon.props.visible {
+        return None;
+    }
+    let local = try_local(&polygon.props.transform, world)?;
+    polygon.sample_local(local)
 }
 
 fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
@@ -715,7 +743,8 @@ mod tests {
         PersistError, IMAGE_PNG_PLACEHOLDER, MAX_PNG_DIMENSION, SCENE_FORMAT_VERSION,
     };
     use crate::element::{
-        Circle, Element, ElementStyle, Image, Line, Path, Rectangle, Text, TextAlign,
+        Circle, Element, ElementStyle, Image, Line, Path, Polygon, PolygonKind, Rectangle, Text,
+        TextAlign,
     };
     use crate::snap::GuideAxis;
     use crate::{AnyElement, Scene, Viewport};
@@ -1205,6 +1234,84 @@ mod tests {
             255,
         ];
         assert_pixel(sample_pixel(&scene, Vec2::new(5.0, 5.0)), placeholder);
+    }
+
+    #[test]
+    fn polygon_and_star_round_trip_and_old_documents_stay_valid() {
+        let mut scene = Scene::new();
+        let star_id = scene.next_id();
+        let mut star = Polygon::star(star_id, Vec2::new(4.0, 5.0), 30.0).with_inner_radius(0.25);
+        star.set_sides(7);
+        star.set_rotation(0.2);
+        scene.add_polygon(star);
+        let hex_id = scene.next_id();
+        scene.add_polygon(Polygon::hexagon(hex_id, Vec2::new(-8.0, 1.0), 12.0));
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"type\":\"polygon\""));
+        assert!(json.contains("\"kind\":\"star\""));
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(restored, scene);
+        match restored.get(1).unwrap() {
+            AnyElement::Polygon(shape) => {
+                assert_eq!(shape.kind(), PolygonKind::Star);
+                assert_eq!(shape.sides(), 7);
+                assert_eq!(shape.inner_radius(), 0.25);
+            }
+            other => panic!("expected star, got {other:?}"),
+        }
+
+        let size = serde_json::to_value(Vec2::new(4.0, 2.0)).unwrap();
+        let legacy = json!({
+            "version": 1,
+            "elements": [
+                {
+                    "type": "rectangle",
+                    "data": {
+                        "props": { "id": 1 },
+                        "size": size
+                    }
+                },
+                {
+                    "type": "polygon",
+                    "data": { "props": { "id": 2 }, "radius": 10.0, "sides": 100 }
+                },
+                {
+                    "type": "star",
+                    "data": { "props": { "id": 3 }, "radius": 8.0 }
+                }
+            ]
+        });
+        let old = Scene::from_json(&legacy.to_string()).unwrap();
+        match old.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => assert_eq!(rect.corner_radius(), 0.0),
+            other => panic!("expected rectangle, got {other:?}"),
+        }
+        match old.get(2).unwrap() {
+            AnyElement::Polygon(shape) => {
+                assert_eq!(shape.kind(), PolygonKind::Polygon);
+                assert_eq!(shape.sides(), 64);
+            }
+            other => panic!("expected polygon, got {other:?}"),
+        }
+        match old.get(3).unwrap() {
+            AnyElement::Polygon(shape) => {
+                assert_eq!(shape.kind(), PolygonKind::Star);
+                assert_eq!(shape.sides(), 5);
+                assert_eq!(shape.inner_radius(), 0.5);
+            }
+            other => panic!("expected star, got {other:?}"),
+        }
+
+        let mut painted = Scene::new();
+        painted.add_polygon(
+            Polygon::hexagon(1, Vec2::ZERO, 10.0).with_style(ElementStyle::fill_only(Color::RED)),
+        );
+        assert_pixel(sample_pixel(&painted, Vec2::ZERO), [255, 0, 0, 255]);
+        assert_pixel(sample_pixel(&painted, Vec2::new(9.5, 0.0)), [0, 0, 0, 0]);
+        assert_pixel(
+            sample_pixel(&painted, Vec2::new(5.0, 0.0)),
+            [255, 0, 0, 255],
+        );
     }
 
     #[test]

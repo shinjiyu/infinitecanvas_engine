@@ -175,7 +175,9 @@ fn editable_leaves(scene: &Scene, selected_ids: &[ElementId]) -> Vec<ElementId> 
 
 fn paint_from_snapshot(id: ElementId, snapshot: &StyleSnapshot) -> SampledPaint {
     match snapshot {
-        StyleSnapshot::Shape(style) | StyleSnapshot::Rectangle { style, .. } => SampledPaint {
+        StyleSnapshot::Shape(style)
+        | StyleSnapshot::Rectangle { style, .. }
+        | StyleSnapshot::Polygon { style, .. } => SampledPaint {
             id,
             fill: style.fill,
             stroke: style.stroke,
@@ -196,13 +198,17 @@ fn paint_from_snapshot(id: ElementId, snapshot: &StyleSnapshot) -> SampledPaint 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::{ElementStyle, Image, Rectangle, Text};
+    use crate::element::{ElementStyle, Image, Polygon, PolygonKind, Rectangle, Text};
     use crate::style::{capture_style, StyleSnapshot};
     use infinitecanvas_math::Color;
 
     fn shape_style(scene: &Scene, id: ElementId) -> ElementStyle {
         match capture_style(scene, id) {
-            Some(StyleSnapshot::Shape(style) | StyleSnapshot::Rectangle { style, .. }) => style,
+            Some(
+                StyleSnapshot::Shape(style)
+                | StyleSnapshot::Rectangle { style, .. }
+                | StyleSnapshot::Polygon { style, .. },
+            ) => style,
             other => panic!("shape {id}, got {other:?}"),
         }
     }
@@ -306,6 +312,32 @@ mod tests {
         assert_eq!(sample.id, 2);
         assert_eq!(sample.fill, None);
         assert_eq!(sample.stroke, None);
+    }
+
+    #[test]
+    fn polygon_and_star_sample_fill_and_stroke_without_changing_sides() {
+        let mut scene = Scene::new();
+        let mut style = ElementStyle::fill_only(Color::RED);
+        style.stroke = Some(Color::BLUE);
+        scene.add_polygon(Polygon::star(1, Vec2::ZERO, 20.0).with_style(style));
+
+        let sample = sample_paint_at(&scene, Vec2::ZERO).unwrap();
+        assert_eq!(sample.id, 1);
+        assert_eq!(sample.fill, Some(Color::RED));
+        assert_eq!(sample.stroke, Some(Color::BLUE));
+
+        scene.add_rect(rect(2, Vec2::new(80.0, 0.0), Color::GREEN, None, 1));
+        let mut history = CommandHistory::new();
+        assert!(apply_sampled_paint(&mut history, &mut scene, &[2], &sample));
+        assert_eq!(shape_style(&scene, 2).fill, Some(Color::RED));
+        assert_eq!(shape_style(&scene, 2).stroke, Some(Color::BLUE));
+        match capture_style(&scene, 1) {
+            Some(StyleSnapshot::Polygon { sides, kind, .. }) => {
+                assert_eq!(sides, 5);
+                assert_eq!(kind, PolygonKind::Star);
+            }
+            other => panic!("star, got {other:?}"),
+        }
     }
 
     #[test]

@@ -34,6 +34,7 @@ impl InfiniteCanvas {
     /// - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
     ///   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
     /// - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
+    /// - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -56,6 +57,10 @@ impl InfiniteCanvas {
         write_number(&obj, "opacity", &style.opacity);
         write_number(&obj, "fontSize", &style.font_size);
         write_number(&obj, "cornerRadius", &style.corner_radius);
+        write_number(&obj, "sides", &style.sides);
+        write_number(&obj, "innerRadius", &style.inner_radius);
+        js_set(&obj, "hasPolygon", JsValue::from(style.has_polygon));
+        js_set(&obj, "hasStar", JsValue::from(style.has_star));
         write_color(&obj, "textColor", &style.text_color);
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
@@ -66,7 +71,9 @@ impl InfiniteCanvas {
     /// 把补丁写进当前选择并记一条撤销记录。
     ///
     /// 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
-    /// `strokeWidth`、`opacity`、`fontSize`、`cornerRadius` 是数字。`cornerRadius` 也可以写成 `corner_radius`。
+    /// `strokeWidth`、`opacity`、`fontSize`、`cornerRadius`、`sides`、`innerRadius` 是数字。
+    /// `cornerRadius` 也可以写成 `corner_radius`。`sides` 也可以写成 `points`，并钳到 3–64。
+    /// `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
     /// `textColor` 是十六进制颜色。圆角只写到矩形上。
     /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` 是小写名字。
     /// 线型和线帽线结只改形状，文本描边保持原来的光栅描边。
@@ -387,7 +394,21 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         stroke_cap: read_label(value, "strokeCap", StrokeCap::parse),
         stroke_join: read_label(value, "strokeJoin", StrokeJoin::parse),
         corner_radius: read_f32(value, "cornerRadius").or_else(|| read_f32(value, "corner_radius")),
+        sides: read_sides(value),
+        inner_radius: read_f32(value, "innerRadius").or_else(|| read_f32(value, "inner_radius")),
     })
+}
+
+fn read_sides(value: &JsValue) -> Option<u32> {
+    let number = read_f32(value, "sides").or_else(|| read_f32(value, "points"))?;
+    if !number.is_finite() {
+        return None;
+    }
+    let rounded = number.round();
+    if rounded < 0.0 || rounded > u32::MAX as f32 {
+        return None;
+    }
+    Some(rounded as u32)
 }
 
 fn read_dash(value: &JsValue, key: &str) -> Option<Vec<f32>> {
