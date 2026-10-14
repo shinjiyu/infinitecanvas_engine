@@ -3,6 +3,7 @@
  *
  * 把选择、直线、画笔、压力测试和纹理上传放在同一张画布上。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
+ * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  *
  * @example
  * ```html
@@ -12,6 +13,7 @@
 
 import init, { InfiniteCanvas as WasmCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
 import wasmUrl from '../packages/core/wasm/infinitecanvas_wasm_bg.wasm?url';
+import { attachLayerPanel } from './layer-panel.js';
 import { rasterizeText } from './text-raster.js';
 
 const TEXTURE_ID = 'landing-badge';
@@ -33,6 +35,8 @@ let autosaveTimer = 0;
 /** @type {{ id: bigint | number, node: HTMLTextAreaElement } | null} */
 let textEditor = null;
 let textEditorOpening = false;
+/** @type {ReturnType<typeof attachLayerPanel> | null} */
+let layerPanel = null;
 
 /**
  * 浏览器没有可用的 WebGPU 时抛出，用来展示友好提示而不是原始异常。
@@ -212,8 +216,9 @@ function loadSample(engine, canvas) {
   engine.clear_scene();
   const w = canvas.width;
   const h = canvas.height;
-  engine.add_rectangle(w * 0.32, h * 0.38, 200, 130, '#4090f2', '#d6e6ff', 2);
-  engine.add_rectangle(w * 0.52, h * 0.58, 150, 96, '#f2c94c', null, 0);
+  const blue = engine.add_rectangle(w * 0.32, h * 0.38, 200, 130, '#4090f2', '#d6e6ff', 2);
+  const gold = engine.add_rectangle(w * 0.52, h * 0.58, 150, 96, '#f2c94c', null, 0);
+  engine.group_elements([blue, gold]);
   engine.add_circle(w * 0.66, h * 0.34, 58, '#36d399', '#0f5c40', 3);
   engine.add_circle(w * 0.76, h * 0.66, 40, '#f24040', null, 0);
   engine.add_rectangle(w * 0.22, h * 0.7, 90, 70, '#9b59b6', null, 0);
@@ -661,6 +666,7 @@ function updateHud(engine) {
   if (redoBtn) redoBtn.disabled = !engine.can_redo();
   syncSnapControls(engine);
   drawAlignmentGuides(engine);
+  layerPanel?.sync();
 }
 
 /**
@@ -905,6 +911,12 @@ async function main() {
     await init(wasmUrl);
     wasm = new WasmCanvas();
     await wasm.init(canvasEl);
+    layerPanel = attachLayerPanel(wasm, {
+      onEdit() {
+        scheduleAutosave(wasm);
+      },
+      setStatus,
+    });
     bindInput(canvasEl, wasm);
     try {
       if (restoreLocal(wasm)) {

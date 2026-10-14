@@ -153,7 +153,7 @@ impl AnyElement {
 pub struct Scene {
     elements: HashMap<ElementId, AnyElement>,
     next_id: ElementId,
-    /// 增删元素时递增。顶点缓存据此整表重排，而不是每帧排序。
+    /// 增删元素或大纲重排（绘制顺序变化）时递增。顶点缓存据此整表重排，而不是每帧排序。
     ///
     /// 不参与 [`PartialEq`]，也不写入 JSON。
     structure_epoch: u64,
@@ -165,6 +165,31 @@ pub struct Scene {
     ///
     /// 不参与 [`PartialEq`]，也不写入 JSON。
     selection_epoch: u64,
+}
+
+/// 重排前的父子关系、组内顺序和 `z_index`。
+///
+/// [`crate::ReorderOutlineCommand`] 用它撤销。世界变换不在这份快照里。
+#[derive(Debug, Clone)]
+pub struct OutlineSnapshot {
+    nodes: Vec<OutlineNode>,
+}
+
+#[derive(Debug, Clone)]
+struct OutlineNode {
+    id: ElementId,
+    parent: Option<ElementId>,
+    z_index: i32,
+    children: Option<Vec<ElementId>>,
+}
+
+struct OutlinePlan {
+    id: ElementId,
+    new_parent: Option<ElementId>,
+    source_children: Option<(ElementId, Vec<ElementId>)>,
+    dest_children: Option<(ElementId, Vec<ElementId>)>,
+    root_order: Vec<ElementId>,
+    refresh: Vec<ElementId>,
 }
 
 impl PartialEq for Scene {
@@ -425,13 +450,15 @@ impl Scene {
 
     /// 查找指定位置的元素（从上到下）
     ///
-    /// 组本身不接点击。祖先被隐藏的元素也不会被点中。
+    /// 组本身不接点击。祖先被隐藏或锁定的元素也不会被点中。
     pub fn find_at(&self, point: Vec2) -> Option<ElementId> {
         let mut elements = self.elements_sorted();
         elements.reverse(); // 从顶层开始查找
 
         for element in elements {
-            if !self.is_effectively_visible(element.id()) {
+            if !self.is_effectively_visible(element.id())
+                || self.is_effectively_locked(element.id())
+            {
                 continue;
             }
             if element.as_element().contains_point(point) {
@@ -752,6 +779,13 @@ impl Scene {
         true
     }
 
+    /// 自己或任一祖先被锁定时返回 true。
+    ///
+    /// 命中测试、框选和拖动都用它。元素不在场景里时返回 false。
+    pub fn is_effectively_locked(&self, id: ElementId) -> bool {
+        self.lock_blocker(id).is_some()
+    }
+
     /// 设置可见性。隐藏组不会改子元素自己的标志，但命中和绘制会把子孙一并跳过。
     ///
     /// 子树会被标脏，这样隐藏或重新显示后顶点缓存会丢掉或写回子孙的三角形。
@@ -794,6 +828,244 @@ impl Scene {
             .filter_map(|id| self.build_tree_node(id, &mut visiting))
             .collect();
         SceneTree { roots: nodes }
+    }
+
+    /// 把元素挪到大纲中的新位置。
+    ///
+    /// `new_parent` 为 `None` 时挂到根上。`index` 是从原位置摘下之后、在目标兄弟列表里的下标，
+    /// `0` 为最底层（先绘制）。成功后按深度优先重写全部 `z_index`（越靠后的兄弟越大），
+    /// 并推进 [`Scene::structure_epoch`]，顶点缓存下一帧按新顺序重排。世界坐标不变。
+    ///
+    /// # 返回
+    /// `Ok(None)` 表示位置没有变化。`Ok(Some(groups))` 是子元素集合变了、需要重算包围盒的组。
+    ///
+    /// # 错误
+    /// 元素不存在、目标不是组、会成环，或元素 / 目标组已锁定。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{Rectangle, Scene};
+    /// use infinitecanvas_math::Vec2;
+    ///
+    /// let mut scene = Scene::new();
+    /// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+    /// scene.add_rect(Rectangle::new(2, Vec2::new(30.0, 0.0), Vec2::new(10.0, 10.0)));
+    /// scene.move_in_outline(1, None, 1).unwrap();
+    /// let order: Vec<_> = scene
+    ///     .elements_sorted()
+    ///     .into_iter()
+    ///     .map(|element| element.id())
+    ///     .collect();
+    /// assert_eq!(order, vec![2, 1]);
+    /// ```
+    pub fn move_in_outline(
+        &mut self,
+        id: ElementId,
+        new_parent: Option<ElementId>,
+        index: usize,
+    ) -> Result<Option<Vec<ElementId>>, GroupError> {
+        let Some(plan) = self.plan_outline_move(id, new_parent, index)? else {
+            return Ok(None);
+        };
+        let refresh = plan.refresh.clone();
+        self.apply_outline_plan(plan);
+        Ok(Some(refresh))
+    }
+
+    /// 记下当前大纲，供撤销时原样写回。
+    pub fn outline_snapshot(&self) -> OutlineSnapshot {
+        let mut ids: Vec<ElementId> = self.elements.keys().copied().collect();
+        ids.sort_unstable();
+        let nodes = ids
+            .into_iter()
+            .filter_map(|id| {
+                let element = self.elements.get(&id)?;
+                let parent = element.as_element().props().parent;
+                let z_index = element.as_element().props().z_index;
+                let children = element.as_group().map(|group| group.children.clone());
+                Some(OutlineNode {
+                    id,
+                    parent,
+                    z_index,
+                    children,
+                })
+            })
+            .collect();
+        OutlineSnapshot { nodes }
+    }
+
+    /// 写回 [`Scene::outline_snapshot`] 的父子关系和 `z_index`。
+    ///
+    /// `refresh` 里的组会按当前子元素重算包围盒。结构版本前进，绘制顺序回到快照。
+    pub fn restore_outline(&mut self, snapshot: &OutlineSnapshot, refresh: &[ElementId]) {
+        for node in &snapshot.nodes {
+            if let Some(element) = self.elements.get_mut(&node.id) {
+                let props = element.as_element_mut().props_mut();
+                props.parent = node.parent;
+                props.z_index = node.z_index;
+            }
+            if let Some(children) = &node.children {
+                self.set_group_children(node.id, children.clone());
+            }
+        }
+        if !refresh.is_empty() {
+            for group_id in refresh {
+                if self.elements.contains_key(group_id) {
+                    self.refresh_bounds_upwards(*group_id);
+                }
+            }
+            self.bump_selection_epoch();
+        }
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+    }
+
+    fn plan_outline_move(
+        &self,
+        id: ElementId,
+        new_parent: Option<ElementId>,
+        index: usize,
+    ) -> Result<Option<OutlinePlan>, GroupError> {
+        self.ensure_editable(id)?;
+        if let Some(parent_id) = new_parent {
+            if parent_id == id || self.is_ancestor(id, parent_id) {
+                return Err(GroupError::WouldCycle);
+            }
+            self.group_children(parent_id)?;
+            self.ensure_editable(parent_id)?;
+        }
+
+        let old_parent = self.parent_id(id);
+        let old_siblings = self.sibling_ids(old_parent)?;
+        let Some(old_index) = old_siblings.iter().position(|sibling| *sibling == id) else {
+            return Err(GroupError::UnknownElement(id));
+        };
+
+        let mut dest = if old_parent == new_parent {
+            old_siblings.clone()
+        } else {
+            self.sibling_ids(new_parent)?
+        };
+        if old_parent == new_parent {
+            dest.remove(old_index);
+        }
+        let clamped = index.min(dest.len());
+        if old_parent == new_parent && clamped == old_index {
+            return Ok(None);
+        }
+        dest.insert(clamped, id);
+
+        let mut refresh = Vec::new();
+        if old_parent != new_parent {
+            if let Some(parent_id) = old_parent {
+                refresh.push(parent_id);
+            }
+            if let Some(parent_id) = new_parent {
+                refresh.push(parent_id);
+            }
+        }
+
+        let root_order = if new_parent.is_none() {
+            dest.clone()
+        } else if old_parent.is_none() {
+            let mut roots = old_siblings.clone();
+            roots.retain(|root_id| *root_id != id);
+            roots
+        } else {
+            self.root_ids_back_to_front()
+        };
+        let source_children = if old_parent == new_parent {
+            None
+        } else {
+            old_parent.map(|parent_id| {
+                let mut children = old_siblings;
+                children.retain(|child| *child != id);
+                (parent_id, children)
+            })
+        };
+        let dest_children = new_parent.map(|parent_id| (parent_id, dest));
+        Ok(Some(OutlinePlan {
+            id,
+            new_parent,
+            source_children,
+            dest_children,
+            root_order,
+            refresh,
+        }))
+    }
+
+    fn apply_outline_plan(&mut self, plan: OutlinePlan) {
+        if let Some((group_id, children)) = plan.source_children {
+            self.set_group_children(group_id, children);
+        }
+        if let Some((group_id, children)) = plan.dest_children {
+            self.set_group_children(group_id, children);
+        }
+        self.set_parent(plan.id, plan.new_parent);
+        self.assign_z_order(&plan.root_order);
+        if !plan.refresh.is_empty() {
+            for group_id in &plan.refresh {
+                self.refresh_bounds_upwards(*group_id);
+            }
+            self.bump_selection_epoch();
+        }
+        self.structure_epoch = self.structure_epoch.wrapping_add(1);
+    }
+
+    fn sibling_ids(&self, parent: Option<ElementId>) -> Result<Vec<ElementId>, GroupError> {
+        match parent {
+            Some(parent_id) => self.group_children(parent_id),
+            None => Ok(self.root_ids_back_to_front()),
+        }
+    }
+
+    fn root_ids_back_to_front(&self) -> Vec<ElementId> {
+        let mut roots: Vec<ElementId> = self
+            .elements
+            .keys()
+            .copied()
+            .filter(|id| self.parent_id(*id).is_none())
+            .collect();
+        roots.sort_by_key(|id| {
+            let z_index = self
+                .elements
+                .get(id)
+                .map(|element| element.as_element().props().z_index)
+                .unwrap_or(0);
+            (z_index, *id)
+        });
+        roots
+    }
+
+    fn set_group_children(&mut self, group_id: ElementId, children: Vec<ElementId>) {
+        if let Some(group) = self
+            .elements
+            .get_mut(&group_id)
+            .and_then(AnyElement::as_group_mut)
+        {
+            group.children = children;
+        }
+    }
+
+    fn assign_z_order(&mut self, root_order: &[ElementId]) {
+        let mut z_index = 0i32;
+        let mut visiting = HashSet::new();
+        for id in root_order {
+            self.write_z_dfs(*id, &mut z_index, &mut visiting);
+        }
+    }
+
+    fn write_z_dfs(&mut self, id: ElementId, z_index: &mut i32, visiting: &mut HashSet<ElementId>) {
+        if !visiting.insert(id) {
+            return;
+        }
+        if let Some(element) = self.elements.get_mut(&id) {
+            element.as_element_mut().props_mut().z_index = *z_index;
+        }
+        *z_index = z_index.saturating_add(1);
+        let children = self.group_child_ids(id);
+        for child_id in children {
+            self.write_z_dfs(child_id, z_index, visiting);
+        }
     }
 
     fn normalize_members(&self, ids: &[ElementId]) -> Result<Vec<ElementId>, GroupError> {
@@ -1535,5 +1807,130 @@ mod tests {
             scene.enter_group(other, group_id),
             Err(GroupError::WouldCycle)
         ));
+    }
+
+    fn paint_order(scene: &Scene) -> Vec<ElementId> {
+        let mut ids: Vec<ElementId> = scene.iter().map(|element| element.id()).collect();
+        ids.sort_by_key(|id| {
+            let z_index = scene.get(*id).unwrap().as_element().props().z_index;
+            (z_index, *id)
+        });
+        ids
+    }
+
+    #[test]
+    fn reorder_siblings_changes_paint_order_without_moving_them() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(10.0, 0.0)));
+        scene.add_rect(rect(3, Vec2::new(20.0, 0.0)));
+        assert_eq!(paint_order(&scene), vec![1, 2, 3]);
+        let epoch = scene.structure_epoch();
+
+        assert!(scene.move_in_outline(1, None, 0).unwrap().is_none());
+        assert_eq!(scene.structure_epoch(), epoch);
+
+        scene.move_in_outline(1, None, 2).unwrap().unwrap();
+        assert_eq!(paint_order(&scene), vec![2, 3, 1]);
+        assert!(scene.structure_epoch() > epoch);
+        approx(translation(&scene, 1), Vec2::ZERO);
+    }
+
+    #[test]
+    fn reparent_into_and_out_of_group_keeps_world_position() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(40.0, 0.0)));
+        scene.add_rect(rect(3, Vec2::new(80.0, 10.0)));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let group_at = translation(&scene, group_id);
+
+        scene
+            .move_in_outline(3, Some(group_id), 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(scene.parent_of(3), Some(group_id));
+        assert_eq!(scene.children_of(group_id), vec![3, 1, 2]);
+        approx(translation(&scene, 3), Vec2::new(80.0, 10.0));
+        assert_eq!(paint_order(&scene).last().copied(), Some(2));
+
+        scene.move_in_outline(3, None, 0).unwrap().unwrap();
+        assert!(scene.parent_of(3).is_none());
+        assert_eq!(scene.children_of(group_id), vec![1, 2]);
+        approx(translation(&scene, 3), Vec2::new(80.0, 10.0));
+        approx(translation(&scene, group_id), group_at);
+        assert_eq!(paint_order(&scene).first().copied(), Some(3));
+    }
+
+    #[test]
+    fn move_in_outline_rejects_cycles_and_locks() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(20.0, 0.0)));
+        scene.add_rect(rect(3, Vec2::new(60.0, 0.0)));
+        let inner = scene.group(&[1, 2]).unwrap();
+        let outer = scene.group(&[inner, 3]).unwrap();
+        assert!(matches!(
+            scene.move_in_outline(outer, Some(inner), 0),
+            Err(GroupError::WouldCycle)
+        ));
+        scene.set_locked(outer, true);
+        assert!(matches!(
+            scene.move_in_outline(3, None, 0),
+            Err(GroupError::Locked(_))
+        ));
+        assert!(matches!(
+            scene.move_in_outline(1, Some(outer), 0),
+            Err(GroupError::Locked(_))
+        ));
+    }
+
+    #[test]
+    fn hidden_and_locked_elements_are_not_pickable() {
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO));
+        scene.add_rect(rect(2, Vec2::new(40.0, 0.0)));
+        assert!(!scene.set_visible(99, false));
+        scene.set_visible(1, false);
+        assert!(scene.find_at(Vec2::ZERO).is_none());
+        assert!(!scene.get(1).unwrap().as_element().props().visible);
+
+        scene.set_visible(1, true);
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene.set_visible(group_id, false);
+        assert!(scene.get(1).unwrap().as_element().props().visible);
+        assert!(!scene.is_effectively_visible(1));
+        assert!(scene.find_at(Vec2::ZERO).is_none());
+
+        scene.set_visible(group_id, true);
+        scene.set_locked(1, true);
+        assert!(scene.is_effectively_locked(1));
+        assert!(scene.find_at(Vec2::ZERO).is_none());
+        scene.set_locked(1, false);
+        scene.set_locked(group_id, true);
+        assert!(scene.is_effectively_locked(2));
+        assert!(scene.find_at(Vec2::new(40.0, 0.0)).is_none());
+        assert!(!scene.get(2).unwrap().as_element().props().locked);
+    }
+
+    #[test]
+    fn scene_tree_for_ten_thousand_elements_stays_responsive() {
+        let mut scene = Scene::new();
+        for index in 0..10_000 {
+            scene.add_rect(Rectangle::new(
+                index + 1,
+                Vec2::new((index % 200) as f32, (index / 200) as f32),
+                Vec2::new(1.0, 1.0),
+            ));
+        }
+        let started = std::time::Instant::now();
+        let tree = scene.scene_tree();
+        let elapsed = started.elapsed();
+        assert_eq!(tree.roots.len(), 10_000);
+        assert!(
+            elapsed.as_millis() < 2_000,
+            "scene_tree 10k took {elapsed:?}"
+        );
+        eprintln!("scene_tree 10k: {elapsed:?}");
     }
 }

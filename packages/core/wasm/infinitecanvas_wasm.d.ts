@@ -340,6 +340,10 @@ export class InfiniteCanvas {
      */
     get_state(): any;
     /**
+     * 场景结构版本。增删元素或大纲重排后变化，图层面板用它决定是否重读场景树。
+     */
+    get_structure_epoch(): bigint;
+    /**
      * 查询文本在屏幕上的位置，编辑框跟着平移和缩放移动。
      */
     get_text_editor_metrics(id: bigint): any;
@@ -488,9 +492,27 @@ export class InfiniteCanvas {
      * - `Err(JsValue)`: 渲染失败（渲染器未初始化）
      */
     render(): void;
+    /**
+     * 把元素移到大纲中的新位置，并记入撤销栈。
+     *
+     * 同一父节点下改变绘制顺序，或移入 / 移出组。世界坐标不变。
+     * `parent_id` 为 `0` 时挂到根上（元素 ID 从 1 开始）。`index` 是摘下该元素之后
+     * 在目标兄弟列表中的下标，`0` 为最底层。
+     *
+     * 锁定、成环或目标不是组时返回 `false`，不入栈。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.reorder_element(id, groupId, 0);
+     * canvas.undo();
+     * ```
+     */
+    reorder_element(id: bigint, parent_id: bigint, index: number): boolean;
     select_element(element_id: bigint, additive: boolean): boolean;
     /**
      * 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+     *
+     * 锁定时会取消选中该元素和它的子孙，画布上不能再点选或拖动它们。
      */
     set_element_locked(id: bigint, locked: boolean): boolean;
     /**
@@ -648,6 +670,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_selection_count: (a: number) => number;
     readonly infinitecanvas_get_snap_threshold: (a: number) => number;
     readonly infinitecanvas_get_state: (a: number) => any;
+    readonly infinitecanvas_get_structure_epoch: (a: number) => bigint;
     readonly infinitecanvas_get_text_editor_metrics: (a: number, b: bigint) => any;
     readonly infinitecanvas_get_tool_cursor: (a: number) => [number, number];
     readonly infinitecanvas_get_undo_count: (a: number) => number;
@@ -675,6 +698,7 @@ export interface InitOutput {
     readonly infinitecanvas_redo: (a: number) => number;
     readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_render: (a: number) => [number, number];
+    readonly infinitecanvas_reorder_element: (a: number, b: bigint, c: bigint, d: number) => number;
     readonly infinitecanvas_select_element: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_element_locked: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_element_visible: (a: number, b: bigint, c: number) => number;

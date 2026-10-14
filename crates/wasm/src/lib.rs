@@ -38,10 +38,10 @@ use infinitecanvas_engine::{
         cursor_for, transforms_differ, HandleGesture, HandleMetrics, SelectionFrame,
     },
     AddElementCommand, AnyElement, Circle, CommandHistory, Element, ElementId, ElementStyle, Event,
-    EventQueue, Image, Line, MoveCommand, Path, PointerButton, PointerEvent, Rectangle,
-    RemoveElementCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, Text, TextAlign,
-    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
-    UpdateTextCommand, Viewport,
+    EventQueue, Image, Line, MoveCommand, OutlineSnapshot, Path, PointerButton, PointerEvent,
+    Rectangle, RemoveElementCommand, ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox,
+    SelectionManager, Text, TextAlign, TextClickResolver, TextPlacement, Tool, ToolManager,
+    TransformElementsCommand, UpdateTextCommand, Viewport,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -1129,7 +1129,7 @@ impl InfiniteCanvas {
         let textures = self.snapshot_text_textures();
         self.pending_text_edit = None;
         self.scene = scene;
-        self.selection.sync_from_scene(&self.scene);
+        self.selection.sync_from_scene(&mut self.scene);
         self.selection_box.cancel();
         self.command_history.clear();
         self.drag_state = DragState::default();
@@ -1277,6 +1277,50 @@ impl InfiniteCanvas {
         }
     }
 
+    /// 把元素移到大纲中的新位置，并记入撤销栈。
+    ///
+    /// 同一父节点下改变绘制顺序，或移入 / 移出组。世界坐标不变。
+    /// `parent_id` 为 `0` 时挂到根上（元素 ID 从 1 开始）。`index` 是摘下该元素之后
+    /// 在目标兄弟列表中的下标，`0` 为最底层。
+    ///
+    /// 锁定、成环或目标不是组时返回 `false`，不入栈。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.reorder_element(id, groupId, 0);
+    /// canvas.undo();
+    /// ```
+    #[wasm_bindgen]
+    pub fn reorder_element(&mut self, id: u64, parent_id: u64, index: u32) -> bool {
+        let parent = if parent_id == 0 {
+            None
+        } else {
+            Some(parent_id)
+        };
+        let index = index as usize;
+        let before: OutlineSnapshot = self.scene.outline_snapshot();
+        match self.scene.move_in_outline(id, parent, index) {
+            Ok(Some(refresh)) => {
+                self.command_history
+                    .push_executed(Box::new(ReorderOutlineCommand::applied(
+                        id, parent, index, before, refresh,
+                    )));
+                true
+            }
+            Ok(None) => false,
+            Err(error) => {
+                log::warn!("reorder_element failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// 场景结构版本。增删元素或大纲重排后变化，图层面板用它决定是否重读场景树。
+    #[wasm_bindgen]
+    pub fn get_structure_epoch(&self) -> u64 {
+        self.scene.structure_epoch()
+    }
+
     /// 把元素移出当前组，挂回组的父节点或根。
     #[wasm_bindgen]
     pub fn leave_group(&mut self, element_id: u64) -> bool {
@@ -1302,9 +1346,17 @@ impl InfiniteCanvas {
     }
 
     /// 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+    ///
+    /// 锁定时会取消选中该元素和它的子孙，画布上不能再点选或拖动它们。
     #[wasm_bindgen]
     pub fn set_element_locked(&mut self, id: u64, locked: bool) -> bool {
-        self.scene.set_locked(id, locked)
+        let updated = self.scene.set_locked(id, locked);
+        if updated && locked {
+            for element_id in self.scene.subtree_ids(id) {
+                let _ = self.selection.deselect(&mut self.scene, element_id);
+            }
+        }
+        updated
     }
 
     /// 场景树。`roots` 里每个节点含 `id`、`elementType`、`parentId`、`visible`、`locked`、`zIndex`、`children`。
@@ -1691,6 +1743,7 @@ impl InfiniteCanvas {
             &HitTestOptions {
                 max_results: 1,
                 include_invisible: false,
+                include_locked: false,
             },
         );
         let Some(hit) = hits.first() else {
@@ -1990,6 +2043,7 @@ impl InfiniteCanvas {
         let options = HitTestOptions {
             max_results: 1,
             include_invisible: false,
+            include_locked: false,
         };
         let hits = hit_test_point(&self.scene, event.world_position, &options);
         let additive = event.modifiers.ctrl || event.modifiers.meta || event.modifiers.shift;
@@ -2336,6 +2390,7 @@ impl InfiniteCanvas {
             &HitTestOptions {
                 max_results: 8,
                 include_invisible: false,
+                include_locked: false,
             },
         )
         .into_iter()
@@ -2407,12 +2462,21 @@ impl InfiniteCanvas {
 
     /// 开始拖动
     fn start_drag(&mut self, pointer_id: i32, position: Vec2) {
+        let dragged_ids: Vec<ElementId> = self
+            .selection
+            .selected_ids()
+            .into_iter()
+            .filter(|id| !self.scene.is_effectively_locked(*id))
+            .collect();
+        if dragged_ids.is_empty() {
+            return;
+        }
         self.drag_state.is_dragging = true;
         self.drag_state.pointer_id = Some(pointer_id);
         self.drag_state.start_position = position;
         self.drag_state.last_position = position;
         self.drag_state.total_delta = Vec2::ZERO;
-        self.drag_state.dragged_ids = self.selection.selected_ids();
+        self.drag_state.dragged_ids = dragged_ids;
         self.drag_state.origin_bounds = self.dragged_origin_bounds();
         self.drag_state.guides.clear();
     }

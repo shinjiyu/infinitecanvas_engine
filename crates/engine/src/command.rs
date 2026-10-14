@@ -3,6 +3,7 @@
 //! 实现命令模式，支持撤销/重做功能
 
 use crate::element::{ElementId, TextVisual};
+use crate::scene::OutlineSnapshot;
 use crate::{math::Vec2, AnyElement, Scene};
 use std::collections::VecDeque;
 
@@ -203,6 +204,80 @@ impl Command for UpdateTextCommand {
     }
 }
 
+/// 调整大纲顺序：同一父节点下改绘制顺序，或移入 / 移出组。
+///
+/// 执行前会记下 [`OutlineSnapshot`]。撤销写回父指针、子元素顺序和 `z_index`，
+/// 世界坐标保持不动。拖拽已经落在场景里时用 [`ReorderOutlineCommand::applied`]，
+/// 再 [`CommandHistory::push_executed`]。
+#[derive(Debug)]
+pub struct ReorderOutlineCommand {
+    id: ElementId,
+    new_parent: Option<ElementId>,
+    index: usize,
+    before: Option<OutlineSnapshot>,
+    refresh: Vec<ElementId>,
+}
+
+impl ReorderOutlineCommand {
+    /// 创建一条尚未执行的重排命令。
+    ///
+    /// # 参数
+    /// - `id`: 被移动的元素
+    /// - `new_parent`: 新的父组。`None` 表示根
+    /// - `index`: 摘下之后在目标兄弟列表中的下标，`0` 为最底层
+    pub fn new(id: ElementId, new_parent: Option<ElementId>, index: usize) -> Self {
+        Self {
+            id,
+            new_parent,
+            index,
+            before: None,
+            refresh: Vec::new(),
+        }
+    }
+
+    /// 移动已经写入场景时，用移动前的快照入栈。
+    ///
+    /// # 参数
+    /// - `before`: [`Scene::outline_snapshot`] 在移动之前的结果
+    /// - `refresh`: [`Scene::move_in_outline`] 返回的、需要重算包围盒的组
+    pub fn applied(
+        id: ElementId,
+        new_parent: Option<ElementId>,
+        index: usize,
+        before: OutlineSnapshot,
+        refresh: Vec<ElementId>,
+    ) -> Self {
+        Self {
+            id,
+            new_parent,
+            index,
+            before: Some(before),
+            refresh,
+        }
+    }
+}
+
+impl Command for ReorderOutlineCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        if self.before.is_none() {
+            self.before = Some(scene.outline_snapshot());
+        }
+        if let Ok(Some(refresh)) = scene.move_in_outline(self.id, self.new_parent, self.index) {
+            self.refresh = refresh;
+        }
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        if let Some(before) = &self.before {
+            scene.restore_outline(before, &self.refresh);
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "ReorderOutline"
+    }
+}
+
 fn apply_text_visual(scene: &mut Scene, id: ElementId, visual: &TextVisual) {
     if let Some(AnyElement::Text(text)) = scene.get_mut(id) {
         let _ = text.apply_visual(visual);
@@ -380,5 +455,94 @@ mod tests {
         history.redo(&mut scene);
         assert!(history.can_undo());
         assert!(!history.can_redo());
+    }
+
+    fn paint_ids(scene: &Scene) -> Vec<ElementId> {
+        let mut ids: Vec<ElementId> = scene.iter().map(|element| element.id()).collect();
+        ids.sort_by_key(|id| {
+            let z_index = scene.get(*id).unwrap().as_element().props().z_index;
+            (z_index, *id)
+        });
+        ids
+    }
+
+    #[test]
+    fn reorder_command_undo_redo_restores_z_order() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(20.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.add_rect(Rectangle::new(
+            3,
+            Vec2::new(40.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let mut history = CommandHistory::new();
+        history.execute(Box::new(ReorderOutlineCommand::new(1, None, 2)), &mut scene);
+        assert_eq!(paint_ids(&scene), vec![2, 3, 1]);
+
+        assert!(history.undo(&mut scene));
+        assert_eq!(paint_ids(&scene), vec![1, 2, 3]);
+        assert!(history.redo(&mut scene));
+        assert_eq!(paint_ids(&scene), vec![2, 3, 1]);
+    }
+
+    #[test]
+    fn reparent_command_undo_restores_group_membership() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(30.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.add_rect(Rectangle::new(
+            3,
+            Vec2::new(70.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let before = scene.outline_snapshot();
+        let refresh = scene
+            .move_in_outline(3, Some(group_id), 2)
+            .unwrap()
+            .expect("child moved into the group");
+        let mut history = CommandHistory::new();
+        history.push_executed(Box::new(ReorderOutlineCommand::applied(
+            3,
+            Some(group_id),
+            2,
+            before,
+            refresh,
+        )));
+        assert_eq!(scene.parent_of(3), Some(group_id));
+        assert_eq!(scene.children_of(group_id), vec![1, 2, 3]);
+        let moved = scene
+            .get(3)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform
+            .translation;
+        assert_eq!(moved, Vec2::new(70.0, 0.0));
+
+        history.undo(&mut scene);
+        assert!(scene.parent_of(3).is_none());
+        assert_eq!(scene.children_of(group_id), vec![1, 2]);
+        assert_eq!(
+            scene
+                .get(3)
+                .unwrap()
+                .as_element()
+                .props()
+                .transform
+                .translation,
+            Vec2::new(70.0, 0.0)
+        );
+        history.redo(&mut scene);
+        assert_eq!(scene.children_of(group_id), vec![1, 2, 3]);
     }
 }

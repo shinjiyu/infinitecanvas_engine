@@ -623,6 +623,14 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 场景结构版本。增删元素或大纲重排后变化，图层面板用它决定是否重读场景树。
+     * @returns {bigint}
+     */
+    get_structure_epoch() {
+        const ret = wasm.infinitecanvas_get_structure_epoch(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
      * 查询文本在屏幕上的位置，编辑框跟着平移和缩放移动。
      * @param {bigint} id
      * @returns {any}
@@ -942,6 +950,29 @@ export class InfiniteCanvas {
         }
     }
     /**
+     * 把元素移到大纲中的新位置，并记入撤销栈。
+     *
+     * 同一父节点下改变绘制顺序，或移入 / 移出组。世界坐标不变。
+     * `parent_id` 为 `0` 时挂到根上（元素 ID 从 1 开始）。`index` 是摘下该元素之后
+     * 在目标兄弟列表中的下标，`0` 为最底层。
+     *
+     * 锁定、成环或目标不是组时返回 `false`，不入栈。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.reorder_element(id, groupId, 0);
+     * canvas.undo();
+     * ```
+     * @param {bigint} id
+     * @param {bigint} parent_id
+     * @param {number} index
+     * @returns {boolean}
+     */
+    reorder_element(id, parent_id, index) {
+        const ret = wasm.infinitecanvas_reorder_element(this.__wbg_ptr, id, parent_id, index);
+        return ret !== 0;
+    }
+    /**
      * @param {bigint} element_id
      * @param {boolean} additive
      * @returns {boolean}
@@ -952,6 +983,8 @@ export class InfiniteCanvas {
     }
     /**
      * 设置元素锁定。锁定后组和平移 API 会拒绝修改它以及它的子孙。
+     *
+     * 锁定时会取消选中该元素和它的子孙，画布上不能再点选或拖动它们。
      * @param {bigint} id
      * @param {boolean} locked
      * @returns {boolean}
@@ -2879,12 +2912,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2514, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2526, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 387, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 399, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_);
             return ret;
         },
