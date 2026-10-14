@@ -117,6 +117,7 @@ impl Scene {
             next_id,
             assets: asset_records_for(self, &elements),
             elements,
+            guides: Vec::new(),
         };
         serde_json::to_string(&file).map_err(|err| PersistError::Json(err.to_string()))
     }

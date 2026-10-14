@@ -26,6 +26,8 @@ helpEntries(SHORTCUTS) ──► #shortcut-help
 
 视图缩放也在这张表里：`Shift+1`（`zoomFit`）调用 `zoom_to_fit`，`fit_scene` 是同一个命令；`Shift+2`（`zoomSelection`）调用 `zoom_to_selection`；`Shift+0`（`zoom100`）调用 `set_zoom(1)`。`?` 帮助面板从同一张表列出这三行。工具栏的「适应全部」和「缩放到选中」走同样的两个函数。详见 [camera-fit.md](./camera-fit.md)。
 
+标尺和手动参考线（#56）也在这张表里：不带修饰键的 `G` 显示或隐藏标尺和参考线，按住不重复。`Ctrl/Cmd+G` 仍是成组，`Ctrl/Cmd+Shift+G` 仍是取消分组。吸附一组里的按钮调用同一个 `set_rulers_visible`。选中参考线时，键盘 Delete / Backspace 先删参考线，否则仍删除选中元素。右键菜单里的「删除」只删元素。
+
 ## 引擎补充
 
 删除、全选和缩放在页面里没有现成的一次调用，所以 WASM 增加了这些入口，场景逻辑仍在 engine 里：

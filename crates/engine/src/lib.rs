@@ -23,6 +23,7 @@ pub mod camera_fit;
 pub mod command;
 pub mod element;
 pub mod event;
+pub mod guides;
 pub mod hit_test;
 pub mod minimap;
 pub mod orient;
@@ -53,10 +54,10 @@ pub use camera_fit::{
 pub use command::{
     apply_nudge, apply_set_locked, apply_set_visibility, apply_stack_reorder, apply_toggle_locked,
     apply_toggle_visibility, AddElementCommand, Command, CommandHistory, DuplicateElementsCommand,
-    MoveCommand, NudgeDirection, NudgeElementsCommand, PasteElementsCommand, RemoveElementCommand,
-    RemoveElementsCommand, ReorderOutlineCommand, ReorderSelectionCommand, SetLockedCommand,
-    SetStyleCommand, SetVisibilityCommand, StackOrderAction, TransformElementsCommand,
-    UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
+    EditGuidesCommand, MoveCommand, NudgeDirection, NudgeElementsCommand, PasteElementsCommand,
+    RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand, ReorderSelectionCommand,
+    SetLockedCommand, SetStyleCommand, SetVisibilityCommand, StackOrderAction,
+    TransformElementsCommand, UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use element::{
     Circle, Element, ElementId, ElementProps, ElementStyle, Group, Image, Line, Path, Rectangle,
@@ -66,6 +67,11 @@ pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,
     WheelEvent,
 };
+pub use guides::{
+    edge_is_axis_aligned, handle_outward, resize_edge_correction, ruler_band, ruler_major_step,
+    ruler_ticks, GuideSnapshot, GuideStore, ManualGuide, RulerBand, RulerOrientation, RulerTick,
+    GUIDE_HIT_PX, RULER_THICKNESS_PX,
+};
 pub use hit_test::{hit_test_point, HitTestOptions, HitTestResult};
 pub use infinitecanvas_math as math;
 pub use minimap::{
@@ -74,7 +80,8 @@ pub use minimap::{
 };
 pub use orient::{apply_flip, apply_rotate_quarter, FlipAxis, OrientSelectionCommand, QuarterTurn};
 pub use persist::{
-    export_selection_png, export_viewport_png, PersistError, SceneFile, SCENE_FORMAT_VERSION,
+    export_selection_png, export_viewport_png, export_viewport_png_with_guides, PersistError,
+    SceneFile, SCENE_FORMAT_VERSION,
 };
 pub use quadtree::QuadTree;
 pub use scene::OutlineSnapshot;
@@ -83,14 +90,14 @@ pub use scene_tree::{SceneTree, SceneTreeNode};
 pub use selection::SelectionManager;
 pub use selection_box::SelectionBox;
 pub use snap::{
-    bounds_union, snap_bounds, snap_drag, AlignmentGuide, DragSnap, GuideAxis, SnapResult,
-    SnapSettings,
+    bounds_union, snap_bounds, snap_bounds_with_guides, snap_drag, snap_drag_with_guides,
+    AlignmentGuide, DragSnap, GuideAxis, GuideLines, SnapResult, SnapSettings,
 };
 pub use style::{
     apply_style_snapshot, capture_style, selection_style, style_locked, style_target_ids,
     SelectionStyle, StyleField, StylePatch, StyleSnapshot, TextPaint,
 };
-pub use svg::export_svg;
+pub use svg::{export_svg, export_svg_with_guides};
 pub use tool::{Tool, ToolManager};
 pub use vertex_cache::{
     rebuild_all_vertices, GpuVertexWrite, RebuiltGeometry, TexturedDraw, VertexBufferKind,

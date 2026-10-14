@@ -35,16 +35,23 @@ use infinitecanvas_engine::{
         DEFAULT_TEXT_CONTENT,
     },
     export_selection_png, export_svg, export_viewport_png,
+    guides::{
+        handle_outward, moving_edge, resize_edge_correction, ruler_band, ruler_ticks,
+        GuideSnapshot, RulerBand, RulerOrientation, GUIDE_HIT_PX, RULER_THICKNESS_PX,
+    },
     hit_test::{hit_test_point, HitTestOptions, HitTestResult},
     math::{Color, Rect, Transform, Vec2},
-    snap::{bounds_union, snap_drag, AlignmentGuide, DragSnap, SnapSettings},
+    snap::{
+        bounds_union, snap_drag_with_guides, AlignmentGuide, DragSnap, GuideAxis, GuideLines,
+        SnapSettings,
+    },
     transform_handles::{
-        cursor_for, selection_locks_image_aspect, transforms_differ, HandleGesture, HandleMetrics,
-        SelectionFrame,
+        cursor_for, selection_locks_image_aspect, transforms_differ, HandleGesture, HandleKind,
+        HandleMetrics, SelectionFrame,
     },
     zoom_viewport_to_scene, zoom_viewport_to_selection, AddElementCommand, AlignMode, AnyElement,
-    Circle, CommandHistory, DistributeAxis, DuplicateElementsCommand, Element, ElementId,
-    ElementStyle, Event, EventQueue, FlipAxis, Image, Line, MoveCommand, NudgeDirection,
+    Circle, CommandHistory, DistributeAxis, DuplicateElementsCommand, EditGuidesCommand, Element,
+    ElementId, ElementStyle, Event, EventQueue, FlipAxis, Image, Line, MoveCommand, NudgeDirection,
     OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent, QuarterTurn,
     Rectangle, RemoveElementCommand, RemoveElementsCommand, ReorderOutlineCommand, Scene,
     SceneTreeNode, SelectionBox, SelectionManager, StackOrderAction, Text, TextAlign,
@@ -98,6 +105,17 @@ struct DragState {
     pen_points: Vec<Vec2>,
     /// 绘制过程中的预览元素；抬笔后才进入撤销栈
     preview_id: Option<ElementId>,
+}
+
+/// 从标尺拖出或拖动一条手动参考线。松手后才进撤销栈。
+struct GuideGesture {
+    pointer_id: i32,
+    axis: GuideAxis,
+    /// 已经写进场景的参考线。还在标尺上的新建手势是 `None`。
+    id: Option<u64>,
+    /// 拖动已有参考线时的原始位置。从标尺新建时是 `None`。
+    origin: Option<f32>,
+    before: GuideSnapshot,
 }
 
 /// 缩放 / 旋转手柄的拖动。预览已经写进场景，松手后才进入撤销栈。
@@ -165,6 +183,12 @@ pub struct InfiniteCanvas {
     perf_stats: PerformanceStats,
     /// 拖拽吸附。默认开启，阈值是屏幕像素。
     snap: SnapSettings,
+    /// 标尺和手动参考线是否显示。隐藏后不命中、不吸附。
+    rulers_visible: bool,
+    /// 正在拖的参考线。
+    guide_gesture: Option<GuideGesture>,
+    /// 当前选中的参考线。和元素选择互斥。
+    selected_guide: Option<u64>,
     /// 属性面板拖动中的样式基线。松手后收成一条撤销记录。
     style_preview: Option<style_api::StylePreview>,
     /// 小地图缩略图。几何版本或尺寸变了才重算，平移缩放不扫描元素。
@@ -224,6 +248,9 @@ impl InfiniteCanvas {
             pending_text_edit: None,
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
+            rulers_visible: true,
+            guide_gesture: None,
+            selected_guide: None,
             style_preview: None,
             minimap_cache: None,
             gpu_image_assets: HashSet::new(),
@@ -753,6 +780,7 @@ impl InfiniteCanvas {
     /// 是否成功撤销
     #[wasm_bindgen]
     pub fn undo(&mut self) -> bool {
+        self.cancel_guide_gesture();
         self.commit_handle_gesture();
         self.commit_style_preview();
         let textures = self.snapshot_text_textures();
@@ -771,6 +799,7 @@ impl InfiniteCanvas {
     /// 是否成功重做
     #[wasm_bindgen]
     pub fn redo(&mut self) -> bool {
+        self.cancel_guide_gesture();
         self.commit_handle_gesture();
         self.commit_style_preview();
         let textures = self.snapshot_text_textures();
@@ -998,6 +1027,142 @@ impl InfiniteCanvas {
             array.push(&obj);
         }
         array
+    }
+
+    /// 显示或隐藏标尺和手动参考线。
+    ///
+    /// 隐藏后参考线仍留在场景 JSON 里，但不再命中、不再吸附。
+    /// 正在拖的参考线会取消，场景回到按下前的参考线。
+    ///
+    /// # 参数
+    /// - `visible`: `true` 显示
+    #[wasm_bindgen]
+    pub fn set_rulers_visible(&mut self, visible: bool) {
+        if !visible {
+            self.cancel_guide_gesture();
+            self.selected_guide = None;
+        }
+        self.rulers_visible = visible;
+    }
+
+    /// 标尺和手动参考线是否显示。
+    #[wasm_bindgen]
+    pub fn are_rulers_visible(&self) -> bool {
+        self.rulers_visible
+    }
+
+    /// 标尺厚度（屏幕像素）。
+    #[wasm_bindgen]
+    pub fn get_ruler_thickness(&self) -> f32 {
+        RULER_THICKNESS_PX
+    }
+
+    /// 主刻度的世界步长。缩放越大，步长越小。
+    #[wasm_bindgen]
+    pub fn get_ruler_major_step(&self) -> f32 {
+        infinitecanvas_engine::ruler_major_step(self.viewport.zoom())
+    }
+
+    /// 一条标尺上的刻度。
+    ///
+    /// `axis` 为 `"horizontal"`（顶边，世界 x）或 `"vertical"`（左边，世界 y）。
+    /// 每条记录含 `world`、`screen` 和 `major`。
+    ///
+    /// # 参数
+    /// - `axis`: `"horizontal"` 或 `"vertical"`
+    #[wasm_bindgen]
+    pub fn get_ruler_ticks(&self, axis: &str) -> Array {
+        let orientation = match axis {
+            "vertical" => RulerOrientation::Vertical,
+            _ => RulerOrientation::Horizontal,
+        };
+        let array = Array::new();
+        if !self.rulers_visible {
+            return array;
+        }
+        for tick in ruler_ticks(&self.viewport, orientation) {
+            let obj = Object::new();
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("world"),
+                &JsValue::from(tick.world),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("screen"),
+                &JsValue::from(tick.screen),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("major"),
+                &JsValue::from(tick.major),
+            );
+            array.push(&obj);
+        }
+        array
+    }
+
+    /// 场景里的手动参考线。
+    ///
+    /// 每条记录含 `id`、`axis`（`"horizontal"` / `"vertical"`）、`position`（世界坐标）
+    /// 和 `selected`。隐藏标尺时仍返回数据，绘制由调用方决定。
+    #[wasm_bindgen]
+    pub fn get_manual_guides(&self) -> Array {
+        let array = Array::new();
+        for guide in self.scene.guides().iter() {
+            let obj = Object::new();
+            let _ = Reflect::set(&obj, &JsValue::from_str("id"), &JsValue::from(guide.id));
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("axis"),
+                &JsValue::from_str(guide.axis.name()),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("position"),
+                &JsValue::from(guide.position),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("selected"),
+                &JsValue::from(self.selected_guide == Some(guide.id)),
+            );
+            array.push(&obj);
+        }
+        array
+    }
+
+    /// 删除当前选中的参考线，并记入撤销栈。
+    ///
+    /// # 返回
+    /// 确实删掉了一条参考线时为 `true`。
+    #[wasm_bindgen]
+    pub fn delete_selected_guide(&mut self) -> bool {
+        let Some(id) = self.selected_guide else {
+            return false;
+        };
+        self.delete_guide_id(id)
+    }
+
+    /// 双击命中参考线时删除它。
+    ///
+    /// # 参数
+    /// - `x`: 画布像素 x
+    /// - `y`: 画布像素 y
+    ///
+    /// # 返回
+    /// 命中并删除时为 `true`。标尺隐藏时为 `false`。
+    #[wasm_bindgen]
+    pub fn delete_guide_at(&mut self, x: f32, y: f32) -> bool {
+        if !self.rulers_visible {
+            return false;
+        }
+        let world = self.viewport.screen_to_world(Vec2::new(x, y));
+        let threshold = GUIDE_HIT_PX / self.viewport.zoom().max(0.05);
+        let Some(id) = self.scene.guides().hit_test(world, threshold) else {
+            return false;
+        };
+        self.delete_guide_id(id)
     }
 
     /// 获取选中元素的边界框
@@ -1336,6 +1501,8 @@ impl InfiniteCanvas {
     /// 清空场景
     #[wasm_bindgen]
     pub fn clear_scene(&mut self) {
+        self.cancel_guide_gesture();
+        self.selected_guide = None;
         self.cancel_handle_gesture();
         self.cancel_style_preview();
         let textures = self.snapshot_text_textures();
@@ -1391,6 +1558,8 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn import_json(&mut self, json: &str) -> Result<(), JsValue> {
         let scene = Scene::from_json(json).map_err(|err| JsValue::from_str(&err.to_string()))?;
+        self.cancel_guide_gesture();
+        self.selected_guide = None;
         self.cancel_handle_gesture();
         self.cancel_style_preview();
         let textures = self.snapshot_text_textures();
@@ -2706,6 +2875,9 @@ impl InfiniteCanvas {
     /// - `x`, `y`: 屏幕坐标（与指针事件相同）
     #[wasm_bindgen]
     pub fn cursor_at(&self, x: f32, y: f32) -> String {
+        if let Some(cursor) = self.guide_cursor(x, y) {
+            return cursor.to_string();
+        }
         if self.tool_manager.current() != Tool::Select {
             return self.tool_manager.current().cursor().to_string();
         }
@@ -2790,6 +2962,10 @@ impl InfiniteCanvas {
         if event.button != Some(PointerButton::Primary) {
             return;
         }
+        if self.try_begin_guide_gesture(&event) {
+            return;
+        }
+        self.selected_guide = None;
 
         let current_tool = self.tool_manager.current();
 
@@ -2804,6 +2980,9 @@ impl InfiniteCanvas {
     }
 
     fn handle_pointer_move(&mut self, event: PointerEvent) {
+        if self.update_guide_gesture(&event) {
+            return;
+        }
         let current_tool = self.tool_manager.current();
 
         match current_tool {
@@ -2817,6 +2996,9 @@ impl InfiniteCanvas {
     }
 
     fn handle_pointer_up(&mut self, event: PointerEvent) {
+        if self.finish_guide_gesture(&event) {
+            return;
+        }
         let current_tool = self.tool_manager.current();
 
         match current_tool {
@@ -3151,6 +3333,12 @@ impl InfiniteCanvas {
         for id in flagged {
             self.selection.select_element(&mut self.scene, id, true);
         }
+        if self
+            .selected_guide
+            .is_some_and(|id| self.scene.guides().get(id).is_none())
+        {
+            self.selected_guide = None;
+        }
     }
 
     // ========== 文本工具 ==========
@@ -3315,10 +3503,11 @@ impl InfiniteCanvas {
         let snapped = match (self.snap.enabled, self.drag_state.origin_bounds) {
             (true, Some(origin)) => {
                 let targets = self.snap_targets();
-                snap_drag(
+                snap_drag_with_guides(
                     origin,
                     raw_delta,
                     &targets,
+                    &self.manual_guide_lines(),
                     &self.snap,
                     self.viewport.zoom(),
                 )
@@ -3472,6 +3661,7 @@ impl InfiniteCanvas {
 
     fn update_handle_gesture(&mut self, event: &PointerEvent) -> bool {
         let lock_aspect = self.image_selection_locks_aspect();
+        let pointer = self.snapped_resize_pointer(event, lock_aspect);
         let preview = {
             let Some(drag) = &self.handle_drag else {
                 return false;
@@ -3481,7 +3671,7 @@ impl InfiniteCanvas {
             }
             let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
             drag.gesture.preview_with(
-                event.world_position,
+                pointer,
                 event.modifiers.shift,
                 metrics.min_half,
                 lock_aspect,
@@ -3524,6 +3714,332 @@ impl InfiniteCanvas {
             let originals = drag.gesture.originals().to_vec();
             self.apply_transform_list(&originals);
         }
+    }
+
+    /// 隐藏标尺时不把参考线交给吸附。
+    fn manual_guide_lines(&self) -> GuideLines {
+        if self.rulers_visible {
+            self.scene.guides().lines()
+        } else {
+            GuideLines::default()
+        }
+    }
+
+    fn guide_cursor(&self, x: f32, y: f32) -> Option<&'static str> {
+        if !self.rulers_visible {
+            return None;
+        }
+        if let Some(gesture) = &self.guide_gesture {
+            return Some(axis_cursor(gesture.axis));
+        }
+        let screen = Vec2::new(x, y);
+        match ruler_band(screen, RULER_THICKNESS_PX) {
+            Some(RulerBand::Top) => return Some("ns-resize"),
+            Some(RulerBand::Left) => return Some("ew-resize"),
+            Some(RulerBand::Corner) => return Some("default"),
+            None => {}
+        }
+        if self.tool_manager.current() != Tool::Select {
+            return None;
+        }
+        let world = self.viewport.screen_to_world(screen);
+        let threshold = GUIDE_HIT_PX / self.viewport.zoom().max(0.05);
+        let id = self.scene.guides().hit_test(world, threshold)?;
+        Some(axis_cursor(self.scene.guides().get(id)?.axis))
+    }
+
+    /// 标尺上开始新建，或在选择工具里抓住已有参考线。手柄优先于参考线。
+    fn try_begin_guide_gesture(&mut self, event: &PointerEvent) -> bool {
+        if !self.rulers_visible {
+            return false;
+        }
+        if let Some(band) = ruler_band(event.screen_position, RULER_THICKNESS_PX) {
+            let axis = match band {
+                RulerBand::Top => GuideAxis::Horizontal,
+                RulerBand::Left => GuideAxis::Vertical,
+                RulerBand::Corner => {
+                    self.selected_guide = None;
+                    return true;
+                }
+            };
+            self.begin_guide_drag(event.pointer_id, axis, None, None);
+            return true;
+        }
+        if self.tool_manager.current() != Tool::Select
+            || self.pointer_hits_handle(event.world_position)
+        {
+            return false;
+        }
+        let threshold = GUIDE_HIT_PX / self.viewport.zoom().max(0.05);
+        let Some(id) = self
+            .scene
+            .guides()
+            .hit_test(event.world_position, threshold)
+        else {
+            return false;
+        };
+        let Some(guide) = self.scene.guides().get(id).copied() else {
+            return false;
+        };
+        self.selection.clear(&mut self.scene);
+        self.begin_guide_drag(event.pointer_id, guide.axis, Some(id), Some(guide.position));
+        true
+    }
+
+    fn begin_guide_drag(
+        &mut self,
+        pointer_id: i32,
+        axis: GuideAxis,
+        id: Option<u64>,
+        origin: Option<f32>,
+    ) {
+        self.cancel_handle_gesture();
+        self.selection_box.cancel();
+        self.selected_guide = id;
+        self.guide_gesture = Some(GuideGesture {
+            pointer_id,
+            axis,
+            id,
+            origin,
+            before: self.scene.guide_snapshot(),
+        });
+    }
+
+    fn pointer_hits_handle(&self, world: Vec2) -> bool {
+        let Some(frame) = self.compute_selection_frame() else {
+            return false;
+        };
+        let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
+        frame
+            .hit_test(world, metrics.hit_radius, metrics.rotate_gap)
+            .is_some()
+    }
+
+    fn update_guide_gesture(&mut self, event: &PointerEvent) -> bool {
+        let Some(gesture) = self.guide_gesture.as_ref() else {
+            return false;
+        };
+        if gesture.pointer_id != event.pointer_id {
+            return false;
+        }
+        let axis = gesture.axis;
+        let existing = gesture.id;
+        let creating = gesture.origin.is_none();
+        let position = match axis {
+            GuideAxis::Horizontal => event.world_position.y,
+            GuideAxis::Vertical => event.world_position.x,
+        };
+        if !position.is_finite() {
+            return true;
+        }
+        let on_ruler = pointer_on_source_ruler(event.screen_position, axis);
+        if on_ruler && creating {
+            if let Some(id) = existing {
+                self.scene.remove_guide(id);
+                if let Some(gesture) = &mut self.guide_gesture {
+                    gesture.id = None;
+                }
+                self.selected_guide = None;
+            }
+            return true;
+        }
+        match existing {
+            Some(id) => {
+                self.scene.move_guide(id, position);
+                self.selected_guide = Some(id);
+            }
+            None => {
+                if let Some(guide) = self.scene.add_guide(axis, position) {
+                    if let Some(gesture) = &mut self.guide_gesture {
+                        gesture.id = Some(guide.id);
+                    }
+                    self.selected_guide = Some(guide.id);
+                }
+            }
+        }
+        true
+    }
+
+    fn finish_guide_gesture(&mut self, event: &PointerEvent) -> bool {
+        let Some(gesture) = self.guide_gesture.as_ref() else {
+            return false;
+        };
+        if gesture.pointer_id != event.pointer_id {
+            return false;
+        }
+        let gesture = self.guide_gesture.take().expect("gesture exists");
+        let on_ruler = pointer_on_source_ruler(event.screen_position, gesture.axis);
+        if on_ruler {
+            if gesture.origin.is_none() {
+                self.scene.restore_guides(&gesture.before);
+                self.selected_guide = None;
+            } else if gesture.id.is_some() {
+                if let Some(id) = gesture.id {
+                    self.scene.remove_guide(id);
+                }
+                self.selected_guide = None;
+                self.push_guide_edit(gesture.before);
+            }
+            return true;
+        }
+        if gesture.id.is_some() {
+            self.push_guide_edit(gesture.before);
+        }
+        true
+    }
+
+    fn cancel_guide_gesture(&mut self) {
+        if let Some(gesture) = self.guide_gesture.take() {
+            self.scene.restore_guides(&gesture.before);
+            self.selected_guide = gesture.origin.and(gesture.id);
+        }
+    }
+
+    fn push_guide_edit(&mut self, before: GuideSnapshot) {
+        let after = self.scene.guide_snapshot();
+        if after != before {
+            self.command_history
+                .push_executed(Box::new(EditGuidesCommand::new(before, after)));
+        }
+    }
+
+    fn delete_guide_id(&mut self, id: u64) -> bool {
+        if self.guide_gesture.is_some() {
+            self.cancel_guide_gesture();
+        }
+        if self.scene.guides().get(id).is_none() {
+            self.selected_guide = None;
+            return false;
+        }
+        let before = self.scene.guide_snapshot();
+        self.scene.remove_guide(id);
+        self.push_guide_edit(before);
+        self.selected_guide = None;
+        true
+    }
+
+    /// 缩放手柄把元素边吸到参考线。旋转仍只吃 Shift 的 15°。
+    fn snapped_resize_pointer(&mut self, event: &PointerEvent, lock_aspect: bool) -> Vec2 {
+        let pointer = event.world_position;
+        if !self.snap.enabled || !self.rulers_visible {
+            return pointer;
+        }
+        let guides = self.scene.guides().lines();
+        if guides.horizontal.is_empty() && guides.vertical.is_empty() {
+            return pointer;
+        }
+        let Some(drag) = &self.handle_drag else {
+            return pointer;
+        };
+        if drag.pointer_id != event.pointer_id {
+            return pointer;
+        }
+        let HandleKind::Resize(handle) = drag.gesture.kind() else {
+            return pointer;
+        };
+        let gesture = drag.gesture.clone();
+        let ids: Vec<ElementId> = gesture.originals().iter().map(|(id, _)| *id).collect();
+        let metrics = HandleMetrics::from_zoom(self.viewport.zoom());
+        let shift = event.modifiers.shift;
+        let outward = handle_outward(handle, gesture.origin().rotation);
+        let uniform = lock_aspect != shift;
+        let base = gesture.preview_with(pointer, shift, metrics.min_half, lock_aspect);
+        self.apply_transform_list(&base.transforms);
+        let Some(base_bounds) = self.bounds_for_ids(&ids) else {
+            return pointer;
+        };
+        let x_correction = self.edge_pointer_correction(
+            &gesture,
+            pointer,
+            Vec2::new(1.0, 0.0),
+            shift,
+            metrics.min_half,
+            lock_aspect,
+            &ids,
+            moving_edge(base_bounds, outward.x, false),
+            &guides.vertical,
+            outward.x.abs() > 0.25,
+            outward.x,
+        );
+        let y_correction = self.edge_pointer_correction(
+            &gesture,
+            pointer,
+            Vec2::new(0.0, 1.0),
+            shift,
+            metrics.min_half,
+            lock_aspect,
+            &ids,
+            moving_edge(base_bounds, outward.y, true),
+            &guides.horizontal,
+            outward.y.abs() > 0.25,
+            outward.y,
+        );
+        if uniform {
+            if x_correction.abs() <= y_correction.abs() && x_correction != 0.0 {
+                Vec2::new(pointer.x + x_correction, pointer.y)
+            } else {
+                Vec2::new(pointer.x, pointer.y + y_correction)
+            }
+        } else {
+            Vec2::new(pointer.x + x_correction, pointer.y + y_correction)
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn edge_pointer_correction(
+        &mut self,
+        gesture: &HandleGesture,
+        pointer: Vec2,
+        nudge: Vec2,
+        shift: bool,
+        min_half: f32,
+        lock_aspect: bool,
+        ids: &[ElementId],
+        edge: f32,
+        guides: &[f32],
+        active: bool,
+        edge_sign: f32,
+    ) -> f32 {
+        if !active || guides.is_empty() {
+            return 0.0;
+        }
+        let preview = gesture.preview_with(pointer + nudge, shift, min_half, lock_aspect);
+        self.apply_transform_list(&preview.transforms);
+        let Some(nudged) = self.bounds_for_ids(ids) else {
+            return 0.0;
+        };
+        let horizontal = nudge.y != 0.0;
+        let edge_nudged = moving_edge(nudged, edge_sign, horizontal);
+        resize_edge_correction(
+            edge,
+            edge_nudged - edge,
+            guides,
+            self.snap.world_threshold(self.viewport.zoom()),
+        )
+    }
+
+    fn bounds_for_ids(&self, ids: &[ElementId]) -> Option<Rect> {
+        let mut leaves = Vec::new();
+        for id in ids {
+            self.collect_visible_leaf_bounds(*id, &mut leaves);
+        }
+        bounds_union(leaves)
+    }
+}
+
+fn axis_cursor(axis: GuideAxis) -> &'static str {
+    match axis {
+        GuideAxis::Horizontal => "ns-resize",
+        GuideAxis::Vertical => "ew-resize",
+    }
+}
+
+fn pointer_on_source_ruler(screen: Vec2, axis: GuideAxis) -> bool {
+    match ruler_band(screen, RULER_THICKNESS_PX) {
+        Some(RulerBand::Corner) => true,
+        Some(RulerBand::Top) => axis == GuideAxis::Horizontal,
+        Some(RulerBand::Left) => axis == GuideAxis::Vertical,
+        None => false,
     }
 }
 
@@ -3780,6 +4296,9 @@ mod tests {
             pending_text_edit: None,
             perf_stats: PerformanceStats::default(),
             snap: SnapSettings::default(),
+            rulers_visible: true,
+            guide_gesture: None,
+            selected_guide: None,
             style_preview: None,
             minimap_cache: None,
             gpu_image_assets: HashSet::new(),
@@ -4382,5 +4901,127 @@ mod tests {
         );
         assert_eq!(hits, vec![1]);
         assert_eq!(translation(&canvas.scene, 1), placed);
+    }
+
+    fn pointer_at(canvas: &InfiniteCanvas, screen: Vec2) -> PointerEvent {
+        PointerEvent {
+            pointer_id: 1,
+            screen_position: screen,
+            world_position: canvas.viewport.screen_to_world(screen),
+            screen_delta: Vec2::ZERO,
+            world_delta: Vec2::ZERO,
+            button: Some(PointerButton::Primary),
+            buttons_mask: 1,
+            modifiers: infinitecanvas_engine::Modifiers::new(false, false, false, false),
+        }
+    }
+
+    #[test]
+    fn dragging_from_the_top_ruler_creates_a_horizontal_guide() {
+        let mut canvas = blank_canvas();
+        let down = pointer_at(&canvas, Vec2::new(200.0, 8.0));
+        canvas.handle_pointer_down(down);
+        assert!(canvas.scene.guides().is_empty());
+        let moved = pointer_at(&canvas, Vec2::new(200.0, 140.0));
+        let expected_y = moved.world_position.y;
+        canvas.handle_pointer_move(moved);
+        assert_eq!(canvas.scene.guides().len(), 1);
+        let up = pointer_at(&canvas, Vec2::new(200.0, 140.0));
+        canvas.handle_pointer_up(up);
+        let guide = canvas.scene.guides().iter().next().unwrap();
+        assert_eq!(guide.axis, GuideAxis::Horizontal);
+        assert!((guide.position - expected_y).abs() < 1e-3);
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.undo());
+        assert!(canvas.scene.guides().is_empty());
+        assert!(canvas.redo());
+        assert_eq!(canvas.scene.guides().len(), 1);
+    }
+
+    #[test]
+    fn dropping_a_new_guide_back_on_the_ruler_discards_it() {
+        let mut canvas = blank_canvas();
+        canvas.handle_pointer_down(pointer_at(&canvas, Vec2::new(8.0, 200.0)));
+        canvas.handle_pointer_move(pointer_at(&canvas, Vec2::new(180.0, 200.0)));
+        assert_eq!(canvas.scene.guides().len(), 1);
+        canvas.handle_pointer_up(pointer_at(&canvas, Vec2::new(8.0, 200.0)));
+        assert!(canvas.scene.guides().is_empty());
+        assert_eq!(canvas.get_undo_count(), 0);
+    }
+
+    #[test]
+    fn dragging_snaps_the_selection_edge_to_a_manual_guide() {
+        let mut canvas = blank_canvas();
+        canvas
+            .scene
+            .add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(40.0, 20.0)));
+        canvas.scene.add_guide(GuideAxis::Vertical, 50.0).unwrap();
+        canvas.selection.select_element(&mut canvas.scene, 1, false);
+        canvas.start_drag(1, Vec2::ZERO);
+        canvas.drag_selected_to_pointer(Vec2::new(28.0, 0.0));
+        let right = canvas
+            .scene
+            .get(1)
+            .unwrap()
+            .as_element()
+            .world_bounds()
+            .right();
+        assert!((right - 50.0).abs() < 1e-3);
+        assert!(
+            canvas
+                .drag_state
+                .guides
+                .iter()
+                .any(|guide| guide.axis == GuideAxis::Vertical
+                    && (guide.position - 50.0).abs() < 1e-3)
+        );
+
+        canvas.finish_drag();
+        canvas.set_rulers_visible(false);
+        canvas.selection.select_element(&mut canvas.scene, 1, false);
+        let before = canvas
+            .scene
+            .get(1)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform
+            .translation;
+        canvas.start_drag(1, Vec2::ZERO);
+        canvas.drag_selected_to_pointer(Vec2::new(4.0, 0.0));
+        let after = canvas
+            .scene
+            .get(1)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform
+            .translation;
+        assert!((after.x - before.x - 4.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn resizing_snaps_the_element_edge_to_a_manual_guide() {
+        let mut canvas = blank_canvas();
+        canvas
+            .scene
+            .add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(40.0, 20.0)));
+        canvas.selection.select_element(&mut canvas.scene, 1, false);
+        canvas.scene.add_guide(GuideAxis::Vertical, 24.0).unwrap();
+        let handle = canvas.viewport.world_to_screen(Vec2::new(23.0, 0.0));
+        let down = pointer_at(&canvas, handle);
+        assert!(canvas.try_begin_handle_gesture(&down));
+        canvas.update_handle_gesture(&down);
+        let right = canvas
+            .scene
+            .get(1)
+            .unwrap()
+            .as_element()
+            .world_bounds()
+            .right();
+        assert!(
+            (right - 24.0).abs() < 0.05,
+            "right edge {right} should land on the guide"
+        );
     }
 }

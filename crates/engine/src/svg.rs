@@ -24,6 +24,7 @@ use crate::element::{
 };
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
+use crate::snap::GuideAxis;
 use infinitecanvas_math::{Color, Rect, Transform, Vec2};
 use std::collections::{HashMap, HashSet};
 
@@ -63,6 +64,18 @@ const VIEW_PADDING: f32 = 2.0;
 /// assert!(svg.contains("fill=\"#ff0000\""));
 /// ```
 pub fn export_svg(scene: &Scene, selected_only: bool) -> String {
+    export_svg_with_guides(scene, selected_only, false)
+}
+
+/// 同 [`export_svg`]。`include_guides` 为 true 时在 viewBox 内画出参考线。
+///
+/// 默认不画。参考线不改变 viewBox。标尺不进 SVG。
+///
+/// # 参数
+/// - `scene`: 要导出的场景
+/// - `selected_only`: 为 true 时只导出选中叶子
+/// - `include_guides`: 为 true 时追加参考线
+pub fn export_svg_with_guides(scene: &Scene, selected_only: bool, include_guides: bool) -> String {
     let mut bounds: Option<Rect> = None;
     let mut items: Vec<(Vec<ElementId>, String)> = Vec::new();
 
@@ -113,8 +126,34 @@ pub fn export_svg(scene: &Scene, selected_only: bool) -> String {
         }
     }
     svg.push_str(&body);
+    if include_guides {
+        write_guides(&mut svg, scene, view);
+    }
     svg.push_str("</svg>\n");
     svg
+}
+
+fn write_guides(svg: &mut String, scene: &Scene, view: Rect) {
+    for guide in scene.guides().iter() {
+        match guide.axis {
+            GuideAxis::Vertical => {
+                svg.push_str(&format!(
+                    "  <line x1=\"{x}\" y1=\"{y0}\" x2=\"{x}\" y2=\"{y1}\" stroke=\"#3db7ff\" stroke-width=\"1\"/>\n",
+                    x = fmt_num(guide.position),
+                    y0 = fmt_num(view.y),
+                    y1 = fmt_num(view.bottom()),
+                ));
+            }
+            GuideAxis::Horizontal => {
+                svg.push_str(&format!(
+                    "  <line x1=\"{x0}\" y1=\"{y}\" x2=\"{x1}\" y2=\"{y}\" stroke=\"#3db7ff\" stroke-width=\"1\"/>\n",
+                    x0 = fmt_num(view.x),
+                    y = fmt_num(guide.position),
+                    x1 = fmt_num(view.right()),
+                ));
+            }
+        }
+    }
 }
 
 /// 叶子才输出。组没有几何。可见性走 [`Scene::is_effectively_visible`]，
@@ -756,6 +795,7 @@ fn fmt_num(value: f32) -> String {
 mod tests {
     use super::*;
     use crate::element::{Element, ElementStyle};
+    use crate::snap::GuideAxis;
     use infinitecanvas_math::Color;
     use std::f32::consts::FRAC_PI_2;
 
@@ -1263,5 +1303,22 @@ mod tests {
             && point.y >= y - 0.01
             && point.x <= x + width + 0.01
             && point.y <= y + height + 0.01
+    }
+
+    #[test]
+    fn svg_omits_guides_unless_the_flag_is_set() {
+        let mut scene = Scene::new();
+        scene.add_rect(
+            Rectangle::new(1, Vec2::new(10.0, 10.0), Vec2::new(8.0, 8.0))
+                .with_style(ElementStyle::fill_only(Color::RED)),
+        );
+        scene.add_guide(GuideAxis::Horizontal, 4.0).unwrap();
+        let plain = export_svg(&scene, false);
+        assert!(!plain.contains("#3db7ff"));
+        assert_eq!(export_svg_with_guides(&scene, false, false), plain);
+        let marked = export_svg_with_guides(&scene, false, true);
+        assert!(marked.contains("#3db7ff"));
+        assert!(marked.contains("y1=\"4\""));
+        assert!(plain.contains("<rect"));
     }
 }

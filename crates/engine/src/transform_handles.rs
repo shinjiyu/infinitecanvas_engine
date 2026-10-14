@@ -55,7 +55,7 @@ pub enum ResizeHandle {
 
 impl ResizeHandle {
     /// 手柄相对中心的方向：x/y 为 -1、0 或 1。
-    fn axis_signs(self) -> (i8, i8) {
+    pub fn axis_signs(self) -> (i8, i8) {
         match self {
             Self::NorthWest => (-1, -1),
             Self::North => (0, -1),
@@ -370,6 +370,11 @@ impl HandleGesture {
     /// 被抓住的手柄。
     pub fn kind(&self) -> HandleKind {
         self.kind
+    }
+
+    /// 拖动开始时的选中框。
+    pub fn origin(&self) -> SelectionFrame {
+        self.origin
     }
 
     /// 拖动开始时的变换，撤销命令用它作为 before。
