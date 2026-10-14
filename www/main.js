@@ -3,6 +3,7 @@
  *
  * 把选择、直线、画笔、压力测试、纹理和小地图放在同一张画布上。
  * 选中元素后右侧属性面板可改填充、描边、线宽和不透明度，文本还可改字号和颜色。
+ * 方向键按世界单位微调选中元素（Shift 为 10 倍）；输入框内不触发。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
  * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
  * Ctrl+C / Ctrl+V / Ctrl+D 复制、粘贴、克隆，都进撤销栈。
@@ -23,6 +24,7 @@ import {
   screenToWorld,
   writeTextClipboard,
 } from './clipboard.js';
+import { arrowNudge } from './nudge-keys.js';
 import { rasterizeText } from './text-raster.js';
 
 const TEXTURE_ID = 'landing-badge';
@@ -1111,6 +1113,15 @@ function bindInput(canvas, engine) {
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const nudge = arrowNudge(event);
+    if (nudge) {
+      event.preventDefault();
+      if (engine.nudge_selection(nudge.direction, nudge.shift)) {
+        scheduleAutosave(engine);
+        syncPropertyPanel(engine);
+      }
+      return;
+    }
     switch (event.key.toLowerCase()) {
       case 'v':
         setTool('select');

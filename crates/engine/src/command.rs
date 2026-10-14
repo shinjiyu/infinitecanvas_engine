@@ -8,7 +8,16 @@ use crate::style::{
     apply_style_snapshot, capture_style, style_locked, style_target_ids, StylePatch, StyleSnapshot,
 };
 use crate::{math::Vec2, AnyElement, Scene};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
+
+/// 方向键微调的默认步长，世界单位。
+///
+/// 与视口缩放无关：画布缩小后按一次方向键仍然移动 1 个画布单位。
+/// 世界坐标 Y 轴向下，与屏幕一致（上为 -Y，下为 +Y）。
+pub const NUDGE_STEP: f32 = 1.0;
+
+/// 按住 Shift 时，步长相对 [`NUDGE_STEP`] 的倍数。
+pub const NUDGE_SHIFT_FACTOR: f32 = 10.0;
 
 /// 命令 Trait
 ///
@@ -52,6 +61,258 @@ impl Command for MoveCommand {
     fn name(&self) -> &'static str {
         "MoveElements"
     }
+}
+
+/// 方向键。位移沿世界轴，不随元素自身的旋转改变。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NudgeDirection {
+    /// 世界 X 减小。
+    Left,
+    /// 世界 X 增大。
+    Right,
+    /// 世界 Y 减小（屏幕向上）。
+    Up,
+    /// 世界 Y 增大（屏幕向下）。
+    Down,
+}
+
+impl NudgeDirection {
+    /// 该方向上的世界位移。
+    ///
+    /// `shift` 为 true 时步长是 [`NUDGE_STEP`] × [`NUDGE_SHIFT_FACTOR`]，否则是 [`NUDGE_STEP`]。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::math::Vec2;
+    /// use infinitecanvas_engine::NudgeDirection;
+    ///
+    /// assert_eq!(NudgeDirection::Right.delta(false), Vec2::new(1.0, 0.0));
+    /// assert_eq!(NudgeDirection::Up.delta(true), Vec2::new(0.0, -10.0));
+    /// ```
+    pub fn delta(self, shift: bool) -> Vec2 {
+        let step = if shift {
+            NUDGE_STEP * NUDGE_SHIFT_FACTOR
+        } else {
+            NUDGE_STEP
+        };
+        match self {
+            Self::Left => Vec2::new(-step, 0.0),
+            Self::Right => Vec2::new(step, 0.0),
+            Self::Up => Vec2::new(0.0, -step),
+            Self::Down => Vec2::new(0.0, step),
+        }
+    }
+
+    /// 解析方向键名称。
+    ///
+    /// 接受 `left` / `right` / `up` / `down`，以及 DOM 的 `ArrowLeft` 等 `key`。
+    /// 大小写不敏感，两端空白忽略。无法识别时返回 `None`。
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::NudgeDirection;
+    ///
+    /// assert_eq!(NudgeDirection::parse("ArrowDown"), Some(NudgeDirection::Down));
+    /// assert!(NudgeDirection::parse("v").is_none());
+    /// ```
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "left" | "arrowleft" => Some(Self::Left),
+            "right" | "arrowright" => Some(Self::Right),
+            "up" | "arrowup" => Some(Self::Up),
+            "down" | "arrowdown" => Some(Self::Down),
+            _ => None,
+        }
+    }
+}
+
+/// 从当前选中里挑出方向键要平移的元素。
+///
+/// - 不在场景里、不可见（含被隐藏的祖先挡住）、或已锁定（含被锁定的祖先挡住）的 id 去掉
+/// - 选中组时保留组根。组的子孙若也在这批目标里则去掉，避免同一棵子树移动两次
+///
+/// 结果按 id 升序，方便测试和撤销记录稳定。
+///
+/// # 参数
+/// - `scene`: 当前场景
+/// - `selected_ids`: 当前选中的元素
+///
+/// # 返回
+/// 要平移的元素 id。没有可移动目标时为空。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::command::nudge_targets;
+/// use infinitecanvas_engine::math::Vec2;
+/// use infinitecanvas_engine::{Rectangle, Scene};
+///
+/// let mut scene = Scene::new();
+/// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(4.0, 4.0)));
+/// scene.set_locked(1, true);
+/// assert!(nudge_targets(&scene, &[1]).is_empty());
+/// ```
+pub fn nudge_targets(scene: &Scene, selected_ids: &[ElementId]) -> Vec<ElementId> {
+    let selected: HashSet<ElementId> = selected_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            scene.contains(*id)
+                && scene.is_effectively_visible(*id)
+                && !scene.is_effectively_locked(*id)
+        })
+        .collect();
+    let mut ids: Vec<ElementId> = selected
+        .iter()
+        .copied()
+        .filter(|id| !ancestor_in(scene, *id, &selected))
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// `id` 的某个祖先是否也在 `set` 里。
+fn ancestor_in(scene: &Scene, id: ElementId, set: &HashSet<ElementId>) -> bool {
+    let mut current = scene.parent_of(id);
+    while let Some(parent) = current {
+        if set.contains(&parent) {
+            return true;
+        }
+        current = scene.parent_of(parent);
+    }
+    false
+}
+
+/// 方向键平移。只改平移分量，组根会带动子孙，并标脏子树。
+///
+/// 拖拽吸附不经过这条命令。多选的全部目标放在同一条历史里。
+#[derive(Debug)]
+pub struct NudgeElementsCommand {
+    ids: Vec<ElementId>,
+    delta: Vec2,
+}
+
+impl NudgeElementsCommand {
+    /// 按当前选择构造一条尚未执行的平移命令。
+    ///
+    /// 没有可移动目标时返回 `None`，调用方不应入栈。
+    ///
+    /// # 参数
+    /// - `scene`: 当前场景
+    /// - `selected`: 当前选中的元素 id
+    /// - `direction`: 方向键
+    /// - `shift`: 是否按住 Shift（步长 × [`NUDGE_SHIFT_FACTOR`]）
+    ///
+    /// # 示例
+    /// ```
+    /// use infinitecanvas_engine::{NudgeDirection, NudgeElementsCommand, Scene};
+    ///
+    /// let scene = Scene::new();
+    /// assert!(NudgeElementsCommand::from_selection(
+    ///     &scene,
+    ///     &[],
+    ///     NudgeDirection::Left,
+    ///     false,
+    /// )
+    /// .is_none());
+    /// ```
+    pub fn from_selection(
+        scene: &Scene,
+        selected: &[ElementId],
+        direction: NudgeDirection,
+        shift: bool,
+    ) -> Option<Self> {
+        let ids = nudge_targets(scene, selected);
+        if ids.is_empty() {
+            return None;
+        }
+        Some(Self {
+            ids,
+            delta: direction.delta(shift),
+        })
+    }
+}
+
+impl Command for NudgeElementsCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        // 与拖拽共用 `translate_ids`：只加平移，选中组时子孙跟着走，并标脏。
+        scene.translate_ids(&self.ids, self.delta);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        scene.translate_ids(&self.ids, -self.delta);
+    }
+
+    fn name(&self) -> &'static str {
+        "NudgeElements"
+    }
+}
+
+/// 对当前选择执行一次方向键微调，并记入一条撤销记录。
+///
+/// 空选、全部锁定、全部不可见，或没有可移动目标时不入栈，返回 `false`。
+///
+/// # 参数
+/// - `history`: 撤销栈
+/// - `scene`: 要修改的场景
+/// - `selected`: 当前选中 id
+/// - `direction`: 方向键
+/// - `shift`: 为 true 时步长是 [`NUDGE_STEP`] 的 [`NUDGE_SHIFT_FACTOR`] 倍
+///
+/// # 返回
+/// 是否写入了撤销栈
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::math::Vec2;
+/// use infinitecanvas_engine::{
+///     apply_nudge, CommandHistory, Element, NudgeDirection, Rectangle, Scene,
+/// };
+///
+/// let mut scene = Scene::new();
+/// scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+/// let mut history = CommandHistory::new();
+/// assert!(apply_nudge(
+///     &mut history,
+///     &mut scene,
+///     &[1],
+///     NudgeDirection::Right,
+///     false,
+/// ));
+/// assert_eq!(
+///     scene
+///         .get(1)
+///         .unwrap()
+///         .as_element()
+///         .props()
+///         .transform
+///         .translation,
+///     Vec2::new(1.0, 0.0)
+/// );
+/// assert!(history.undo(&mut scene));
+/// assert_eq!(
+///     scene
+///         .get(1)
+///         .unwrap()
+///         .as_element()
+///         .props()
+///         .transform
+///         .translation,
+///     Vec2::ZERO
+/// );
+/// ```
+pub fn apply_nudge(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    selected: &[ElementId],
+    direction: NudgeDirection,
+    shift: bool,
+) -> bool {
+    let Some(command) = NudgeElementsCommand::from_selection(scene, selected, direction, shift)
+    else {
+        return false;
+    };
+    history.execute(Box::new(command), scene);
+    true
 }
 
 /// 添加元素命令
@@ -724,6 +985,7 @@ impl std::fmt::Debug for CommandHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SelectionManager;
     use crate::{element::Rectangle, math::Vec2};
 
     #[test]
@@ -963,5 +1225,307 @@ mod tests {
         }
 
         assert!(SetStyleCommand::from_patch(&scene, &[1], &patch).is_none());
+    }
+
+    fn translation_of(scene: &Scene, id: ElementId) -> Vec2 {
+        scene
+            .get(id)
+            .unwrap()
+            .as_element()
+            .props()
+            .transform
+            .translation
+    }
+
+    fn approx_eq(actual: Vec2, expected: Vec2) {
+        assert!(
+            (actual - expected).length() < 1e-3,
+            "actual {actual:?} expected {expected:?}"
+        );
+    }
+
+    fn selected(scene: &mut Scene, ids: &[ElementId]) -> Vec<ElementId> {
+        let mut selection = SelectionManager::new();
+        for (index, id) in ids.iter().enumerate() {
+            assert!(
+                selection.select_element(scene, *id, index > 0),
+                "select {id}"
+            );
+        }
+        selection.selected_ids()
+    }
+
+    /// 单选向右移动 1 个世界单位。旋转和缩放不动，撤销/重做只恢复平移。
+    #[test]
+    fn single_selection_nudge_moves_one_world_unit() {
+        let mut scene = Scene::new();
+        let mut rect = Rectangle::new(1, Vec2::new(3.0, 4.0), Vec2::new(8.0, 6.0));
+        rect.props.set_rotation(0.4);
+        rect.props.transform.scale = Vec2::new(1.5, 0.5);
+        let z_index = rect.props.z_index;
+        scene.add_rect(rect);
+        let ids = selected(&mut scene, &[1]);
+        let mut history = CommandHistory::new();
+
+        assert!(apply_nudge(
+            &mut history,
+            &mut scene,
+            &ids,
+            NudgeDirection::Right,
+            false,
+        ));
+        approx_eq(translation_of(&scene, 1), Vec2::new(4.0, 4.0));
+        let props = scene.get(1).unwrap().as_element().props();
+        assert!((props.rotation() - 0.4).abs() < 1e-6);
+        assert_eq!(props.transform.scale, Vec2::new(1.5, 0.5));
+        assert_eq!(props.z_index, z_index);
+        assert!(scene.parent_of(1).is_none());
+        assert!(scene.has_dirty_elements());
+        assert_eq!(history.undo_count(), 1);
+        assert!(!history.can_redo());
+
+        assert!(history.undo(&mut scene));
+        approx_eq(translation_of(&scene, 1), Vec2::new(3.0, 4.0));
+        assert!(history.can_redo());
+        assert!(scene.has_dirty_elements());
+
+        assert!(history.redo(&mut scene));
+        approx_eq(translation_of(&scene, 1), Vec2::new(4.0, 4.0));
+        assert_eq!(
+            scene.get(1).unwrap().as_element().props().transform.scale,
+            Vec2::new(1.5, 0.5)
+        );
+    }
+
+    /// 四个方向沿世界轴。Y 向下，所以上是 -Y。
+    #[test]
+    fn nudge_directions_follow_world_axes() {
+        assert_eq!(NudgeDirection::Left.delta(false), Vec2::new(-1.0, 0.0));
+        assert_eq!(NudgeDirection::Right.delta(false), Vec2::new(1.0, 0.0));
+        assert_eq!(NudgeDirection::Up.delta(false), Vec2::new(0.0, -1.0));
+        assert_eq!(NudgeDirection::Down.delta(false), Vec2::new(0.0, 1.0));
+        assert_eq!(
+            NudgeDirection::parse(" arrowLEFT "),
+            Some(NudgeDirection::Left)
+        );
+        assert!(NudgeDirection::parse("Delete").is_none());
+
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(10.0, 20.0),
+            Vec2::new(4.0, 4.0),
+        ));
+        let ids = selected(&mut scene, &[1]);
+        let mut history = CommandHistory::new();
+        assert!(apply_nudge(
+            &mut history,
+            &mut scene,
+            &ids,
+            NudgeDirection::Down,
+            false,
+        ));
+        approx_eq(translation_of(&scene, 1), Vec2::new(10.0, 21.0));
+        assert!(apply_nudge(
+            &mut history,
+            &mut scene,
+            &ids,
+            NudgeDirection::Left,
+            false,
+        ));
+        approx_eq(translation_of(&scene, 1), Vec2::new(9.0, 21.0));
+        assert!(apply_nudge(
+            &mut history,
+            &mut scene,
+            &ids,
+            NudgeDirection::Up,
+            false,
+        ));
+        approx_eq(translation_of(&scene, 1), Vec2::new(9.0, 20.0));
+    }
+
+    /// Shift 步长是普通步长的 10 倍。
+    #[test]
+    fn shift_nudge_step_is_ten_times() {
+        assert_eq!(NUDGE_SHIFT_FACTOR, 10.0);
+        assert_eq!(NudgeDirection::Right.delta(true).x, NUDGE_STEP * 10.0);
+
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::new(2.0, 5.0), Vec2::new(4.0, 4.0)));
+        let ids = selected(&mut scene, &[1]);
+        let mut history = CommandHistory::new();
+        assert!(apply_nudge(
+            &mut history,
+            &mut scene,
+            &ids,
+            NudgeDirection::Up,
+            true,
+        ));
+        approx_eq(translation_of(&scene, 1), Vec2::new(2.0, -5.0));
+        assert_eq!(history.undo_count(), 1);
+        history.undo(&mut scene);
+        approx_eq(translation_of(&scene, 1), Vec2::new(2.0, 5.0));
+    }
+
+    /// 多选一次移动全部目标，只产生一条历史。未选中的元素不动。
+    #[test]
+    fn multi_selection_nudge_is_one_history_entry() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(30.0, 8.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.add_rect(Rectangle::new(
+            3,
+            Vec2::new(80.0, -4.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let ids = selected(&mut scene, &[1, 2]);
+        let mut history = CommandHistory::new();
+
+        assert!(apply_nudge(
+            &mut history,
+            &mut scene,
+            &ids,
+            NudgeDirection::Right,
+            false,
+        ));
+        assert_eq!(history.undo_count(), 1);
+        approx_eq(translation_of(&scene, 1), Vec2::new(1.0, 0.0));
+        approx_eq(translation_of(&scene, 2), Vec2::new(31.0, 8.0));
+        approx_eq(translation_of(&scene, 3), Vec2::new(80.0, -4.0));
+
+        assert!(history.undo(&mut scene));
+        approx_eq(translation_of(&scene, 1), Vec2::ZERO);
+        approx_eq(translation_of(&scene, 2), Vec2::new(30.0, 8.0));
+        assert!(history.redo(&mut scene));
+        approx_eq(translation_of(&scene, 1), Vec2::new(1.0, 0.0));
+        approx_eq(translation_of(&scene, 2), Vec2::new(31.0, 8.0));
+    }
+
+    /// 选中组时平移组根，子孙只移动一次。组内子元素单独选中时不带动兄弟。
+    #[test]
+    fn group_selection_nudge_translates_group_root() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(20.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let group_id = scene.group(&[1, 2]).unwrap();
+        let group_at = translation_of(&scene, group_id);
+        let mut history = CommandHistory::new();
+
+        let both = selected(&mut scene, &[group_id, 1]);
+        assert_eq!(nudge_targets(&scene, &both), vec![group_id]);
+        assert!(apply_nudge(
+            &mut history,
+            &mut scene,
+            &both,
+            NudgeDirection::Right,
+            false,
+        ));
+        assert_eq!(history.undo_count(), 1);
+        approx_eq(translation_of(&scene, 1), Vec2::new(1.0, 0.0));
+        approx_eq(translation_of(&scene, 2), Vec2::new(21.0, 0.0));
+        approx_eq(
+            translation_of(&scene, group_id),
+            group_at + Vec2::new(1.0, 0.0),
+        );
+        let dirty = scene.take_dirty_ids();
+        assert!(dirty.contains(&group_id) && dirty.contains(&1) && dirty.contains(&2));
+
+        assert!(history.undo(&mut scene));
+        approx_eq(translation_of(&scene, 1), Vec2::ZERO);
+        approx_eq(translation_of(&scene, 2), Vec2::new(20.0, 0.0));
+        approx_eq(translation_of(&scene, group_id), group_at);
+        assert!(history.redo(&mut scene));
+        approx_eq(translation_of(&scene, 1), Vec2::new(1.0, 0.0));
+        history.undo(&mut scene);
+
+        let child_only = selected(&mut scene, &[1]);
+        assert!(apply_nudge(
+            &mut history,
+            &mut scene,
+            &child_only,
+            NudgeDirection::Down,
+            false,
+        ));
+        approx_eq(translation_of(&scene, 1), Vec2::new(0.0, 1.0));
+        approx_eq(translation_of(&scene, 2), Vec2::new(20.0, 0.0));
+        history.undo(&mut scene);
+        approx_eq(translation_of(&scene, 1), Vec2::ZERO);
+        approx_eq(translation_of(&scene, 2), Vec2::new(20.0, 0.0));
+    }
+
+    /// 锁定、隐藏或空选不入栈，位置不变。
+    #[test]
+    fn locked_hidden_or_empty_selection_is_noop() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::new(6.0, 7.0), Vec2::new(4.0, 4.0)));
+        scene.add_rect(Rectangle::new(2, Vec2::new(16.0, 7.0), Vec2::new(4.0, 4.0)));
+        let mut history = CommandHistory::new();
+
+        assert!(!apply_nudge(
+            &mut history,
+            &mut scene,
+            &[],
+            NudgeDirection::Right,
+            false,
+        ));
+        assert!(
+            NudgeElementsCommand::from_selection(&scene, &[], NudgeDirection::Left, true,)
+                .is_none()
+        );
+        assert_eq!(history.undo_count(), 0);
+
+        let ids = selected(&mut scene, &[1]);
+        scene.set_locked(1, true);
+        assert!(!apply_nudge(
+            &mut history,
+            &mut scene,
+            &ids,
+            NudgeDirection::Right,
+            true,
+        ));
+        approx_eq(translation_of(&scene, 1), Vec2::new(6.0, 7.0));
+        assert_eq!(history.undo_count(), 0);
+        scene.set_locked(1, false);
+
+        scene.set_visible(1, false);
+        assert!(!apply_nudge(
+            &mut history,
+            &mut scene,
+            &ids,
+            NudgeDirection::Down,
+            false,
+        ));
+        approx_eq(translation_of(&scene, 1), Vec2::new(6.0, 7.0));
+        assert_eq!(history.undo_count(), 0);
+        scene.set_visible(1, true);
+
+        let group_id = scene.group(&[1, 2]).unwrap();
+        scene.set_locked(group_id, true);
+        assert!(NudgeElementsCommand::from_selection(
+            &scene,
+            &[group_id, 1],
+            NudgeDirection::Left,
+            false,
+        )
+        .is_none());
+        approx_eq(translation_of(&scene, 1), Vec2::new(6.0, 7.0));
+        approx_eq(translation_of(&scene, 2), Vec2::new(16.0, 7.0));
+        assert!(!history.can_undo());
     }
 }

@@ -28,6 +28,7 @@ mod texture_manager;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
+    apply_nudge,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
@@ -40,11 +41,11 @@ use infinitecanvas_engine::{
         cursor_for, transforms_differ, HandleGesture, HandleMetrics, SelectionFrame,
     },
     AddElementCommand, AnyElement, Circle, CommandHistory, DuplicateElementsCommand, Element,
-    ElementId, ElementStyle, Event, EventQueue, Image, Line, MoveCommand, OutlineSnapshot,
-    PasteElementsCommand, Path, PointerButton, PointerEvent, Rectangle, RemoveElementCommand,
-    ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox, SelectionManager, Text, TextAlign,
-    TextClickResolver, TextPlacement, Tool, ToolManager, TransformElementsCommand,
-    UpdateTextCommand, Viewport,
+    ElementId, ElementStyle, Event, EventQueue, Image, Line, MoveCommand, NudgeDirection,
+    OutlineSnapshot, PasteElementsCommand, Path, PointerButton, PointerEvent, Rectangle,
+    RemoveElementCommand, ReorderOutlineCommand, Scene, SceneTreeNode, SelectionBox,
+    SelectionManager, Text, TextAlign, TextClickResolver, TextPlacement, Tool, ToolManager,
+    TransformElementsCommand, UpdateTextCommand, Viewport,
 };
 
 /// 直线 / 画笔抬笔时短于该长度则丢弃
@@ -505,6 +506,45 @@ impl InfiniteCanvas {
         // 创建并执行移动命令
         let cmd = MoveCommand::new(selected_ids, delta);
         self.command_history.execute(Box::new(cmd), &mut self.scene);
+    }
+
+    /// 用方向键平移当前选中元素，并记入一条撤销记录。
+    ///
+    /// 只移动顶层、可见、未锁定的选中元素。选中组时移动组根，子孙跟着走，只改平移。
+    /// 步长是世界单位，与缩放无关：默认 1，`shift` 为 true 时为 10。
+    /// 多选合成一条历史。空选、锁定或无法识别的方向不入栈。不经过拖拽吸附。
+    ///
+    /// 进行中的拖动、变换手柄和样式预览会先各自入栈，再做这次平移。
+    ///
+    /// # 参数
+    /// - `direction`: `"left"`、`"right"`、`"up"`、`"down"`，或 `"ArrowLeft"` 等
+    /// - `shift`: 为 true 时步长 ×10
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.nudge_selection("right", event.shiftKey);
+    /// ```
+    #[wasm_bindgen]
+    pub fn nudge_selection(&mut self, direction: &str, shift: bool) -> bool {
+        let Some(direction) = NudgeDirection::parse(direction) else {
+            return false;
+        };
+        if self.drag_state.is_dragging {
+            self.finish_drag();
+        }
+        self.commit_handle_gesture();
+        self.commit_style_preview();
+        let selected = self.selection.selected_ids();
+        apply_nudge(
+            &mut self.command_history,
+            &mut self.scene,
+            &selected,
+            direction,
+            shift,
+        )
     }
 
     // ========== 撤销/重做 API ==========
@@ -3378,5 +3418,53 @@ mod tests {
             }
             _ => panic!("text"),
         }
+    }
+
+    /// 方向键 API 走当前选择和撤销栈。空选、锁定和未知方向不入栈。
+    #[test]
+    fn nudge_selection_moves_current_selection_and_undoes() {
+        let mut canvas = blank_canvas();
+        canvas.scene.add_rect(Rectangle::new(
+            1,
+            Vec2::new(10.0, 20.0),
+            Vec2::new(4.0, 4.0),
+        ));
+        canvas.scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(40.0, 20.0),
+            Vec2::new(4.0, 4.0),
+        ));
+        assert!(canvas.select_element(1, false));
+        assert!(canvas.select_element(2, true));
+
+        assert!(!canvas.nudge_selection("zoom", false));
+        assert_eq!(canvas.get_undo_count(), 0);
+
+        assert!(canvas.nudge_selection("right", false));
+        assert_eq!(translation(&canvas.scene, 1), Vec2::new(11.0, 20.0));
+        assert_eq!(translation(&canvas.scene, 2), Vec2::new(41.0, 20.0));
+        assert_eq!(canvas.get_undo_count(), 1);
+
+        assert!(canvas.nudge_selection("ArrowUp", true));
+        assert_eq!(translation(&canvas.scene, 1), Vec2::new(11.0, 10.0));
+        assert_eq!(translation(&canvas.scene, 2), Vec2::new(41.0, 10.0));
+        assert_eq!(canvas.get_undo_count(), 2);
+
+        assert!(canvas.undo());
+        assert_eq!(translation(&canvas.scene, 1), Vec2::new(11.0, 20.0));
+        assert!(canvas.redo());
+        assert_eq!(translation(&canvas.scene, 1), Vec2::new(11.0, 10.0));
+        canvas.undo();
+
+        canvas.scene.set_locked(1, true);
+        canvas.scene.set_locked(2, true);
+        let undo_count = canvas.get_undo_count();
+        assert!(!canvas.nudge_selection("left", true));
+        assert_eq!(translation(&canvas.scene, 1), Vec2::new(11.0, 20.0));
+        assert_eq!(canvas.get_undo_count(), undo_count);
+
+        canvas.clear_selection();
+        assert!(!canvas.nudge_selection("down", false));
+        assert_eq!(canvas.get_undo_count(), undo_count);
     }
 }
