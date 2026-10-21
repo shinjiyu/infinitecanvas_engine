@@ -634,6 +634,19 @@
       white-space: nowrap;
     }
 
+    .layer-row .layer-rename {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+      height: 1.4rem;
+      padding: 0 0.25rem;
+      border: 1px solid var(--accent);
+      border-radius: 3px;
+      background: #0f172a;
+      color: inherit;
+      font: inherit;
+    }
+
     .layer-drop {
       position: absolute;
       left: 0.4rem;
@@ -889,7 +902,7 @@
           <p class="prop-count">已选 <strong id="prop-count">0</strong></p>
           <label class="prop-row" id="prop-frame-name-row" for="prop-frame-name" hidden>
             名称
-            <input id="prop-frame-name" type="text" value="" aria-label="画板名称">
+            <input id="prop-frame-name" type="text" value="" aria-label="元素名称">
           </label>
           <div id="prop-transform">
             <label class="prop-row" for="prop-x">

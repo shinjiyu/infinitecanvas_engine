@@ -421,6 +421,7 @@ fn scale_alpha(mut color: Color, factor: f32) -> Color {
     color
 }
 
+// `AnyElement` grew with `ElementProps::name`; keep the plan enum unboxed for call sites.
 #[allow(clippy::large_enum_variant)]
 enum Planned {
     Shape(AnyElement),

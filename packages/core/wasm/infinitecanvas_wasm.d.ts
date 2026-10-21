@@ -428,6 +428,12 @@ export class InfiniteCanvas {
      */
     duplicate_selection(dx: number, dy: number): Array<any>;
     /**
+     * 元素显示名称。不存在时返回 `null`。
+     *
+     * 未自定义时画板仍返回其 `Frame::name`（缺省 `"Frame"`），其它类型返回空字符串。
+     */
+    element_name(id: bigint): string | undefined;
+    /**
      * 把元素放进组，世界坐标不变。
      */
     enter_group(element_id: bigint, group_id: bigint): boolean;
@@ -662,13 +668,15 @@ export class InfiniteCanvas {
      * - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
      * - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
      * - `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字。`shadowColor` 是 `#rrggbbaa`（面板只用 RGB，浓度在 `shadowOpacity`）。没有形状、文本或图片时 `shadowSupported` 为 false
+     * - `innerShadowOffsetX` / `innerShadowOffsetY` / `innerShadowBlur` / `innerShadowSpread` / `innerShadowOpacity` 是数字。`innerShadowColor` 同投影。`innerShadowSupported` 与投影相同
      * - `fillKind`：`solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
      *   `fillAngle` 为度，`fillCenter` 为 `{x, y}`，`fillRadius` 为局部半径（0 表示自动）。
      *   这几项只统计形状。多选不一致时对应的 `*Mixed` 为 true
      * - `blendMode` 为 `normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。
      *   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true。未写出时不改模糊
      * - `blurRadius` 是图层高斯模糊的标准差。没有形状、文本或图片时 `blurSupported` 为 false。多选不一致时 `blurRadiusMixed` 为 true。画板算形状。未写出时不改渐变或混合模式
-     * - `textAlign` 为 `left` / `center` / `right`。`fontWeight` 为 `regular` / `bold`。只统计文本。多选不一致时对应的 `*Mixed` 为 true
+     * - `textAlign` 为 `left` / `center` / `right`。`fontWeight` 为 `regular` / `bold`。
+     *   `lineHeight` 为行高倍数，`letterSpacing` 为世界单位字距。只统计文本。多选不一致时对应的 `*Mixed` 为 true
      * - `startMarker` / `endMarker`：`none` / `arrow` / `triangle`。仅直线（`hasLine`）。多选不一致时对应 `*Mixed` 为 true
      *
      * # 示例（JavaScript）
@@ -985,6 +993,13 @@ export class InfiniteCanvas {
      */
     remove_element(id: bigint): boolean;
     /**
+     * 重命名任意元素（可撤销）。锁定、不存在或名称未变时返回 false，不入栈。
+     *
+     * 空字符串清除自定义名（图层面板回退到类型默认名；画板恢复 `"Frame"`）。
+     * 多选时由 UI 决定：图层面板按行改单个 id；属性面板仅单选启用。
+     */
+    rename_element(id: bigint, name: string): boolean;
+    /**
      * 重命名画板。不是画板，或名称没变时返回 false，不入栈。
      */
     rename_frame(id: bigint, name: string): boolean;
@@ -1205,9 +1220,11 @@ export class InfiniteCanvas {
      * `cornerRadius` 也可以写成 `corner_radius`。`sides` 也可以写成 `points`，并钳到 3–64。
      * `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
      * `textColor` 是十六进制颜色。`textAlign` 为 `left` / `center` / `right`，也可写成 `text_align` / `align`。
-     * `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。对齐与字重只写到文本上。圆角只写到矩形上。
+     * `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。
+     * `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。对齐、字重、行高与字距只写到文本上。圆角只写到矩形上。
      * `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
      * `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
+     * `innerShadowOffsetX` / `innerShadowOffsetY` / `innerShadowBlur` / `innerShadowSpread` / `innerShadowOpacity` 同理，也可蛇形命名。`innerShadowColor` 只改 RGB。
      * `blurRadius` 也可以写成 `blur_radius`。形状、文本、图片和画板都接受图层模糊。负数收成 0。
      * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` / `strokeAlign` / `blendMode` 是小写名字。
      * `fillKind` 是 `solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
@@ -1304,7 +1321,7 @@ export class InfiniteCanvas {
      *
      * # 返回
      * 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
-     * `color`, `align`, `fontWeight`, `fontFamily`, `paddingWorld`, `textureId`
+     * `color`, `align`, `fontWeight`, `lineHeight`, `letterSpacing`, `fontFamily`, `paddingWorld`, `textureId`
      */
     take_text_raster_jobs(): Array<any>;
     /**
@@ -1484,6 +1501,7 @@ export interface InitOutput {
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_distribute_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_duplicate_selection: (a: number, b: number, c: number) => any;
+    readonly infinitecanvas_element_name: (a: number, b: bigint) => [number, number];
     readonly infinitecanvas_enter_group: (a: number, b: bigint, c: bigint) => number;
     readonly infinitecanvas_export_frame_png: (a: number, b: bigint, c: number) => [number, number, number, number];
     readonly infinitecanvas_export_frame_svg: (a: number, b: bigint) => [number, number, number, number];
@@ -1554,6 +1572,7 @@ export interface InitOutput {
     readonly infinitecanvas_push_hand_tool: (a: number) => void;
     readonly infinitecanvas_redo: (a: number) => number;
     readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
+    readonly infinitecanvas_rename_element: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_rename_frame: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_render: (a: number) => [number, number];
     readonly infinitecanvas_reorder_element: (a: number, b: bigint, c: bigint, d: number) => number;

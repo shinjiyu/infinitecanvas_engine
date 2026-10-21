@@ -30,9 +30,10 @@ mod transform_api;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
-    apply_align, apply_boolean, apply_distribute, apply_flip, apply_nudge, apply_rename_frame,
-    apply_reparent_into_frame, apply_rotate_quarter, apply_set_locked, apply_set_visibility,
-    apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility, boolean_targets,
+    apply_align, apply_boolean, apply_distribute, apply_flip, apply_nudge, apply_rename_element,
+    apply_rename_frame, apply_reparent_into_frame, apply_rotate_quarter, apply_set_locked,
+    apply_set_visibility, apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility,
+    boolean_targets,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
@@ -1632,9 +1633,26 @@ impl InfiniteCanvas {
     #[wasm_bindgen]
     pub fn frame_name(&self, id: u64) -> Option<String> {
         match self.scene.get(id) {
-            Some(AnyElement::Frame(frame)) => Some(frame.name.clone()),
+            Some(AnyElement::Frame(_)) => self.scene.element_name(id),
             _ => None,
         }
+    }
+
+    /// 元素显示名称。不存在时返回 `null`。
+    ///
+    /// 未自定义时画板仍返回其 `Frame::name`（缺省 `"Frame"`），其它类型返回空字符串。
+    #[wasm_bindgen]
+    pub fn element_name(&self, id: u64) -> Option<String> {
+        self.scene.element_name(id)
+    }
+
+    /// 重命名任意元素（可撤销）。锁定、不存在或名称未变时返回 false，不入栈。
+    ///
+    /// 空字符串清除自定义名（图层面板回退到类型默认名；画板恢复 `"Frame"`）。
+    /// 多选时由 UI 决定：图层面板按行改单个 id；属性面板仅单选启用。
+    #[wasm_bindgen]
+    pub fn rename_element(&mut self, id: u64, name: &str) -> bool {
+        apply_rename_element(&mut self.command_history, &mut self.scene, id, name)
     }
 
     /// 把元素移进画板。空列表、目标不是画板、或没有元素移动时返回 false，不入栈。

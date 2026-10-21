@@ -274,6 +274,11 @@ pub struct ElementProps {
     /// 是否锁定。锁定的元素及其子孙拒绝变换；大纲面板用它画锁图标。
     #[serde(default)]
     pub locked: bool,
+    /// 显示名称。空字符串表示未命名，图层面板回退到类型默认名。
+    ///
+    /// `serde(default)` 让还没有该字段的旧 JSON 仍能反序列化；空名称不写出。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
     /// 几何、样式或变换已变化，需要重新生成顶点。
     ///
     /// 运行时状态，不写入场景 JSON。新建和导入的元素默认为 `true`。
@@ -292,6 +297,7 @@ impl PartialEq for ElementProps {
             && self.z_index == other.z_index
             && self.parent == other.parent
             && self.locked == other.locked
+            && self.name == other.name
     }
 }
 
@@ -312,6 +318,7 @@ impl ElementProps {
             z_index: 0,
             parent: None,
             locked: false,
+            name: String::new(),
             dirty: true,
         }
     }

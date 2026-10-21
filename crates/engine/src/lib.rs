@@ -61,13 +61,14 @@ pub use camera_fit::{
     zoom_viewport_to_selection, CameraPose, DEFAULT_FIT_PADDING,
 };
 pub use command::{
-    apply_nudge, apply_rename_frame, apply_reparent_into_frame, apply_set_locked,
-    apply_set_visibility, apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility,
-    AddElementCommand, Command, CommandHistory, DuplicateElementsCommand, EditGuidesCommand,
-    MoveCommand, NudgeDirection, NudgeElementsCommand, PasteElementsCommand, RemoveElementCommand,
-    RemoveElementsCommand, RenameFrameCommand, ReorderOutlineCommand, ReorderSelectionCommand,
-    ReparentIntoFrameCommand, SetLockedCommand, SetStyleCommand, SetVisibilityCommand,
-    StackOrderAction, TransformElementsCommand, UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
+    apply_nudge, apply_rename_element, apply_rename_frame, apply_reparent_into_frame,
+    apply_set_locked, apply_set_visibility, apply_stack_reorder, apply_toggle_locked,
+    apply_toggle_visibility, AddElementCommand, Command, CommandHistory, DuplicateElementsCommand,
+    EditGuidesCommand, MoveCommand, NudgeDirection, NudgeElementsCommand, PasteElementsCommand,
+    RemoveElementCommand, RemoveElementsCommand, RenameElementCommand, RenameFrameCommand,
+    ReorderOutlineCommand, ReorderSelectionCommand, ReparentIntoFrameCommand, SetLockedCommand,
+    SetStyleCommand, SetVisibilityCommand, StackOrderAction, TransformElementsCommand,
+    UpdateTextCommand, NUDGE_SHIFT_FACTOR, NUDGE_STEP,
 };
 pub use crop::{
     apply_image_crop, crop_target_ids, image_crop_selection, resize_image_crop, CropPatch,
