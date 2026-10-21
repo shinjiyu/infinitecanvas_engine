@@ -435,6 +435,10 @@ export class InfiniteCanvas {
      */
     duplicate_selection(dx: number, dy: number): Array<any>;
     /**
+     * 元素当前的遮罩源 id。没有则返回 0。
+     */
+    element_masked_by(id: bigint): bigint;
+    /**
      * 元素显示名称。不存在时返回 `null`。
      *
      * 未自定义时画板仍返回其 `Frame::name`（缺省 `"Frame"`），其它类型返回空字符串。
@@ -864,6 +868,19 @@ export class InfiniteCanvas {
      */
     load_stress_scene(count: number): void;
     /**
+     * 当前选择是否可以「解除遮罩」。
+     */
+    mask_release_ready(): boolean;
+    /**
+     * 当前选择是否可以「设为遮罩」（≥2 个未锁定叶子，最上层可作 mask）。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * if (canvas.mask_selection_ready()) canvas.set_selection_as_mask();
+     * ```
+     */
+    mask_selection_ready(): boolean;
+    /**
      * 元素在小地图上的简化外框。
      *
      * 同一几何版本和尺寸会复用缓存，避免 10 万元素时每帧重扫。
@@ -1005,6 +1022,12 @@ export class InfiniteCanvas {
      * 是否成功重做
      */
     redo(): boolean;
+    /**
+     * 解除选中相关的遮罩关系。一次撤销。
+     *
+     * 选中目标上的 `masked_by`，或选中 mask 源时清掉所有指向它的目标。
+     */
+    release_selection_mask(): boolean;
     /**
      * 删除元素
      *
@@ -1242,6 +1265,16 @@ export class InfiniteCanvas {
      * - `visible`: `true` 显示
      */
     set_rulers_visible(visible: boolean): void;
+    /**
+     * 把选中最上层形状设为遮罩，裁剪其余选中目标。一次撤销。
+     *
+     * 空选 / 锁定 / 不足两个有效叶子时不入栈。成功后 `mark_dirty`。
+     * **无新快捷键**（避开 V/L/P/R/O/T/H/I/M/G/N/K/F 等）。
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     */
+    set_selection_as_mask(): boolean;
     /**
      * 把当前选中元素的锁定设成同一个值，并记入一条撤销记录。
      *
@@ -1558,6 +1591,7 @@ export interface InitOutput {
     readonly infinitecanvas_deselect_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_distribute_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_duplicate_selection: (a: number, b: number, c: number) => any;
+    readonly infinitecanvas_element_masked_by: (a: number, b: bigint) => bigint;
     readonly infinitecanvas_element_name: (a: number, b: bigint) => [number, number];
     readonly infinitecanvas_enter_group: (a: number, b: bigint, c: bigint) => number;
     readonly infinitecanvas_export_frame_png: (a: number, b: bigint, c: number) => [number, number, number, number];
@@ -1615,6 +1649,8 @@ export interface InitOutput {
     readonly infinitecanvas_is_snap_enabled: (a: number) => number;
     readonly infinitecanvas_leave_group: (a: number, b: bigint) => number;
     readonly infinitecanvas_load_stress_scene: (a: number, b: number) => void;
+    readonly infinitecanvas_mask_release_ready: (a: number) => number;
+    readonly infinitecanvas_mask_selection_ready: (a: number) => number;
     readonly infinitecanvas_minimap_element_rects: (a: number, b: number, c: number, d: number) => any;
     readonly infinitecanvas_minimap_epoch: (a: number) => bigint;
     readonly infinitecanvas_minimap_to_world: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
@@ -1632,6 +1668,7 @@ export interface InitOutput {
     readonly infinitecanvas_preview_selection_style: (a: number, b: any) => number;
     readonly infinitecanvas_push_hand_tool: (a: number) => void;
     readonly infinitecanvas_redo: (a: number) => number;
+    readonly infinitecanvas_release_selection_mask: (a: number) => number;
     readonly infinitecanvas_remove_element: (a: number, b: bigint) => number;
     readonly infinitecanvas_rename_element: (a: number, b: bigint, c: number, d: number) => number;
     readonly infinitecanvas_rename_frame: (a: number, b: bigint, c: number, d: number) => number;
@@ -1655,6 +1692,7 @@ export interface InitOutput {
     readonly infinitecanvas_set_image_crop: (a: number, b: any) => number;
     readonly infinitecanvas_set_path_node_mode: (a: number, b: number) => void;
     readonly infinitecanvas_set_rulers_visible: (a: number, b: number) => void;
+    readonly infinitecanvas_set_selection_as_mask: (a: number) => number;
     readonly infinitecanvas_set_selection_locked: (a: number, b: number) => number;
     readonly infinitecanvas_set_selection_style: (a: number, b: any) => number;
     readonly infinitecanvas_set_selection_transform: (a: number, b: any) => number;

@@ -30,6 +30,7 @@ pub mod eyedropper;
 pub mod grid;
 pub mod guides;
 pub mod hit_test;
+pub mod mask;
 pub mod minimap;
 pub mod orient;
 pub mod path_edit;
@@ -97,6 +98,11 @@ pub use guides::{
 };
 pub use hit_test::{click_target, hit_test_point, HitTestOptions, HitTestResult};
 pub use infinitecanvas_math as math;
+pub use mask::{
+    apply_release_mask, apply_set_mask, can_be_mask, can_release_mask, can_set_mask,
+    clear_mask_refs_to, filter_lines_by_mask, filter_tris_by_mask, mask_covers,
+    mask_pair_from_selection, release_targets, SetMaskCommand,
+};
 pub use minimap::{
     build_overview, drag_camera_center, fit_minimap, minimap_to_world, scene_bounds,
     viewport_minimap_rect, world_rect_to_minimap, world_to_minimap, MinimapFrame, MinimapOverview,

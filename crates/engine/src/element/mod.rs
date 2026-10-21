@@ -247,6 +247,7 @@ fn align_is_center(align: &StrokeAlign) -> bool {
 /// - 位置和变换
 /// - 可见性和选中状态
 /// - 层级顺序
+/// - 可选遮罩关系（[`Self::masked_by`]）
 ///
 /// JSON 里除 `id` 以外的字段都可省略：变换缺省为单位变换（旋转 0、缩放 1），
 /// `visible` 缺省为 true。未知字段会被忽略。
@@ -279,6 +280,12 @@ pub struct ElementProps {
     /// `serde(default)` 让还没有该字段的旧 JSON 仍能反序列化；空名称不写出。
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub name: String,
+    /// 裁剪本元素绘制的遮罩源 id。`None` 表示不被遮罩。
+    ///
+    /// `serde(default)` 让旧 JSON 仍可读；未设置时不写出。
+    /// 删除遮罩源时由场景清掉悬挂引用。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub masked_by: Option<ElementId>,
     /// 几何、样式或变换已变化，需要重新生成顶点。
     ///
     /// 运行时状态，不写入场景 JSON。新建和导入的元素默认为 `true`。
@@ -298,6 +305,7 @@ impl PartialEq for ElementProps {
             && self.parent == other.parent
             && self.locked == other.locked
             && self.name == other.name
+            && self.masked_by == other.masked_by
     }
 }
 
@@ -319,6 +327,7 @@ impl ElementProps {
             parent: None,
             locked: false,
             name: String::new(),
+            masked_by: None,
             dirty: true,
         }
     }

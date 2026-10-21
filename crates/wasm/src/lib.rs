@@ -31,10 +31,10 @@ mod transform_api;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{
-    apply_align, apply_boolean, apply_distribute, apply_flip, apply_nudge, apply_rename_element,
-    apply_rename_frame, apply_reparent_into_frame, apply_rotate_quarter, apply_set_locked,
-    apply_set_visibility, apply_stack_reorder, apply_toggle_locked, apply_toggle_visibility,
-    boolean_targets,
+    apply_align, apply_boolean, apply_distribute, apply_flip, apply_nudge, apply_release_mask,
+    apply_rename_element, apply_rename_frame, apply_reparent_into_frame, apply_rotate_quarter,
+    apply_set_locked, apply_set_mask, apply_set_visibility, apply_stack_reorder,
+    apply_toggle_locked, apply_toggle_visibility, boolean_targets, can_release_mask, can_set_mask,
     element::text::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
@@ -872,6 +872,56 @@ impl InfiniteCanvas {
         };
         self.selection.select_element(&mut self.scene, id, false);
         true
+    }
+
+    /// 当前选择是否可以「设为遮罩」（≥2 个未锁定叶子，最上层可作 mask）。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// if (canvas.mask_selection_ready()) canvas.set_selection_as_mask();
+    /// ```
+    #[wasm_bindgen]
+    pub fn mask_selection_ready(&self) -> bool {
+        can_set_mask(&self.scene, &self.selection.selected_ids())
+    }
+
+    /// 当前选择是否可以「解除遮罩」。
+    #[wasm_bindgen]
+    pub fn mask_release_ready(&self) -> bool {
+        can_release_mask(&self.scene, &self.selection.selected_ids())
+    }
+
+    /// 把选中最上层形状设为遮罩，裁剪其余选中目标。一次撤销。
+    ///
+    /// 空选 / 锁定 / 不足两个有效叶子时不入栈。成功后 `mark_dirty`。
+    /// **无新快捷键**（避开 V/L/P/R/O/T/H/I/M/G/N/K/F 等）。
+    ///
+    /// # 返回
+    /// 是否写入了撤销栈
+    #[wasm_bindgen]
+    pub fn set_selection_as_mask(&mut self) -> bool {
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        apply_set_mask(&mut self.command_history, &mut self.scene, &selected)
+    }
+
+    /// 解除选中相关的遮罩关系。一次撤销。
+    ///
+    /// 选中目标上的 `masked_by`，或选中 mask 源时清掉所有指向它的目标。
+    #[wasm_bindgen]
+    pub fn release_selection_mask(&mut self) -> bool {
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        apply_release_mask(&mut self.command_history, &mut self.scene, &selected)
+    }
+
+    /// 元素当前的遮罩源 id。没有则返回 0。
+    #[wasm_bindgen]
+    pub fn element_masked_by(&self, id: u64) -> u64 {
+        self.scene
+            .get(id)
+            .and_then(|el| el.as_element().props().masked_by)
+            .unwrap_or(0)
     }
 
     // ========== 撤销/重做 API ==========
@@ -6004,5 +6054,24 @@ mod tests {
         assert_eq!(canvas.get_undo_count(), 0);
         assert!(canvas.selection.is_selected(left));
         assert!(canvas.selection.is_selected(right));
+    }
+
+    #[test]
+    fn mask_selection_sets_and_releases_with_undo() {
+        let mut canvas = blank_canvas();
+        let bottom = canvas.add_rectangle(0.0, 0.0, 40.0, 40.0, Some("#ff0000".into()), None, 0.0);
+        let top = canvas.add_rectangle(0.0, 0.0, 16.0, 16.0, Some("#0000ff".into()), None, 0.0);
+        assert!(!canvas.mask_selection_ready());
+        canvas.select_element(bottom, false);
+        canvas.select_element(top, true);
+        assert!(canvas.mask_selection_ready());
+        assert!(canvas.set_selection_as_mask());
+        assert_eq!(canvas.element_masked_by(bottom), top);
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.mask_release_ready());
+        assert!(canvas.release_selection_mask());
+        assert_eq!(canvas.element_masked_by(bottom), 0);
+        assert!(canvas.undo());
+        assert_eq!(canvas.element_masked_by(bottom), top);
     }
 }

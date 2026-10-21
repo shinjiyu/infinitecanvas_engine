@@ -828,6 +828,18 @@ function dispatchShortcut(shortcut, engine) {
     case 'ungroup':
       ungroupSelection(engine);
       break;
+    case 'setMask':
+      if (typeof engine.set_selection_as_mask === 'function' && engine.set_selection_as_mask()) {
+        scheduleAutosave(engine);
+        setStatus('已设为遮罩');
+      }
+      break;
+    case 'releaseMask':
+      if (typeof engine.release_selection_mask === 'function' && engine.release_selection_mask()) {
+        scheduleAutosave(engine);
+        setStatus('已解除遮罩');
+      }
+      break;
     case 'copy':
       enqueueClipboard(() => copySelection(engine));
       break;
@@ -1272,6 +1284,8 @@ const CONTEXT_ACTIONS = {
   delete: { handler: 'delete' },
   group: { handler: 'group' },
   ungroup: { handler: 'ungroup' },
+  'set-mask': { handler: 'setMask' },
+  'release-mask': { handler: 'releaseMask' },
   front: { handler: 'reorder', order: 'front' },
   back: { handler: 'reorder', order: 'back' },
   forward: { handler: 'reorder', order: 'forward' },
@@ -1366,6 +1380,8 @@ function openContextMenu(canvas, engine, event) {
       clipboardHasContent,
       canGroup,
       canUngroup,
+      canSetMask: typeof engine.mask_selection_ready === 'function' && engine.mask_selection_ready(),
+      canReleaseMask: typeof engine.mask_release_ready === 'function' && engine.mask_release_ready(),
     });
     mountContextMenu(menu, items, (action) => runContextAction(engine, action, pastePoint));
     menu.hidden = false;
@@ -1837,6 +1853,46 @@ function syncOrientControls(engine) {
  *
  * @param {WasmCanvas} engine
  */
+
+/**
+ * 遮罩按钮：设为遮罩需 ≥2 个有效叶子；解除遮罩在选中带关系时可用。无新快捷键。
+ * @param {import('../packages/core/wasm/infinitecanvas_wasm.js').InfiniteCanvas} engine
+ */
+function syncMaskControls(engine) {
+  const canSet = typeof engine.mask_selection_ready === 'function' && engine.mask_selection_ready();
+  const canRelease = typeof engine.mask_release_ready === 'function' && engine.mask_release_ready();
+  document.querySelectorAll('[data-mask="set"]').forEach((button) => {
+    button.disabled = !canSet;
+  });
+  document.querySelectorAll('[data-mask="release"]').forEach((button) => {
+    button.disabled = !canRelease;
+  });
+}
+
+/**
+ * @param {import('../packages/core/wasm/infinitecanvas_wasm.js').InfiniteCanvas} engine
+ */
+function bindMaskControls(engine) {
+  document.querySelectorAll('[data-mask]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const action = button.getAttribute('data-mask');
+      if (action === 'set' && typeof engine.set_selection_as_mask === 'function') {
+        if (engine.set_selection_as_mask()) {
+          scheduleAutosave(engine);
+          setStatus('已设为遮罩');
+        }
+        return;
+      }
+      if (action === 'release' && typeof engine.release_selection_mask === 'function') {
+        if (engine.release_selection_mask()) {
+          scheduleAutosave(engine);
+          setStatus('已解除遮罩');
+        }
+      }
+    });
+  });
+}
+
 function syncBooleanControls(engine) {
   const enabled = typeof engine.boolean_selection_ready === 'function'
     && engine.boolean_selection_ready();
@@ -2855,6 +2911,7 @@ function bindInput(canvas, engine) {
   bindPropertyPanel(engine);
   bindAlignControls(engine);
   bindBooleanControls(engine);
+  bindMaskControls(engine);
   bindOrientControls(engine);
   document.addEventListener('pointerdown', (event) => {
     if (!contextMenuOpen) return;
@@ -3230,6 +3287,7 @@ function updateHud(engine) {
   syncPropertyPanel(engine);
   syncAlignControls(engine);
   syncBooleanControls(engine);
+  syncMaskControls(engine);
   syncOrientControls(engine);
   syncSnapControls(engine);
   syncRulerControls(engine);

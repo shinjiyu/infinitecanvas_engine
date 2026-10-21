@@ -109,7 +109,7 @@ function withHint(item, mac) {
  * 选中菜单的粘贴只在剪贴板有文本时出现。成组至少两个选中才出现，
  * 解组只在唯一选中是分组时出现。空白菜单始终有粘贴、全选、缩放到适合。
  *
- * @param {{ kind: 'canvas' | 'selection', clipboardHasContent?: boolean, canGroup?: boolean, canUngroup?: boolean }} state
+ * @param {{ kind: 'canvas' | 'selection', clipboardHasContent?: boolean, canGroup?: boolean, canUngroup?: boolean, canSetMask?: boolean, canReleaseMask?: boolean }} state
  * @param {boolean} [mac] 键帽是否按 Mac 显示
  * @returns {Array<{ id: string, label: string, hint?: string } | { type: 'separator' }>}
  */
@@ -128,6 +128,8 @@ export function contextMenuItems(state, mac = prefersMacModifier()) {
     const structure = [];
     if (state.canGroup) structure.push(withHint({ id: 'group', label: '成组' }, mac));
     if (state.canUngroup) structure.push(withHint({ id: 'ungroup', label: '解组' }, mac));
+    if (state.canSetMask) structure.push({ id: 'set-mask', label: '设为遮罩' });
+    if (state.canReleaseMask) structure.push({ id: 'release-mask', label: '解除遮罩' });
     if (structure.length > 0) {
       items.push({ type: 'separator' }, ...structure);
     }
