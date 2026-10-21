@@ -552,7 +552,8 @@ fn write_polygon(polygon: &Polygon) -> String {
 }
 
 fn write_line(line: &Line) -> String {
-    let (start, end, arrow) = line.local_shaft_and_arrow();
+    // Path-approximated markers (same triangles as WebGPU), not SVG marker-start/end.
+    let (start, end, start_arrow, end_arrow) = line.local_shaft_and_markers();
     let (color, _) = stroke_paint(&line.style);
     let mut body = String::new();
     body.push_str(&format!(
@@ -564,7 +565,7 @@ fn write_line(line: &Line) -> String {
     ));
     push_stroke_only(&mut body, &line.style);
     body.push_str("/>\n");
-    if let Some(tri) = arrow {
+    for tri in [start_arrow, end_arrow].into_iter().flatten() {
         body.push_str("    <polygon points=\"");
         body.push_str(&points_attr(&tri));
         body.push_str("\" fill=\"");
@@ -1020,7 +1021,9 @@ fn stroke_overflow(element: &AnyElement) -> f32 {
             frame.style.stroke_width,
             &frame.props.transform,
         ),
-        AnyElement::Line(line) if line.arrow() => arrow_overflow(line),
+        AnyElement::Line(line) if line.start_marker().is_some() || line.end_marker().is_some() => {
+            arrow_overflow(line)
+        }
         AnyElement::Line(_)
         | AnyElement::Path(_)
         | AnyElement::Image(_)

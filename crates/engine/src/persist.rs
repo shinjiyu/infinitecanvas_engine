@@ -1498,6 +1498,14 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("arrow");
+        value["elements"][3]["data"]
+            .as_object_mut()
+            .unwrap()
+            .remove("end_marker");
+        value["elements"][3]["data"]
+            .as_object_mut()
+            .unwrap()
+            .remove("start_marker");
 
         let restored = Scene::from_json(&value.to_string()).unwrap();
         match restored.get(4).unwrap() {

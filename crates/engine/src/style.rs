@@ -26,8 +26,8 @@
 
 use crate::blend::BlendMode;
 use crate::element::{
-    DropShadow, ElementId, ElementStyle, FillKind, FontWeight, GradientStop, Polygon, PolygonKind,
-    Rectangle, StrokeCap, StrokeJoin, TextAlign,
+    DropShadow, ElementId, ElementStyle, FillKind, FontWeight, GradientStop, Line, LineMarker,
+    Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin, TextAlign,
 };
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::{Color, Vec2};
@@ -71,9 +71,19 @@ pub struct TextPaint {
 /// 一个元素上可撤销的样式快照。
 #[derive(Debug, Clone, PartialEq)]
 pub enum StyleSnapshot {
-    /// 圆、直线或路径。矩形用 [`StyleSnapshot::Rectangle`]，以便带上圆角。
+    /// 圆或路径。直线用 [`StyleSnapshot::Line`]，以便带上起止箭头。
+    /// 矩形用 [`StyleSnapshot::Rectangle`]，以便带上圆角。
     /// 多边形和星形用 [`StyleSnapshot::Polygon`]。
     Shape(ElementStyle),
+    /// 直线的画笔和起止箭头。一次补丁仍是一条撤销记录。
+    Line {
+        /// 描边色、线宽、虚线、线帽、线结、投影、模糊等。
+        style: ElementStyle,
+        /// 起点箭头。
+        start_marker: LineMarker,
+        /// 终点箭头。
+        end_marker: LineMarker,
+    },
     /// 矩形的画笔和圆角。一次补丁同时改这两项，撤销仍是一条记录。
     Rectangle {
         /// 填充、描边、线宽、不透明度。
@@ -168,6 +178,10 @@ pub struct StylePatch {
     ///
     /// 没出现在补丁里就保持原值，也不改渐变或混合模式。
     pub blur_radius: Option<f32>,
+    /// 直线起点箭头。只写到直线上；空选或非直线是 no-op。
+    pub start_marker: Option<LineMarker>,
+    /// 直线终点箭头。只写到直线上；空选或非直线是 no-op。
+    pub end_marker: Option<LineMarker>,
 }
 
 /// 当前选择的公共样式。
@@ -231,6 +245,12 @@ pub struct SelectionStyle {
     pub blur_radius: StyleField<f32>,
     /// 选择里有形状、文本、图片或画板，可以改图层模糊。
     pub blur_supported: bool,
+    /// 直线起点箭头。选择里没有直线时为 [`StyleField::Absent`]。
+    pub start_marker: StyleField<LineMarker>,
+    /// 直线终点箭头。选择里没有直线时为 [`StyleField::Absent`]。
+    pub end_marker: StyleField<LineMarker>,
+    /// 选择里有直线（含组内的直线）。箭头控件只对它们出现。
+    pub has_line: bool,
     /// 选择里有形状（含组内的形状）。
     pub has_shape: bool,
     /// 选择里有矩形（含组内的矩形）。圆角只对它们生效。
@@ -259,6 +279,19 @@ impl StyleSnapshot {
         let original = self.clone();
         match self {
             Self::Shape(style) => apply_shape_paint(style, patch),
+            Self::Line {
+                style,
+                start_marker,
+                end_marker,
+            } => {
+                apply_shape_paint(style, patch);
+                if let Some(marker) = patch.start_marker {
+                    *start_marker = marker;
+                }
+                if let Some(marker) = patch.end_marker {
+                    *end_marker = marker;
+                }
+            }
             Self::Rectangle {
                 style,
                 corner_radius,
@@ -398,7 +431,11 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             inner_radius: polygon.inner_radius(),
             kind: polygon.kind(),
         }),
-        AnyElement::Line(line) => Some(StyleSnapshot::Shape(line.style.clone())),
+        AnyElement::Line(line) => Some(StyleSnapshot::Line {
+            style: line.style.clone(),
+            start_marker: line.start_marker,
+            end_marker: line.end_marker,
+        }),
         AnyElement::Path(path) => Some(StyleSnapshot::Shape(path.style.clone())),
         AnyElement::Text(text) => Some(StyleSnapshot::Text(TextPaint {
             font_size: text.font_size,
@@ -431,7 +468,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
         Some(AnyElement::Rectangle(rect)) => assign_rectangle(rect, snapshot),
         Some(AnyElement::Circle(circle)) => assign_shape(&mut circle.style, snapshot),
         Some(AnyElement::Polygon(polygon)) => assign_polygon(polygon, snapshot),
-        Some(AnyElement::Line(line)) => assign_shape(&mut line.style, snapshot),
+        Some(AnyElement::Line(line)) => assign_line(line, snapshot),
         Some(AnyElement::Path(path)) => assign_shape(&mut path.style, snapshot),
         Some(AnyElement::Text(text)) => {
             if let StyleSnapshot::Text(paint) = snapshot {
@@ -505,6 +542,9 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut fill_radii = Vec::new();
     let mut blends = Vec::new();
     let mut layer_blurs = Vec::new();
+    let mut start_markers = Vec::new();
+    let mut end_markers = Vec::new();
+    let mut has_line = false;
     let mut has_shape = false;
     let mut has_polygon = false;
     let mut has_star = false;
@@ -514,6 +554,44 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
 
     for id in style_target_ids(scene, ids) {
         match capture_style(scene, id) {
+            Some(StyleSnapshot::Line {
+                style,
+                start_marker,
+                end_marker,
+            }) => {
+                has_shape = true;
+                has_line = true;
+                push_shape_paint(
+                    &mut fills,
+                    &mut strokes,
+                    &mut widths,
+                    &mut opacities,
+                    &style,
+                );
+                push_gradient(
+                    &mut fill_kinds,
+                    &mut fill_stops,
+                    &mut fill_angles,
+                    &mut fill_centers,
+                    &mut fill_radii,
+                    &style,
+                );
+                dashes.push(style.stroke_dash);
+                caps.push(style.stroke_cap);
+                joins.push(style.stroke_join);
+                blends.push(style.blend_mode);
+                push_shadow(
+                    &mut shadow_xs,
+                    &mut shadow_ys,
+                    &mut shadow_blurs,
+                    &mut shadow_colors,
+                    &mut shadow_opacities,
+                    style.shadow,
+                );
+                layer_blurs.push(crate::element::blur::sanitize_blur(style.blur_radius));
+                start_markers.push(start_marker);
+                end_markers.push(end_marker);
+            }
             Some(StyleSnapshot::Shape(style)) => {
                 has_shape = true;
                 push_shape_paint(
@@ -697,6 +775,9 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         fill_radius: fold(fill_radii),
         blur_radius: fold(layer_blurs),
         blur_supported: has_shape || has_text || has_image,
+        start_marker: fold(start_markers),
+        end_marker: fold(end_markers),
+        has_line,
         has_shape,
         has_rect,
         has_text,
@@ -875,6 +956,26 @@ fn assign_polygon(polygon: &mut Polygon, snapshot: &StyleSnapshot) -> bool {
     }
 }
 
+fn assign_line(line: &mut Line, snapshot: &StyleSnapshot) -> bool {
+    match snapshot {
+        StyleSnapshot::Line {
+            style,
+            start_marker,
+            end_marker,
+        } => {
+            line.style = style.clone();
+            line.start_marker = *start_marker;
+            line.end_marker = *end_marker;
+            true
+        }
+        StyleSnapshot::Shape(style) => {
+            line.style = style.clone();
+            true
+        }
+        _ => false,
+    }
+}
+
 fn assign_shape(style: &mut ElementStyle, snapshot: &StyleSnapshot) -> bool {
     if let StyleSnapshot::Shape(next) = snapshot {
         *style = next.clone();
@@ -918,8 +1019,8 @@ fn finite_font(value: Option<f32>) -> Option<f32> {
 mod tests {
     use super::*;
     use crate::element::{
-        DropShadow, FillKind, Frame, GradientStop, Image, Line, Path, Rectangle, StrokeCap,
-        StrokeJoin, Text,
+        DropShadow, FillKind, Frame, GradientStop, Image, Line, LineMarker, Path, Rectangle,
+        StrokeCap, StrokeJoin, Text,
     };
     use crate::Element;
     use crate::{
@@ -932,11 +1033,12 @@ mod tests {
         shape_style(scene, id).fill
     }
 
-    /// 圆、直线、路径是 [`StyleSnapshot::Shape`]，矩形是 [`StyleSnapshot::Rectangle`]。
+    /// 圆、路径是 [`StyleSnapshot::Shape`]，直线是 [`StyleSnapshot::Line`]，矩形是 [`StyleSnapshot::Rectangle`]。
     fn shape_style(scene: &Scene, id: ElementId) -> ElementStyle {
         match capture_style(scene, id) {
             Some(
                 StyleSnapshot::Shape(style)
+                | StyleSnapshot::Line { style, .. }
                 | StyleSnapshot::Rectangle { style, .. }
                 | StyleSnapshot::Polygon { style, .. },
             ) => style,
@@ -2265,6 +2367,94 @@ mod tests {
                 assert_eq!(text.font_weight, FontWeight::Regular);
             }
             other => panic!("text, got {other:?}"),
+        }
+    }
+    #[test]
+    fn line_markers_are_one_undoable_set_style_and_noop_on_non_lines() {
+        let mut scene = Scene::new();
+        scene.add_line(Line::from_world(
+            1,
+            Vec2::ZERO,
+            Vec2::new(80.0, 0.0),
+            ElementStyle::stroke_only(Color::BLACK, 4.0),
+            false,
+        ));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(0.0, 20.0),
+            Vec2::new(10.0, 10.0),
+        ));
+
+        let empty = StylePatch {
+            end_marker: Some(LineMarker::Arrow),
+            ..StylePatch::default()
+        };
+        assert!(SetStyleCommand::from_patch(&scene, &[], &empty).is_none());
+        assert!(SetStyleCommand::from_patch(&scene, &[2], &empty).is_none());
+
+        let summary = selection_style(&scene, &[1]);
+        assert!(summary.has_line);
+        assert_eq!(summary.end_marker, StyleField::Uniform(LineMarker::None));
+        assert_eq!(summary.start_marker, StyleField::Uniform(LineMarker::None));
+
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(
+                SetStyleCommand::from_patch(
+                    &scene,
+                    &[1],
+                    &StylePatch {
+                        end_marker: Some(LineMarker::Arrow),
+                        start_marker: Some(LineMarker::Triangle),
+                        ..StylePatch::default()
+                    },
+                )
+                .unwrap(),
+            ),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert!(scene.has_dirty_elements());
+        match scene.get(1).unwrap() {
+            AnyElement::Line(line) => {
+                assert_eq!(line.end_marker(), LineMarker::Arrow);
+                assert_eq!(line.start_marker(), LineMarker::Triangle);
+                assert!(line.arrow());
+                assert_eq!(line.generate_vertices().len(), 12);
+            }
+            other => panic!("line, got {other:?}"),
+        }
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"end_marker\":\"arrow\""));
+        assert!(json.contains("\"start_marker\":\"triangle\""));
+        assert!(json.contains("\"arrow\":true"));
+        let restored = Scene::from_json(&json).unwrap();
+        match restored.get(1).unwrap() {
+            AnyElement::Line(line) => {
+                assert_eq!(line.end_marker(), LineMarker::Arrow);
+                assert_eq!(line.start_marker(), LineMarker::Triangle);
+            }
+            other => panic!("line, got {other:?}"),
+        }
+
+        let mixed = selection_style(&scene, &[1, 2]);
+        assert!(mixed.has_line);
+        assert_eq!(mixed.end_marker, StyleField::Uniform(LineMarker::Arrow));
+
+        assert!(history.undo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Line(line) => {
+                assert_eq!(line.end_marker(), LineMarker::None);
+                assert_eq!(line.start_marker(), LineMarker::None);
+                assert!(!line.arrow());
+            }
+            other => panic!("line, got {other:?}"),
+        }
+        assert!(history.redo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Line(line) => assert_eq!(line.end_marker(), LineMarker::Arrow),
+            other => panic!("line, got {other:?}"),
         }
     }
 }

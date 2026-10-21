@@ -1163,6 +1163,8 @@ export class InfiniteCanvas {
      * - `blendMode` 为 `normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。
      *   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true。未写出时不改模糊
      * - `blurRadius` 是图层高斯模糊的标准差。没有形状、文本或图片时 `blurSupported` 为 false。多选不一致时 `blurRadiusMixed` 为 true。画板算形状。未写出时不改渐变或混合模式
+     * - `textAlign` 为 `left` / `center` / `right`。`fontWeight` 为 `regular` / `bold`。只统计文本。多选不一致时对应的 `*Mixed` 为 true
+     * - `startMarker` / `endMarker`：`none` / `arrow` / `triangle`。仅直线（`hasLine`）。多选不一致时对应 `*Mixed` 为 true
      *
      * # 示例（JavaScript）
      * ```js
@@ -2047,7 +2049,8 @@ export class InfiniteCanvas {
      * `strokeWidth`、`opacity`、`fontSize`、`cornerRadius`、`sides`、`innerRadius` 是数字。
      * `cornerRadius` 也可以写成 `corner_radius`。`sides` 也可以写成 `points`，并钳到 3–64。
      * `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
-     * `textColor` 是十六进制颜色。圆角只写到矩形上。
+     * `textColor` 是十六进制颜色。`textAlign` 为 `left` / `center` / `right`，也可写成 `text_align` / `align`。
+     * `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。对齐与字重只写到文本上。圆角只写到矩形上。
      * `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
      * `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
      * `blurRadius` 也可以写成 `blur_radius`。形状、文本、图片和画板都接受图层模糊。负数收成 0。
@@ -2167,7 +2170,7 @@ export class InfiniteCanvas {
      *
      * # 返回
      * 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
-     * `color`, `align`, `fontFamily`, `paddingWorld`, `textureId`
+     * `color`, `align`, `fontWeight`, `fontFamily`, `paddingWorld`, `textureId`
      * @returns {Array<any>}
      */
     take_text_raster_jobs() {
@@ -4133,12 +4136,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2916, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2922, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___wasm_bindgen_fe1d14e6b7d09dd3___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_fe1d14e6b7d09dd3___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 508, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 511, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___wasm_bindgen_fe1d14e6b7d09dd3___JsValue______true_);
             return ret;
         },

@@ -147,6 +147,53 @@ impl StrokeJoin {
     }
 }
 
+/// 直线端点箭头样式。
+///
+/// JSON 用小写名字，缺省为 [`LineMarker::None`]。旧文档只有布尔 `arrow` 时，
+/// 反序列化会把 `arrow: true` 收成终点 [`LineMarker::Arrow`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LineMarker {
+    /// 无箭头。
+    #[default]
+    None,
+    /// 细长填充三角箭头（默认箭头几何）。
+    Arrow,
+    /// 更接近等边的填充三角箭头。
+    Triangle,
+}
+
+impl LineMarker {
+    /// 属性面板和 JSON 用的名字。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Arrow => "arrow",
+            Self::Triangle => "triangle",
+        }
+    }
+
+    /// 解析 `none` / `arrow` / `triangle`。无法识别时返回 `None`。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "none" => Some(Self::None),
+            "arrow" => Some(Self::Arrow),
+            "triangle" => Some(Self::Triangle),
+            _ => None,
+        }
+    }
+
+    /// 是否为 [`Self::None`]。
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
+
+    /// 是否绘制端点标记。
+    pub fn is_some(&self) -> bool {
+        *self != Self::None
+    }
+}
+
 /// 元素通用属性
 ///
 /// # 职责

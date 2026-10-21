@@ -183,6 +183,7 @@ fn paint_from_snapshot(
 ) -> SampledPaint {
     match snapshot {
         StyleSnapshot::Shape(style)
+        | StyleSnapshot::Line { style, .. }
         | StyleSnapshot::Rectangle { style, .. }
         | StyleSnapshot::Polygon { style, .. } => SampledPaint {
             id,
@@ -234,6 +235,7 @@ mod tests {
         match capture_style(scene, id) {
             Some(
                 StyleSnapshot::Shape(style)
+                | StyleSnapshot::Line { style, .. }
                 | StyleSnapshot::Rectangle { style, .. }
                 | StyleSnapshot::Polygon { style, .. },
             ) => style,
