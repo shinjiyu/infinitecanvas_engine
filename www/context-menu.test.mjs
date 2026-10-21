@@ -134,3 +134,27 @@ test('the menu stays inside the viewport', () => {
   assert.deepEqual(clampMenuPosition(900, 700, 180, 220, 800, 600), { x: 612, y: 372 });
   assert.deepEqual(clampMenuPosition(4, 2, 180, 40, 800, 600), { x: 8, y: 8 });
 });
+
+test('mask actions appear only when that action applies', () => {
+  const setOnly = contextMenuItems({
+    kind: 'selection',
+    clipboardHasContent: false,
+    canGroup: false,
+    canUngroup: false,
+    canSetMask: true,
+    canReleaseMask: false,
+  }, false);
+  assert.ok(ids(setOnly).includes('set-mask'));
+  assert.ok(!ids(setOnly).includes('release-mask'));
+
+  const releaseOnly = contextMenuItems({
+    kind: 'selection',
+    clipboardHasContent: false,
+    canGroup: false,
+    canUngroup: false,
+    canSetMask: false,
+    canReleaseMask: true,
+  }, false);
+  assert.ok(ids(releaseOnly).includes('release-mask'));
+  assert.ok(!ids(releaseOnly).includes('set-mask'));
+});

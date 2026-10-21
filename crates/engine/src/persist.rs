@@ -798,6 +798,12 @@ fn pixel_center_world(region: Rect, width: u32, height: u32, x: u32, y: u32) -> 
 }
 
 fn sample_element(scene: &Scene, element: &AnyElement, world: Vec2) -> Option<Color> {
+    // 遮罩：目标只在 mask 填充轮廓内保留颜色；mask 自身照常采样。
+    if let Some(mask_id) = element.as_element().props().masked_by {
+        if !crate::mask::mask_covers(scene, mask_id, world) {
+            return None;
+        }
+    }
     match element {
         AnyElement::Rectangle(rect) => sample_rectangle(rect, world),
         AnyElement::Circle(circle) => sample_circle(circle, world),

@@ -742,6 +742,15 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 元素当前的遮罩源 id。没有则返回 0。
+     * @param {bigint} id
+     * @returns {bigint}
+     */
+    element_masked_by(id) {
+        const ret = wasm.infinitecanvas_element_masked_by(this.__wbg_ptr, id);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
      * 元素显示名称。不存在时返回 `null`。
      *
      * 未自定义时画板仍返回其 `Frame::name`（缺省 `"Frame"`），其它类型返回空字符串。
@@ -1552,6 +1561,27 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_load_stress_scene(this.__wbg_ptr, count);
     }
     /**
+     * 当前选择是否可以「解除遮罩」。
+     * @returns {boolean}
+     */
+    mask_release_ready() {
+        const ret = wasm.infinitecanvas_mask_release_ready(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 当前选择是否可以「设为遮罩」（≥2 个未锁定叶子，最上层可作 mask）。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * if (canvas.mask_selection_ready()) canvas.set_selection_as_mask();
+     * ```
+     * @returns {boolean}
+     */
+    mask_selection_ready() {
+        const ret = wasm.infinitecanvas_mask_selection_ready(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 元素在小地图上的简化外框。
      *
      * 同一几何版本和尺寸会复用缓存，避免 10 万元素时每帧重扫。
@@ -1786,6 +1816,16 @@ export class InfiniteCanvas {
      */
     redo() {
         const ret = wasm.infinitecanvas_redo(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 解除选中相关的遮罩关系。一次撤销。
+     *
+     * 选中目标上的 `masked_by`，或选中 mask 源时清掉所有指向它的目标。
+     * @returns {boolean}
+     */
+    release_selection_mask() {
+        const ret = wasm.infinitecanvas_release_selection_mask(this.__wbg_ptr);
         return ret !== 0;
     }
     /**
@@ -2151,6 +2191,20 @@ export class InfiniteCanvas {
      */
     set_rulers_visible(visible) {
         wasm.infinitecanvas_set_rulers_visible(this.__wbg_ptr, visible);
+    }
+    /**
+     * 把选中最上层形状设为遮罩，裁剪其余选中目标。一次撤销。
+     *
+     * 空选 / 锁定 / 不足两个有效叶子时不入栈。成功后 `mark_dirty`。
+     * **无新快捷键**（避开 V/L/P/R/O/T/H/I/M/G/N/K/F 等）。
+     *
+     * # 返回
+     * 是否写入了撤销栈
+     * @returns {boolean}
+     */
+    set_selection_as_mask() {
+        const ret = wasm.infinitecanvas_set_selection_as_mask(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * 把当前选中元素的锁定设成同一个值，并记入一条撤销记录。
@@ -4303,7 +4357,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2954, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2962, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___wasm_bindgen_fe1d14e6b7d09dd3___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_fe1d14e6b7d09dd3___JsError___true_);
             return ret;
         },

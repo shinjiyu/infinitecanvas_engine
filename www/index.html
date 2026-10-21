@@ -858,6 +858,13 @@
           </div>
         </div>
         <div class="group">
+          <p class="group-label">遮罩</p>
+          <div class="boolean-grid">
+            <button type="button" data-mask="set" disabled title="最上层形状裁剪其余选中目标（可撤销，无快捷键）">设为遮罩</button>
+            <button type="button" data-mask="release" disabled title="解除选中相关的遮罩关系（可撤销）">解除遮罩</button>
+          </div>
+        </div>
+        <div class="group">
           <p class="group-label">翻转 / 旋转</p>
           <div class="orient-grid">
             <button type="button" data-flip="horizontal" disabled title="水平翻转（Shift+H）">水平翻转</button>
@@ -971,6 +978,10 @@
             <button type="button" data-boolean="subtract" disabled title="相减：最上层减去下层（前 − 后）">相减</button>
             <button type="button" data-boolean="intersect" disabled title="交集：只保留重叠区域">交集</button>
             <button type="button" data-boolean="xor" disabled title="异或：去掉重叠区域">异或</button>
+          </div>
+          <div class="boolean-grid">
+            <button type="button" data-mask="set" disabled title="最上层形状裁剪其余选中目标（可撤销，无快捷键）">设为遮罩</button>
+            <button type="button" data-mask="release" disabled title="解除选中相关的遮罩关系（可撤销）">解除遮罩</button>
           </div>
           <div class="orient-grid">
             <button type="button" data-flip="horizontal" disabled title="水平翻转（Shift+H）">水平翻转</button>

@@ -270,12 +270,143 @@ struct ExportedLeaf {
 }
 
 fn leaf_fragment(scene: &Scene, element: &AnyElement) -> Option<ExportedLeaf> {
-    match element {
+    let mut leaf = match element {
         AnyElement::Image(image) => Some(export_image(scene, image)),
         other => write_element(other).map(|fragment| ExportedLeaf {
             fragment,
             counts_toward_view_box: true,
         }),
+    }?;
+    if let Some(mask_id) = element.as_element().props().masked_by {
+        leaf.fragment = wrap_with_mask_clip(scene, element.id(), mask_id, &leaf.fragment);
+    }
+    Some(leaf)
+}
+
+/// 用 mask 的填充轮廓包一层 `clipPath`。mask 缺失时输出空裁剪（目标不可见）。
+fn wrap_with_mask_clip(
+    scene: &Scene,
+    target_id: ElementId,
+    mask_id: ElementId,
+    body: &str,
+) -> String {
+    let clip_id = format!("mask-clip-{target_id}");
+    let shape = mask_clip_shape(scene, mask_id).unwrap_or_else(|| {
+        // 无有效轮廓：空 path，目标被完全裁掉。
+        "      <path d=\"M0 0\"/>\n".into()
+    });
+    format!(
+        "  <defs>\n    <clipPath id=\"{clip_id}\" clipPathUnits=\"userSpaceOnUse\">\n{shape}    </clipPath>\n  </defs>\n  <g clip-path=\"url(#{clip_id})\">\n{body}  </g>\n"
+    )
+}
+
+fn mask_clip_shape(scene: &Scene, mask_id: ElementId) -> Option<String> {
+    let element = scene.get(mask_id)?;
+    if !scene.is_effectively_visible(mask_id) {
+        return None;
+    }
+    match element {
+        AnyElement::Rectangle(rect) => {
+            let w = rect.size.x.abs();
+            let h = rect.size.y.abs();
+            let r = rect.effective_corner_radius();
+            let mut inner = format!(
+                "      <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
+                fmt_num(-w * 0.5),
+                fmt_num(-h * 0.5),
+                fmt_num(w),
+                fmt_num(h),
+            );
+            if r > 0.0 {
+                inner.push_str(&format!(" rx=\"{}\" ry=\"{}\"", fmt_num(r), fmt_num(r)));
+            }
+            inner.push_str("/>\n");
+            Some(clip_transformed(&rect.props.transform, &inner))
+        }
+        AnyElement::Circle(circle) => {
+            let inner = format!(
+                "      <circle cx=\"0\" cy=\"0\" r=\"{}\"/>\n",
+                fmt_num(circle.radius.abs())
+            );
+            Some(clip_transformed(&circle.props.transform, &inner))
+        }
+        AnyElement::Polygon(polygon) => {
+            let points = polygon.local_points();
+            if points.len() < 3 {
+                return None;
+            }
+            let mut pts = String::new();
+            for (i, p) in points.iter().enumerate() {
+                if i > 0 {
+                    pts.push(' ');
+                }
+                pts.push_str(&format!("{},{}", fmt_num(p.x), fmt_num(p.y)));
+            }
+            let inner = format!("      <polygon points=\"{pts}\"/>\n");
+            Some(clip_transformed(&polygon.props.transform, &inner))
+        }
+        AnyElement::Frame(frame) => {
+            let proxy = frame.shape_proxy();
+            let w = proxy.size.x.abs();
+            let h = proxy.size.y.abs();
+            let inner = format!(
+                "      <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/>\n",
+                fmt_num(-w * 0.5),
+                fmt_num(-h * 0.5),
+                fmt_num(w),
+                fmt_num(h),
+            );
+            Some(clip_transformed(&proxy.props.transform, &inner))
+        }
+        AnyElement::Path(path) => {
+            let d = path_clip_d(path)?;
+            let inner = format!("      <path d=\"{d}\" fill-rule=\"evenodd\"/>\n");
+            Some(clip_transformed(&path.props.transform, &inner))
+        }
+        _ => None,
+    }
+}
+
+fn clip_transformed(transform: &Transform, inner: &str) -> String {
+    if let Some(matrix) = matrix_value(transform) {
+        format!("      <g transform=\"matrix({matrix})\">\n{inner}      </g>\n")
+    } else {
+        inner.to_string()
+    }
+}
+
+fn path_clip_d(path: &crate::element::Path) -> Option<String> {
+    if path.is_filled() {
+        let mut d = String::new();
+        for shape in path.shapes() {
+            for ring in &shape.rings {
+                if ring.len() < 3 {
+                    continue;
+                }
+                for (i, p) in ring.iter().enumerate() {
+                    let cmd = if i == 0 { 'M' } else { 'L' };
+                    d.push_str(&format!("{cmd}{} {} ", fmt_num(p.x), fmt_num(p.y)));
+                }
+                d.push_str("Z ");
+            }
+        }
+        if d.is_empty() {
+            None
+        } else {
+            Some(d)
+        }
+    } else {
+        let points = path.points();
+        if points.len() < 3 {
+            return None;
+        }
+        let mut d = String::new();
+        for (i, p) in points.iter().enumerate() {
+            let cmd = if i == 0 { 'M' } else { 'L' };
+            d.push_str(&format!("{cmd}{} {} ", fmt_num(p.x), fmt_num(p.y)));
+        }
+        d.push('Z');
+        Some(d)
     }
 }
 

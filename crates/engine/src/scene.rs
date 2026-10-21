@@ -443,6 +443,28 @@ impl Scene {
         if selected {
             self.selection_epoch = self.selection_epoch.wrapping_add(1);
         }
+        // 遮罩源几何变化时，被它裁剪的目标也要重生成顶点。
+        let dependents: Vec<ElementId> = self
+            .elements
+            .values()
+            .filter_map(|el| {
+                let props = el.as_element().props();
+                if props.masked_by == Some(id) {
+                    Some(el.id())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for dep in dependents {
+            if self.dirty_ids.contains(&dep) {
+                continue;
+            }
+            if let Some(element) = self.elements.get_mut(&dep) {
+                element.as_element_mut().props_mut().dirty = true;
+            }
+            self.dirty_ids.insert(dep);
+        }
     }
 
     /// 用已经校验过的元素表和资源表恢复场景
@@ -577,6 +599,18 @@ impl Scene {
         if root.is_some() {
             self.structure_epoch = self.structure_epoch.wrapping_add(1);
             self.bump_geometry_epoch();
+            // 清掉仍指向已删节点的遮罩引用。
+            let removed: std::collections::HashSet<ElementId> = {
+                // root 子树 id 已从 map 移除；用传入的 ids 快照不方便，扫描悬挂 masked_by。
+                self.elements
+                    .values()
+                    .filter_map(|el| el.as_element().props().masked_by)
+                    .filter(|mask| !self.elements.contains_key(mask))
+                    .collect()
+            };
+            if !removed.is_empty() {
+                crate::mask::clear_mask_refs_to(self, &removed);
+            }
         }
         if let Some(parent_id) = parent {
             self.recompute_group_bounds(parent_id);
@@ -1061,6 +1095,8 @@ impl Scene {
         if let Some(parent_id) = parent {
             self.refresh_bounds_upwards(parent_id);
         }
+        // 解组删掉组节点后，清掉仍指向该组的遮罩引用。
+        crate::mask::clear_mask_refs_to(self, &std::collections::HashSet::from([group_id]));
         Ok(children)
     }
 

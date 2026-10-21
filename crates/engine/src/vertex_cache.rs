@@ -517,12 +517,18 @@ pub fn rebuild_all_vertices(scene: &Scene) -> RebuiltGeometry {
 }
 
 /// 组没有自己的三角形。被隐藏的组会让子孙也返回空网格。
+/// 带 `masked_by` 的叶子按 mask 填充轮廓过滤三角形 / 线段（中心点测试）。
 fn mesh_for(scene: &Scene, element: &AnyElement) -> Mesh {
     if !scene.is_effectively_visible(element.id()) {
         return Mesh::empty();
     }
     let mut mesh = generate_mesh(element);
     mesh.blend = element.blend_mode();
+    if let Some(mask_id) = element.as_element().props().masked_by {
+        mesh.fill = crate::mask::filter_tris_by_mask(scene, mask_id, &mesh.fill);
+        mesh.stroke = crate::mask::filter_lines_by_mask(scene, mask_id, &mesh.stroke);
+        mesh.textured = crate::mask::filter_tris_by_mask(scene, mask_id, &mesh.textured);
+    }
     mesh
 }
 
