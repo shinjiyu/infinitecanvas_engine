@@ -29,6 +29,8 @@ pub enum CollabError {
     Duplicate(ElementId),
     /// 成组、解散、锁定或世界变换被场景拒绝（不存在、已锁定、会成环等）。
     Group(String),
+    /// Awareness 编码、应用或本地状态序列化失败。
+    Awareness(String),
 }
 
 impl std::fmt::Display for CollabError {
@@ -48,6 +50,7 @@ impl std::fmt::Display for CollabError {
             CollabError::Missing(id) => write!(f, "element {id} is not in the local scene"),
             CollabError::Duplicate(id) => write!(f, "element {id} is already in the local scene"),
             CollabError::Group(message) => write!(f, "group operation failed: {message}"),
+            CollabError::Awareness(message) => write!(f, "awareness failed: {message}"),
         }
     }
 }

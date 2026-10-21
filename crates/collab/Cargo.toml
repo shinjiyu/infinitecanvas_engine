@@ -9,4 +9,5 @@ description = "Yjs-compatible CRDT binding for the infinite canvas scene"
 [dependencies]
 infinitecanvas-engine = { path = "../engine" }
 yrs = "0.28"
+serde = { workspace = true }
 serde_json = { workspace = true }

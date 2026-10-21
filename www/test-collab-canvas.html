@@ -190,11 +190,19 @@
     .stat-value { color: #36d399; font-weight: 600; }
     
     /* 远程用户选择高亮 */
+    #remote-selections {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      overflow: hidden;
+    }
     .remote-selection-overlay {
       position: absolute;
       pointer-events: none;
       border: 2px dashed;
       border-radius: 2px;
+      box-sizing: border-box;
       transition: all 0.1s ease-out;
     }
   </style>
@@ -264,6 +272,16 @@
 
   <script type="module">
     import init, { InfiniteCanvas } from '../packages/core/wasm/infinitecanvas_wasm.js';
+    import {
+      renderRemotePresence,
+      worldBoundsToScreenRect,
+    } from './presence-overlay.js';
+
+    /**
+     * Soft-coordinate: WebSocket cursor/selection share PresenceState shape with
+     * yrs Awareness (crates/collab). Overlay is pointer-events:none; not written
+     * into scene JSON. Permissions / conflict UI are out of scope. No new shortcuts.
+     */
 
     // ============ 协同客户端 ============
     class CollabClient {
@@ -381,8 +399,8 @@
       function loop() {
         wasm.render();
         
-        // 渲染远程选择
-        renderRemoteSelections();
+        // Remote presence (cursors + selections)
+        paintRemotePresence();
         
         // FPS
         fc++;
@@ -436,19 +454,21 @@
       });
 
       collab.on('user_left', userId => {
-        removeCursor(userId);
         remoteSelections.delete(userId);
         updateUsersList();
+        paintRemotePresence();
       });
 
       collab.on('cursor_update', (userId, pos) => {
         const user = collab.users.get(userId);
-        if (user) updateCursor(userId, user.name, user.color, pos);
+        if (user) user.cursor = pos;
+        paintRemotePresence();
       });
 
       collab.on('selection_update', (userId, selection) => {
         remoteSelections.set(userId, selection);
         updateUsersList();
+        paintRemotePresence();
       });
 
       collab.on('operation', op => {
@@ -652,10 +672,54 @@
       document.getElementById('cursor-' + userId)?.remove();
     }
 
-    function renderRemoteSelections() {
-      // 这里可以在画布上绘制远程用户选中元素的边框
-      // 需要从 WASM 获取元素的边界框信息
-      // 简化版本：仅在用户列表中显示选择数量
+    function buildRemotePresences() {
+      // Exclude local user — do not draw our own remote twin.
+      return collab.getUsers().map((u) => ({
+        clientId: u.id,
+        state: {
+          name: u.name,
+          color: u.color || '#4090f2',
+          cursor: u.cursor,
+          selection: (remoteSelections.get(u.id) || u.selection || []).map(String),
+        },
+      }));
+    }
+
+    function viewportSnapshot() {
+      return {
+        centerX: wasm.get_viewport_center_x(),
+        centerY: wasm.get_viewport_center_y(),
+        zoom: wasm.get_zoom(),
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+      };
+    }
+
+    function resolveScreenRect(elementId) {
+      const id = Number(elementId);
+      if (!Number.isFinite(id)) return null;
+      const info = wasm.get_element_info(BigInt(id));
+      if (!info) return null;
+      return worldBoundsToScreenRect(
+        { x: info.x, y: info.y, width: info.width, height: info.height },
+        viewportSnapshot()
+      );
+    }
+
+    function paintRemotePresence() {
+      if (!collab || collab.state !== 'connected') {
+        document.getElementById('remote-cursors').innerHTML = '';
+        document.getElementById('remote-selections').innerHTML = '';
+        return;
+      }
+      renderRemotePresence(
+        {
+          cursors: document.getElementById('remote-cursors'),
+          selections: document.getElementById('remote-selections'),
+        },
+        buildRemotePresences(),
+        { resolveScreenRect }
+      );
     }
 
     main();

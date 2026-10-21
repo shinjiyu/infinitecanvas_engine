@@ -171,7 +171,7 @@ The bench script drives Chrome through the DevTools protocol. Node 22+ uses the 
 | M1 Core rendering | Done: WebGPU rectangles, circles, lines, freehand paths, images, viewport |
 | M2 Interaction | Done: hit test, selection, marquee, drag, undo/redo, tools |
 | M3 Scene management | Viewport culling, batched solid draws, a persistent vertex cache with per-element dirty flags, performance counters, and a QuadTree module. No scene graph |
-| M4 Collaboration | Rooms, cursors, selection sync, create-element broadcast, and a yrs CRDT skeleton (`infinitecanvas-collab`) for scene elements. The CRDT is not wired to the WebSocket server, WASM, or the browser demo. No permissions, conflict UI, or history replay |
+| M4 Collaboration | Rooms, cursors, selection sync, create-element broadcast, and a yrs CRDT skeleton (`infinitecanvas-collab`) for scene elements. Awareness (`PresenceState`) syncs remote cursors/selection without writing scene JSON; WebSocket path soft-coordinates the same shape. CRDT doc sync is not wired to the WebSocket server or WASM. No permissions, conflict UI, or history replay |
 
 ## Quick start
 

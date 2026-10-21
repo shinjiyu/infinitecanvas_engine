@@ -48,10 +48,33 @@ Scene ◀── from_json ── Y.Doc
 
 物化时 `next_id` 取已有最大 id 加 1（和 `Scene::from_json` 一样），不单独同步一个计数器。
 
+
+## Awareness（光标 / 选区）
+
+`CollabSession` 用 yrs `Awareness` 广播本端在场状态（`PresenceState`）：
+
+- 显示名 / 颜色
+- 指针**世界坐标**
+- 选中元素 id 列表
+
+`MemoryProvider::sync` 在文档 y-sync 之外再交换一次 awareness（含离开时的 null），对端 `remote_presences()` 看不到本地用户，也不会把已离开的 peer 画出来。
+
+```text
+set_local_presence / clear_local_presence
+        │
+        ▼
+ yrs Awareness  ── encode_awareness_update / MemoryProvider ──▶  对端 remote_presences
+        │
+        └── 不进 elements 地图，不进场景 JSON
+```
+
+浏览器 demo（`www/test-collab-canvas.html` + `www/presence-overlay.js`）用同一 JSON 形状渲染远端光标标签和选区虚线框（`pointer-events: none`，不影响 hit-test）。现有 WebSocket `packages/server` 光标/选区消息经 `presenceFromRemoteUser` 软协调到同一形状；**权限与冲突 UI 仍不在范围**。
+
 ## 已知限制
 
 - 没有生产级房间、权限、断线重连或历史回放 UI。`MemoryProvider` 只在进程内走 y-sync 握手。
-- 光标和选区不进文档。写入前会清掉 `selected`，物化后也是 `false`。撤销栈、脏标记、顶点缓存同样不在文档里。
+- 光标和选区走 Awareness，不进文档（见上一节）。写入元素前会清掉 `selected`，物化后也是 `false`。撤销栈、脏标记、顶点缓存同样不在文档里。
+- 未做权限控制或冲突提示 UI；离开时清 awareness，但不做房间 ACL。
 - 直接改 `Scene` 不会写进 Y.Doc。要走 `CollabSession`。
 - `allocate_id` 的形式是 `(peer_slot << 32) | seq`。`seq` 占低 32 位，所以 `peer_slot` 只能用剩下的 21 位（`0..=2_097_151`，常量 `MAX_PEER_SLOT`）。`with_client_id` 会断言这个上限。这样元素 id 始终 `<= 2^53 - 1`，放进 JavaScript `Number` 不会丢精度。两端 slot 相同就可能撞 id。不要用引擎的 `Scene::next_id` 给并发的两端发号。`CollabSession::new` 从 client id 推导 slot 时也会掩到这 21 位。
 - 图片元素的 `asset_id` 随元素 JSON 同步，但场景文件里的 `assets[]` 像素不在 Y.Doc 里。对端物化后没有字节，PNG 仍是纯色占位，SVG 仍写跳过注释。Text 的 `content`、`font_size`、`color`、`align`、`font_family`、`size` 会同步。`texture_id`、LOD、`revision`、`editing` 是 `#[serde(skip)]`，对端物化后 `texture_id` 为空，按自己的缩放重新光栅化。

@@ -3,10 +3,11 @@
 //! 本地增删改走 yrs 事务，物化回 [`Scene`] 时复用场景 JSON（#6）的解码。
 
 use crate::error::CollabError;
+use crate::presence::{PresenceState, RemotePresence};
 use infinitecanvas_engine::math::Transform;
 use infinitecanvas_engine::{AnyElement, ElementId, GroupError, Scene, SCENE_FORMAT_VERSION};
 use serde_json::Value;
-use yrs::sync::Awareness;
+use yrs::sync::{Awareness, AwarenessUpdate};
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 use yrs::{Any, Doc, Map, Out, ReadTxn, StateVector, Transact, Update};
@@ -514,6 +515,130 @@ impl CollabSession {
                 .map_err(|err| CollabError::Update(err.to_string()))?;
         }
         self.refresh_scene()
+    }
+
+    /// 写入本地 awareness 在场状态（光标、选区、显示名）。
+    ///
+    /// 只改 yrs Awareness，不动 [`Self::scene`] / `elements` 地图。经
+    /// [`crate::MemoryProvider::sync`] 或 [`Self::encode_awareness_update`] 传给对端。
+    ///
+    /// # 参数
+    /// - `state`: 本地在场快照。光标用世界坐标。
+    ///
+    /// # 错误
+    /// 序列化失败时返回 [`CollabError::Awareness`]。
+    ///
+    /// # 示例
+    ///
+    /// ```
+    /// use infinitecanvas_collab::{CollabSession, MemoryProvider, PresenceState};
+    ///
+    /// let mut a = CollabSession::with_client_id(1, 1);
+    /// let mut b = CollabSession::with_client_id(2, 2);
+    /// a.set_local_presence(
+    ///     PresenceState::new("Ada", "#4090f2")
+    ///         .with_cursor(12.0, 34.0)
+    ///         .with_selection([7]),
+    /// )?;
+    /// MemoryProvider::sync(&mut a, &mut b)?;
+    /// let remotes = b.remote_presences();
+    /// assert_eq!(remotes.len(), 1);
+    /// assert_eq!(remotes[0].state.name, "Ada");
+    /// assert_eq!(remotes[0].client_id, 1);
+    /// # Ok::<(), infinitecanvas_collab::CollabError>(())
+    /// ```
+    pub fn set_local_presence(&mut self, state: PresenceState) -> Result<(), CollabError> {
+        self.awareness
+            .set_local_state(state)
+            .map_err(|err| CollabError::Awareness(err.to_string()))
+    }
+
+    /// 读取本地 awareness 在场状态。
+    ///
+    /// # 返回
+    /// 尚未设置或已 [`Self::clear_local_presence`] 时为 `None`。
+    pub fn local_presence(&self) -> Option<PresenceState> {
+        self.awareness.local_state()
+    }
+
+    /// 清除本地 awareness，标记本端离开。
+    ///
+    /// 对端在下一次 awareness 同步后不再看到本端的光标/选区。场景文档不变。
+    pub fn clear_local_presence(&mut self) {
+        self.awareness.clean_local_state();
+    }
+
+    /// 远端在场列表（排除本地 client id，也排除已清除的状态）。
+    ///
+    /// # 返回
+    /// 每个仍有有效 JSON 状态的远端副本。不包含本地用户，因此不会画自己的远端副本。
+    pub fn remote_presences(&self) -> Vec<RemotePresence> {
+        let local = self.client_id();
+        let mut out = Vec::new();
+        for (client_id, client_state) in self.awareness.iter() {
+            let id = client_id.get();
+            if id == local {
+                continue;
+            }
+            let Some(json) = client_state.data.as_ref() else {
+                continue;
+            };
+            let Ok(state) = serde_json::from_str::<PresenceState>(json) else {
+                continue;
+            };
+            out.push(RemotePresence {
+                client_id: id,
+                state,
+            });
+        }
+        out.sort_by_key(|p| p.client_id);
+        out
+    }
+
+    /// 编码当前 awareness 更新（Yjs awareness 二进制），不含场景文档。
+    ///
+    /// # 返回
+    /// 可交给另一端 [`Self::apply_awareness_update`] 的字节。
+    ///
+    /// # 错误
+    /// yrs 无法打包 awareness 时返回 [`CollabError::Awareness`]。
+    pub fn encode_awareness_update(&self) -> Result<Vec<u8>, CollabError> {
+        let local = self.awareness.client_id();
+        let mut clients: Vec<_> = self
+            .awareness
+            .iter()
+            .filter_map(|(id, state)| state.data.as_ref().map(|_| id))
+            .collect();
+        // 离开后 data 为 null，默认 update() 会丢掉本端；仍带上 local，对端才能清掉光标。
+        if self.awareness.meta(local).is_some() && !clients.contains(&local) {
+            clients.push(local);
+        }
+        if clients.is_empty() {
+            return Ok(Vec::new());
+        }
+        let update = self
+            .awareness
+            .update_with_clients(clients)
+            .map_err(|err| CollabError::Awareness(err.to_string()))?;
+        Ok(update.encode_v1())
+    }
+
+    /// 应用远端 awareness 更新。
+    ///
+    /// # 参数
+    /// - `update`: [`Self::encode_awareness_update`] 的字节。空切片是 no-op。
+    ///
+    /// # 错误
+    /// 解码或应用失败时返回 [`CollabError::Awareness`]。场景不变。
+    pub fn apply_awareness_update(&mut self, update: &[u8]) -> Result<(), CollabError> {
+        if update.is_empty() {
+            return Ok(());
+        }
+        let decoded = AwarenessUpdate::decode_v1(update)
+            .map_err(|err| CollabError::Awareness(err.to_string()))?;
+        self.awareness
+            .apply_update(decoded)
+            .map_err(|err| CollabError::Awareness(err.to_string()))
     }
 
     pub(crate) fn awareness(&self) -> &Awareness {
