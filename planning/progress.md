@@ -1,6 +1,19 @@
 # 项目进度追踪
 
-**更新时间**: 2026-10-14
+**更新时间**: 2026-10-21
+
+## Issue #109: Yjs 协同 polish（远端光标与选区）
+
+- [x] `PresenceState` / `CollabSession::{set_local_presence,clear_local_presence,remote_presences,encode/apply_awareness_update}`
+- [x] `MemoryProvider::sync` 交换 awareness（含离开 null）；场景 JSON / elements 不含 awareness
+- [x] Demo overlay：远端光标标签 + 选区轮廓（`pointer-events: none`）；不画本地远端副本
+- [x] 与 WebSocket `RemoteUser` 软协调（同 JSON 形状）；文档注明权限/冲突 UI 不在范围；无新快捷键
+
+```text
+PresenceState ── yrs Awareness ── MemoryProvider / overlay
+                      │
+                      └── 不进场景 JSON
+```
 
 ## 属性面板数值变换 (#111)
 

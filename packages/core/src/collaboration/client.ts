@@ -16,6 +16,10 @@ import type {
   Vec2,
   CanvasOperation,
 } from './types';
+import {
+  remotePresencesFromUsers,
+  type RemotePresence,
+} from './presence';
 
 export interface CollaborationClientOptions {
   /** 服务器地址，如 ws://localhost:8080 */
@@ -105,6 +109,16 @@ export class CollaborationClient {
    */
   getRemoteUsers(): RemoteUser[] {
     return Array.from(this.remoteUsers.values());
+  }
+
+  /**
+   * 远端在场快照（awareness 形状），已排除本地用户。
+   *
+   * 与 yrs `CollabSession::remote_presences` 同形，供光标/选区 overlay 使用。
+   * 不读写场景 JSON。
+   */
+  getRemotePresences(): RemotePresence[] {
+    return remotePresencesFromUsers(this.getRemoteUsers(), this.myUserId);
   }
 
   /**

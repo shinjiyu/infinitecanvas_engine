@@ -10,7 +10,8 @@ use yrs::updates::encoder::{Encode, Encoder, EncoderV1};
 /// 内存里的双连接。
 ///
 /// 每调用一次 [`Self::sync`]，双方都发一次 SyncStep1，并把对方回的 SyncStep2
-/// 应用到自己的文档上。这是 y-sync 的对等握手，不是房间服务。
+/// 应用到自己的文档上，再交换一次 awareness（含离开时的 null 状态）。
+/// 这是 y-sync 的对等握手，不是房间服务。
 ///
 /// # 示例
 ///
@@ -57,6 +58,9 @@ impl MemoryProvider {
     pub fn sync(left: &mut CollabSession, right: &mut CollabSession) -> Result<(), CollabError> {
         exchange(left, right)?;
         exchange(right, left)?;
+        // y-sync 的 start() 只带有 data 的 awareness；离开（null）再单独交换一次。
+        exchange_awareness(left, right)?;
+        exchange_awareness(right, left)?;
         Ok(())
     }
 }
@@ -85,4 +89,9 @@ fn exchange(from: &mut CollabSession, to: &mut CollabSession) -> Result<(), Coll
     from.refresh_scene()?;
     to.refresh_scene()?;
     Ok(())
+}
+
+fn exchange_awareness(from: &mut CollabSession, to: &mut CollabSession) -> Result<(), CollabError> {
+    let bytes = from.encode_awareness_update()?;
+    to.apply_awareness_update(&bytes)
 }

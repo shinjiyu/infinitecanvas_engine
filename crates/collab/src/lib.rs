@@ -19,12 +19,18 @@
 //! 远端字节走 [`CollabSession::apply_update`] 或 [`MemoryProvider::sync`]。
 //!
 //! 冲突策略和限制见 `docs/design/crdt.md`。
+//!
+//! 光标 / 选区 / 显示名走 yrs Awareness（[`PresenceState`]），不进场景文档。
+//! [`MemoryProvider::sync`] 的 y-sync 握手会附带 awareness；离开时调用
+//! [`CollabSession::clear_local_presence`]。权限与冲突 UI 不在本 crate 范围。
 
 mod error;
+mod presence;
 mod provider;
 mod session;
 
 pub use error::CollabError;
+pub use presence::{PresenceCursor, PresenceState, RemotePresence};
 pub use provider::MemoryProvider;
 pub use session::{
     CollabSession, DOC_SCHEMA_VERSION, ELEMENTS_ROOT, MAX_PEER_SLOT, META_ROOT, PEER_SLOT_BITS,
