@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   dropIndex,
+  filterFlattenedRows,
   flattenTree,
   groupSelected,
   idKey,
   indexTree,
   renameDraft,
   rowLabel,
+  normalizeLayerQuery,
+  rowMatchesQuery,
+  setSelectionLocked,
+  setSelectionVisible,
   ungroupSelected,
   visibleRange,
 } from './layer-panel.js';
@@ -177,4 +182,76 @@ test('flatten carries name onto rows for rename', () => {
   const rows = flattenTree(roots, new Set());
   assert.equal(rows[0].name, '甲');
   assert.equal(rows[0].label, '甲');
+});
+
+test('search filters by display name and type, keeping ancestors', () => {
+  const roots = [
+    { id: 1, elementType: 'Rectangle', name: '背景', visible: true, locked: false, children: [] },
+    {
+      id: 7,
+      elementType: 'Frame',
+      name: '封面',
+      visible: true,
+      locked: false,
+      children: [
+        { id: 8, elementType: 'Text', visible: true, locked: false, children: [] },
+        { id: 9, elementType: 'Circle', visible: true, locked: false, children: [] },
+      ],
+    },
+  ];
+  const tree = indexTree(roots);
+  const rows = flattenTree(roots, new Set());
+  assert.equal(normalizeLayerQuery('  封面  '), '封面');
+  // Soft-coord with #100 Rename: filter uses display names (custom name / Frame name).
+  assert.equal(rowMatchesQuery(rows.find((row) => row.id === '7'), '封面'), true);
+  assert.equal(rowMatchesQuery(rows.find((row) => row.id === '1'), '背景'), true);
+  assert.equal(rowMatchesQuery(rows.find((row) => row.id === '8'), '文本'), true);
+  assert.equal(rowMatchesQuery(rows.find((row) => row.id === '1'), 'circle'), false);
+
+  const byName = filterFlattenedRows(rows, '封面', tree.parentOf);
+  assert.deepEqual(byName.map((row) => row.id), ['7']);
+
+  const byRenamed = filterFlattenedRows(rows, '背景', tree.parentOf);
+  assert.deepEqual(byRenamed.map((row) => row.id), ['1']);
+
+  const byType = filterFlattenedRows(rows, '文本', tree.parentOf);
+  assert.deepEqual(byType.map((row) => row.id), ['7', '8']);
+
+  const byEnglish = filterFlattenedRows(rows, 'circle', tree.parentOf);
+  assert.deepEqual(byEnglish.map((row) => row.id), ['7', '9']);
+
+  assert.deepEqual(
+    filterFlattenedRows(rows, '', tree.parentOf).map((row) => row.id),
+    rows.map((row) => row.id),
+  );
+});
+
+test('batch visibility and lock helpers call selection APIs', () => {
+  const calls = [];
+  const engine = {
+    get_selected_ids: () => [1n, 2n],
+    set_selection_visible(visible) {
+      calls.push(['visible', visible]);
+      return true;
+    },
+    set_selection_locked(locked) {
+      calls.push(['locked', locked]);
+      return true;
+    },
+  };
+  assert.equal(setSelectionVisible(engine, false, { setStatus() {} }), true);
+  assert.equal(setSelectionLocked(engine, true, { setStatus() {} }), true);
+  assert.deepEqual(calls, [['visible', false], ['locked', true]]);
+
+  assert.equal(
+    setSelectionVisible({ get_selected_ids: () => [] }, false, { setStatus() {} }),
+    false,
+  );
+  assert.equal(
+    setSelectionLocked({
+      get_selected_ids: () => [1n],
+      set_selection_locked: () => false,
+    }, true, { setStatus() {} }),
+    false,
+  );
 });

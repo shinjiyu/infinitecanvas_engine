@@ -2098,6 +2098,24 @@ export class InfiniteCanvas {
         wasm.infinitecanvas_set_rulers_visible(this.__wbg_ptr, visible);
     }
     /**
+     * 把当前选中元素的锁定设成同一个值，并记入一条撤销记录。
+     *
+     * 与图层面板的「全部锁定 / 全部解锁」共用 [`infinitecanvas_engine::SetLockedCommand`]。
+     * 空选、缺失 id，或已经是目标值时不入栈，返回 `false`。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_selection_locked(true);
+     * canvas.undo();
+     * ```
+     * @param {boolean} locked
+     * @returns {boolean}
+     */
+    set_selection_locked(locked) {
+        const ret = wasm.infinitecanvas_set_selection_locked(this.__wbg_ptr, locked);
+        return ret !== 0;
+    }
+    /**
      * 把补丁写进当前选择并记一条撤销记录。
      *
      * 对象里出现的字段才会修改。`fill` / `stroke` 传 `null` 或 `""` 表示清掉。
@@ -2142,6 +2160,24 @@ export class InfiniteCanvas {
      */
     set_selection_transform(patch) {
         const ret = wasm.infinitecanvas_set_selection_transform(this.__wbg_ptr, patch);
+        return ret !== 0;
+    }
+    /**
+     * 把当前选中元素的可见性设成同一个值，并记入一条撤销记录。
+     *
+     * 与图层面板的「全部显示 / 全部隐藏」共用 [`infinitecanvas_engine::SetVisibilityCommand`]。
+     * 空选、缺失 id，或已经是目标值时不入栈，返回 `false`。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_selection_visible(false);
+     * canvas.undo();
+     * ```
+     * @param {boolean} visible
+     * @returns {boolean}
+     */
+    set_selection_visible(visible) {
+        const ret = wasm.infinitecanvas_set_selection_visible(this.__wbg_ptr, visible);
         return ret !== 0;
     }
     /**

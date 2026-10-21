@@ -2428,6 +2428,50 @@ impl InfiniteCanvas {
         apply_toggle_locked(&mut self.command_history, &mut self.scene, &selected)
     }
 
+    /// 把当前选中元素的可见性设成同一个值，并记入一条撤销记录。
+    ///
+    /// 与图层面板的「全部显示 / 全部隐藏」共用 [`infinitecanvas_engine::SetVisibilityCommand`]。
+    /// 空选、缺失 id，或已经是目标值时不入栈，返回 `false`。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.set_selection_visible(false);
+    /// canvas.undo();
+    /// ```
+    #[wasm_bindgen]
+    pub fn set_selection_visible(&mut self, visible: bool) -> bool {
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        apply_set_visibility(
+            &mut self.command_history,
+            &mut self.scene,
+            &selected,
+            visible,
+        )
+    }
+
+    /// 把当前选中元素的锁定设成同一个值，并记入一条撤销记录。
+    ///
+    /// 与图层面板的「全部锁定 / 全部解锁」共用 [`infinitecanvas_engine::SetLockedCommand`]。
+    /// 空选、缺失 id，或已经是目标值时不入栈，返回 `false`。
+    ///
+    /// # 示例（JavaScript）
+    /// ```js
+    /// canvas.set_selection_locked(true);
+    /// canvas.undo();
+    /// ```
+    #[wasm_bindgen]
+    pub fn set_selection_locked(&mut self, locked: bool) -> bool {
+        self.finish_active_gesture();
+        let selected = self.selection.selected_ids();
+        apply_set_locked(
+            &mut self.command_history,
+            &mut self.scene,
+            &selected,
+            locked,
+        )
+    }
+
     /// 可见性或锁定的版本。图层面板用它重读眼睛和锁，不代表场景结构变了。
     #[wasm_bindgen]
     pub fn get_flags_epoch(&self) -> u64 {
@@ -5426,6 +5470,30 @@ mod tests {
         assert!(canvas.scene.is_effectively_visible(1));
         assert!(!canvas.set_element_visible(99, false));
         assert!(!canvas.set_element_locked(99, true));
+
+        // 多选批量显隐/锁定：一次入栈，空选与已是目标值 no-op。
+        canvas.selection.clear(&mut canvas.scene);
+        assert!(!canvas.set_selection_visible(false));
+        assert!(!canvas.set_selection_locked(true));
+        assert_eq!(canvas.get_undo_count(), 0);
+        assert!(canvas.select_element(1, false));
+        assert!(canvas.select_element(2, true));
+        assert!(canvas.set_selection_visible(false));
+        assert!(!canvas.scene.is_effectively_visible(1));
+        assert!(!canvas.scene.get(2).unwrap().as_element().props().visible);
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(!canvas.set_selection_visible(false));
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.undo());
+        assert!(canvas.scene.is_effectively_visible(1));
+        assert!(canvas.set_selection_locked(true));
+        assert!(canvas.scene.is_effectively_locked(1));
+        assert!(canvas.scene.is_effectively_locked(2));
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(!canvas.set_selection_locked(true));
+        assert_eq!(canvas.get_undo_count(), 1);
+        assert!(canvas.undo());
+        assert!(!canvas.scene.is_effectively_locked(1));
     }
 
     #[test]

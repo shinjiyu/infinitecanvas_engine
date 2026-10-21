@@ -11,7 +11,7 @@
  * I 切换吸管（不带 Shift、Ctrl、Alt）。单击采样最上层可见元素的填充和描边，经 SetStyle 写到当前选区。
  * Ctrl+' 显示或隐藏背景网格。选择写入 localStorage，下次打开保持上次的结果。第一次打开默认显示。
  * 保存/打开走版本化场景 JSON，视口或选区可导出 PNG，场景或选区可导出 SVG，改动会写入 localStorage。
- * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈。
+ * 右侧图层面板和画布选中双向同步，拖拽排序走撤销栈；支持搜索过滤与多选批量显隐/锁定。
  * `]` / `[` / Ctrl+] / Ctrl+[ 前移、后移、置顶、置底，和面板上的四个按钮一样，都进撤销栈。
  * Ctrl+L 切换锁定，Ctrl+Shift+H 切换隐藏，和图层面板的锁、眼睛同一条命令。
  * Shift+1 适应全部，Shift+2 缩放到选中。Ctrl+= / Ctrl++ 放大，Ctrl+- 缩小，Ctrl+0 回到 100%。
@@ -1962,6 +1962,7 @@ function renameFrameAt(engine, point) {
   if (engine.rename_frame(hit.id, trimmed)) {
     scheduleAutosave(engine);
     syncPropertyPanel(engine);
+    layerPanel?.sync(true);
     setStatus('已重命名画板');
   }
 }

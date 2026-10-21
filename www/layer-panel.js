@@ -2,11 +2,17 @@
  * 图层面板。
  *
  * 从 `get_scene_tree` 读出场景树，虚拟滚动只挂上视口里的行。
+ * 顶部搜索按显示名 / 类型过滤；清空恢复全树。过滤时画布选中仍双向联动。
+ * 多选时「全部显示/隐藏」「全部锁定/解锁」走 `set_selection_visible` /
+ * `set_selection_locked`，一次可撤销；空选或已是目标状态 no-op。
  * 点击行选中画布元素，锁定的行也可以选中，但不能拖拽。画布选中反向高亮。
  * 拖拽改兄弟顺序或移入/移出组，走 `reorder_element`（Command，可撤销）。
  * 眼睛和锁调用 `set_element_visible` / `set_element_locked`，和快捷键同一条可撤销命令。
  * 双击名称内联重命名：Enter 提交、Esc 取消；走 `rename_element`（可撤销）。
  * 多选时仍可双击某一行改该行；属性面板仅单选时编辑。
+ *
+ * 过滤用行的显示名（含画板 `name`）。改名后下一次 `sync` 会按新名重算过滤
+ * （与 #100 Rename 软协调：这里不另加快捷键）。
  *
  * 兄弟列表在引擎里从后往前（下标 0 是最底层）。面板把每一层反过来画，
  * 最上面的一行是最前面的元素。
@@ -195,6 +201,106 @@ export function visibleRange(scrollTop, viewHeight, total, rowHeight = ROW_HEIGH
 }
 
 /**
+ * 规范化图层搜索词：去首尾空白并转小写。空串表示不过滤。
+ *
+ * @param {string | null | undefined} query
+ * @returns {string}
+ */
+export function normalizeLayerQuery(query) {
+  return String(query ?? '').trim().toLowerCase();
+}
+
+/**
+ * 行是否匹配搜索词。按显示名（`label`）和类型键 / 中文类型名做子串匹配。
+ *
+ * @param {{ label?: string, elementType?: string }} row
+ * @param {string | null | undefined} query
+ * @returns {boolean}
+ */
+export function rowMatchesQuery(row, query) {
+  const q = normalizeLayerQuery(query);
+  if (!q) return true;
+  const label = String(row?.label ?? '').toLowerCase();
+  const typeKey = String(row?.elementType ?? '').toLowerCase();
+  const typeLabel = String(TYPE_LABELS[row?.elementType] || '').toLowerCase();
+  return label.includes(q) || typeKey.includes(q) || typeLabel.includes(q);
+}
+
+/**
+ * 按搜索词过滤摊平行。命中行会带上祖先，便于保留树上下文。
+ * 空搜索原样返回。
+ *
+ * @param {Array<object>} rows `flattenTree` 的结果
+ * @param {string | null | undefined} query
+ * @param {Map<string, string | null>} parentOf `indexTree(...).parentOf`
+ * @returns {Array<object>}
+ */
+export function filterFlattenedRows(rows, query, parentOf) {
+  const q = normalizeLayerQuery(query);
+  if (!q) return rows;
+  /** @type {Set<string>} */
+  const keep = new Set();
+  for (const row of rows) {
+    if (!rowMatchesQuery(row, q)) continue;
+    keep.add(row.id);
+    let parent = parentOf?.get(row.id);
+    while (parent) {
+      keep.add(parent);
+      parent = parentOf.get(parent);
+    }
+  }
+  return rows.filter((row) => keep.has(row.id));
+}
+
+/**
+ * 把当前选中的可见性设成同一个值。空选或已是目标状态时引擎不入栈。
+ *
+ * @param {{ get_selected_ids?: () => Array<bigint | number>, set_selection_visible?: (visible: boolean) => boolean }} engine
+ * @param {boolean} visible
+ * @param {{ setStatus?: (text: string, isError?: boolean) => void }} [hooks]
+ * @returns {boolean} 是否写入了撤销栈
+ */
+export function setSelectionVisible(engine, visible, hooks = {}) {
+  const ids = Array.from(engine.get_selected_ids?.() || []);
+  if (!ids.length) {
+    hooks.setStatus?.('请先选择图层', true);
+    return false;
+  }
+  if (typeof engine.set_selection_visible !== 'function') {
+    hooks.setStatus?.('当前引擎不支持批量显隐', true);
+    return false;
+  }
+  const changed = Boolean(engine.set_selection_visible(visible));
+  if (changed) hooks.setStatus?.(visible ? '已全部显示' : '已全部隐藏');
+  else hooks.setStatus?.('无需更改');
+  return changed;
+}
+
+/**
+ * 把当前选中的锁定设成同一个值。空选或已是目标状态时引擎不入栈。
+ *
+ * @param {{ get_selected_ids?: () => Array<bigint | number>, set_selection_locked?: (locked: boolean) => boolean }} engine
+ * @param {boolean} locked
+ * @param {{ setStatus?: (text: string, isError?: boolean) => void }} [hooks]
+ * @returns {boolean} 是否写入了撤销栈
+ */
+export function setSelectionLocked(engine, locked, hooks = {}) {
+  const ids = Array.from(engine.get_selected_ids?.() || []);
+  if (!ids.length) {
+    hooks.setStatus?.('请先选择图层', true);
+    return false;
+  }
+  if (typeof engine.set_selection_locked !== 'function') {
+    hooks.setStatus?.('当前引擎不支持批量锁定', true);
+    return false;
+  }
+  const changed = Boolean(engine.set_selection_locked(locked));
+  if (changed) hooks.setStatus?.(locked ? '已全部锁定' : '已全部解锁');
+  else hooks.setStatus?.('无需更改');
+  return changed;
+}
+
+/**
  * 计算一次拖放的目标。`parentId` 为 0 表示根；`index` 是摘下之后的存储下标。
  *
  * 行号小于 0 表示放到根列表的最前面。`place` 为 `before` / `after` / `into`。
@@ -347,7 +453,7 @@ export function ungroupSelected(engine, hooks = {}) {
 }
 
 /**
- * 挂上图层面板。页面里需要 `#layer-list`、`#layer-meta` 和成组/解组/压测按钮。
+ * 挂上图层面板。页面里需要 `#layer-list`、`#layer-meta`、搜索框和成组/解组/批量/压测按钮。
  *
  * @param {object} engine WASM `InfiniteCanvas`
  * @param {{ onEdit?: () => void, setStatus?: (text: string, isError?: boolean) => void }} [hooks]
@@ -395,6 +501,21 @@ export function attachLayerPanel(engine, hooks = {}) {
   let drag = null;
   /** @type {{ id: string, input: HTMLInputElement } | null} */
   let renaming = null;
+  /** @type {string} */
+  let searchQuery = '';
+  const searchInput = document.getElementById('layer-search');
+  if (searchInput instanceof HTMLInputElement) {
+    searchQuery = searchInput.value || '';
+  }
+
+  /**
+   * 按折叠与搜索词重建可见行。搜索时展开折叠，保证命中子孙能出现。
+   */
+  function rebuildRows() {
+    const collapsedForFlatten = normalizeLayerQuery(searchQuery) ? new Set() : collapsed;
+    const full = flattenTree(roots, collapsedForFlatten);
+    rows = filterFlattenedRows(full, searchQuery, tree.parentOf);
+  }
 
   const panel = {
     /**
@@ -413,16 +534,73 @@ export function attachLayerPanel(engine, hooks = {}) {
         epoch = nextEpoch;
         roots = Array.from(snapshot?.roots || []);
         tree = indexTree(roots);
-        rows = flattenTree(roots, collapsed);
+        rebuildRows();
         const paintStarted = performance.now();
         render();
         paintMs = performance.now() - paintStarted;
-        if (meta) meta.textContent = `${rows.length.toLocaleString()} 项`;
+        if (meta) {
+          const q = normalizeLayerQuery(searchQuery);
+          meta.textContent = q
+            ? `过滤 ${rows.length.toLocaleString()} 项`
+            : `${rows.length.toLocaleString()} 项`;
+        }
+      } else if (normalizeLayerQuery(searchQuery)) {
+        // 结构未变但搜索词可能已变：调用方应走 applySearch；此处保底重绘选中。
       }
       syncSelection();
       return { treeMs, paintMs, domRows, rows: rows.length };
     },
   };
+
+  /**
+   * 应用搜索框内容并刷新列表。清空恢复全树。
+   */
+  function applySearch() {
+    const next = searchInput instanceof HTMLInputElement ? searchInput.value : searchQuery;
+    searchQuery = next || '';
+    rebuildRows();
+    render();
+    paintSelection();
+    if (meta) {
+      const q = normalizeLayerQuery(searchQuery);
+      meta.textContent = q
+        ? `过滤 ${rows.length.toLocaleString()} 项`
+        : `${rows.length.toLocaleString()} 项`;
+    }
+  }
+
+  if (searchInput instanceof HTMLInputElement) {
+    searchInput.addEventListener('input', () => applySearch());
+    searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        searchInput.value = '';
+        applySearch();
+        searchInput.blur();
+      }
+    });
+  }
+
+  document.getElementById('layer-show-all-btn')?.addEventListener('click', () => {
+    if (!setSelectionVisible(engine, true, { setStatus })) return;
+    onEdit();
+    panel.sync(true);
+  });
+  document.getElementById('layer-hide-all-btn')?.addEventListener('click', () => {
+    if (!setSelectionVisible(engine, false, { setStatus })) return;
+    onEdit();
+    panel.sync(true);
+  });
+  document.getElementById('layer-lock-all-btn')?.addEventListener('click', () => {
+    if (!setSelectionLocked(engine, true, { setStatus })) return;
+    onEdit();
+    panel.sync(true);
+  });
+  document.getElementById('layer-unlock-all-btn')?.addEventListener('click', () => {
+    if (!setSelectionLocked(engine, false, { setStatus })) return;
+    onEdit();
+    panel.sync(true);
+  });
 
   document.getElementById('layer-group-btn')?.addEventListener('click', () => {
     if (!groupSelected(engine, { setStatus })) return;
@@ -527,9 +705,10 @@ export function attachLayerPanel(engine, hooks = {}) {
     event.stopPropagation();
     const action = button.dataset.act;
     if (action === 'twist') {
+      if (normalizeLayerQuery(searchQuery)) return;
       if (collapsed.has(row.id)) collapsed.delete(row.id);
       else collapsed.add(row.id);
-      rows = flattenTree(roots, collapsed);
+      rebuildRows();
       render();
       paintSelection();
       return;
@@ -539,7 +718,7 @@ export function attachLayerPanel(engine, hooks = {}) {
       engine.set_element_visible(wasmId(row.rawId), next);
       const node = tree.byId.get(row.id);
       if (node) node.visible = next;
-      rows = flattenTree(roots, collapsed);
+      rebuildRows();
       render();
       paintSelection();
       onEdit();
@@ -550,7 +729,6 @@ export function attachLayerPanel(engine, hooks = {}) {
       engine.set_element_locked(wasmId(row.rawId), next);
       const node = tree.byId.get(row.id);
       if (node) node.locked = next;
-      rows = flattenTree(roots, collapsed);
       onEdit();
       panel.sync(true);
     }
@@ -677,7 +855,7 @@ export function attachLayerPanel(engine, hooks = {}) {
       }
     }
     if (expanded) {
-      rows = flattenTree(roots, collapsed);
+      rebuildRows();
       render();
     }
     const index = rows.findIndex((row) => ids.includes(row.id));

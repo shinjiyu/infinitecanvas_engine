@@ -3073,4 +3073,50 @@ mod tests {
         assert_eq!(scene.element_name(1).as_deref(), Some("A"));
         assert!(!apply_rename_frame(&mut history, &mut scene, 1, ""));
     }
+
+    #[test]
+    fn batch_set_visibility_and_locked_are_one_undo_and_noop_when_done() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)));
+        scene.add_rect(Rectangle::new(
+            2,
+            Vec2::new(20.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+        let mut history = CommandHistory::new();
+
+        assert!(!apply_set_visibility(&mut history, &mut scene, &[], false));
+        assert!(!apply_set_locked(&mut history, &mut scene, &[], true));
+        assert_eq!(history.undo_count(), 0);
+
+        assert!(apply_set_visibility(
+            &mut history,
+            &mut scene,
+            &[1, 2, 99],
+            false
+        ));
+        assert!(!visible_of(&scene, 1));
+        assert!(!visible_of(&scene, 2));
+        assert_eq!(history.undo_count(), 1);
+        assert!(!apply_set_visibility(
+            &mut history,
+            &mut scene,
+            &[1, 2],
+            false
+        ));
+        assert_eq!(history.undo_count(), 1);
+        assert!(history.undo(&mut scene));
+        assert!(visible_of(&scene, 1));
+        assert!(visible_of(&scene, 2));
+
+        assert!(apply_set_locked(&mut history, &mut scene, &[1, 2], true));
+        assert!(locked_of(&scene, 1));
+        assert!(locked_of(&scene, 2));
+        assert_eq!(history.undo_count(), 1);
+        assert!(!apply_set_locked(&mut history, &mut scene, &[1, 2], true));
+        assert_eq!(history.undo_count(), 1);
+        assert!(history.undo(&mut scene));
+        assert!(!locked_of(&scene, 1));
+        assert!(!locked_of(&scene, 2));
+    }
 }
