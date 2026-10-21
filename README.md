@@ -34,7 +34,7 @@ Only behavior that exists in this repository is listed here.
 
 ### Interaction
 
-- Pointer events drive select, marquee select, drag-move, resize and rotate handles, and drawing, according to the active tool. Drawing tools cover rectangle, circle, polygon (`N`), star (`K`), line (Shift adds an arrow), pen, text placement, and pan. Creating a polygon or star, and editing its side count, are undoable.
+- Pointer events drive select, marquee select, drag-move, resize and rotate handles, and drawing, according to the active tool. Drawing tools cover rectangle, circle, polygon (`N`), star (`K`), line (Shift adds an arrow), pen, text placement, and pan. Double-click a Path (or use the property-panel **Edit nodes** button) to drag anchors and any Bezier handles; Esc or an empty click ends node mode. One `EditPath` undo step; no new tool shortcut. Creating a polygon or star, and editing its side count, are undoable.
 - Dragging snaps the selection bounds to other visible elements' edges and centers inside a screen-pixel threshold (`set_snap_enabled`, `set_snap_threshold`, `get_alignment_guides`). The landing page draws those guides. Multi-select snaps the union bounds. Manual guides from the rulers use the same threshold (`get_manual_guides`). Resize handles snap the moving element edge to the nearest manual guide. Hiding rulers (`set_rulers_visible`) hides the guides and turns that snap off.
 - Hit testing walks the flat scene from the highest z-index and inverse-transforms rotation and scale. It does not consult the QuadTree.
 - Command history for add, remove, move, transform, text content edits, and z-order changes, exposed as `undo` and `redo`.

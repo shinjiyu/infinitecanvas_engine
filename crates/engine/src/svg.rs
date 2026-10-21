@@ -792,10 +792,11 @@ fn write_path(path: &Path) -> Option<String> {
     if path.is_filled() {
         return write_fill_shapes(path);
     }
-    if path.points().len() < 2 {
+    let poly = path.stroke_polyline();
+    if poly.len() < 2 {
         return None;
     }
-    let mut body = format!("    <polyline points=\"{}\"", points_attr(path.points()));
+    let mut body = format!("    <polyline points=\"{}\"", points_attr(&poly));
     push_stroke_only(&mut body, &path.style);
     body.push_str("/>\n");
     Some(wrap_group(

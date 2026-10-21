@@ -21,7 +21,7 @@ pub use gradient::{FillKind, GradientStop};
 pub use group::Group;
 pub use image::Image;
 pub use line::Line;
-pub use path::{FillShape, Path};
+pub use path::{FillShape, Path, PathPointHandles};
 pub use polygon::{Polygon, PolygonKind};
 pub use rect::Rectangle;
 pub use shadow::{DropShadow, InnerShadow};

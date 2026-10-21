@@ -552,6 +552,7 @@ fn path_from_overlay(
         points: Vec::new(),
         style,
         shapes: fill_shapes,
+        point_handles: Vec::new(),
     }
 }
 
