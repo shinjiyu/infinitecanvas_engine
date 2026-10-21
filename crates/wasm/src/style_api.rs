@@ -7,8 +7,8 @@
 use infinitecanvas_engine::{
     apply_sampled_paint, apply_style_snapshot, capture_style, math::Color, math::Vec2,
     sample_paint_at, selection_style, style_locked, style_target_ids, BlendMode, ElementId,
-    FillKind, FontWeight, GradientStop, LineMarker, SampledPaint, SetStyleCommand, StrokeCap,
-    StrokeJoin, StyleField, StylePatch, StyleSnapshot, TextAlign,
+    FillKind, FontWeight, GradientStop, LineMarker, SampledPaint, SetStyleCommand, StrokeAlign,
+    StrokeCap, StrokeJoin, StyleField, StylePatch, StyleSnapshot, TextAlign,
 };
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
@@ -33,7 +33,8 @@ impl InfiniteCanvas {
     /// - `fillSupported`：选择里有这个字段
     /// - `strokeWidth` / `opacity` / `fontSize` / `cornerRadius`：统一数值，混合或不支持时为 null
     /// - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
-    ///   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
+    ///   `strokeJoin` 为 `miter` / `round` / `bevel`，`strokeAlign` 为 `center` / `inside` / `outside`。
+    ///   这四项只统计形状，文本描边不参与
     /// - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
     /// - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
     /// - `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字。`shadowColor` 是 `#rrggbbaa`（面板只用 RGB，浓度在 `shadowOpacity`）。没有形状、文本或图片时 `shadowSupported` 为 false
@@ -90,6 +91,12 @@ impl InfiniteCanvas {
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
         write_label(&obj, "strokeJoin", &style.stroke_join, StrokeJoin::as_str);
+        write_label(
+            &obj,
+            "strokeAlign",
+            &style.stroke_align,
+            StrokeAlign::as_str,
+        );
         write_label(&obj, "startMarker", &style.start_marker, LineMarker::as_str);
         write_label(&obj, "endMarker", &style.end_marker, LineMarker::as_str);
         write_label(&obj, "fillKind", &style.fill_kind, FillKind::as_str);
@@ -112,7 +119,7 @@ impl InfiniteCanvas {
     /// `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
     /// `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
     /// `blurRadius` 也可以写成 `blur_radius`。形状、文本、图片和画板都接受图层模糊。负数收成 0。
-    /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` / `blendMode` 是小写名字。
+    /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` / `strokeAlign` / `blendMode` 是小写名字。
     /// `fillKind` 是 `solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
     /// `fillAngle`、`fillRadius` 是数字。`fillCenter` 是 `{x, y}` 或 `[x, y]`。
     /// 也接受 `fill_kind`、`fill_stops`、`fill_angle`、`fill_center`、`fill_radius`、`blend_mode`。
@@ -441,6 +448,8 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         stroke_dash: read_dash(value, "strokeDash"),
         stroke_cap: read_label(value, "strokeCap", StrokeCap::parse),
         stroke_join: read_label(value, "strokeJoin", StrokeJoin::parse),
+        stroke_align: read_label(value, "strokeAlign", StrokeAlign::parse)
+            .or_else(|| read_label(value, "stroke_align", StrokeAlign::parse)),
         corner_radius: read_f32(value, "cornerRadius").or_else(|| read_f32(value, "corner_radius")),
         sides: read_sides(value),
         inner_radius: read_f32(value, "innerRadius").or_else(|| read_f32(value, "inner_radius")),

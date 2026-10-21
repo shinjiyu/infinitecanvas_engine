@@ -21,7 +21,7 @@
 use crate::blend::BlendMode;
 use crate::element::{
     Circle, DropShadow, Element, ElementId, ElementStyle, FillKind, Image, Line, Path, Polygon,
-    Rectangle, StrokeCap, StrokeJoin, Text, TextAlign,
+    Rectangle, StrokeAlign, StrokeCap, StrokeJoin, Text, TextAlign,
 };
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
@@ -459,31 +459,89 @@ fn write_element(element: &AnyElement) -> Option<String> {
 fn write_rectangle(rect: &Rectangle) -> String {
     let width = rect.size.x.abs();
     let height = rect.size.y.abs();
-    let mut shape = format!(
-        "    <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
-        fmt_num(-width * 0.5),
-        fmt_num(-height * 0.5),
-        fmt_num(width),
-        fmt_num(height),
-    );
     let radius = rect.effective_corner_radius();
-    if radius > 0.0 {
-        shape.push_str(&format!(
-            " rx=\"{}\" ry=\"{}\"",
-            fmt_num(radius),
-            fmt_num(radius)
-        ));
-    }
     let mut defs = String::new();
-    push_fill_stroke(
-        &mut shape,
-        &mut defs,
-        rect.props.id,
-        &rect.style,
-        rect.local_bounds(),
-    );
-    push_shape_line_style(&mut shape, &rect.style);
-    shape.push_str("/>\n");
+    let shape = if rect.style.stroke_align != StrokeAlign::Center
+        && rect.style.stroke.is_some()
+        && rect.style.stroke_width > 0.0
+    {
+        // 双路径近似：填充用原几何，描边用对齐后的中心线矩形。
+        let mut body = String::new();
+        let mut fill_only = format!(
+            "    <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
+            fmt_num(-width * 0.5),
+            fmt_num(-height * 0.5),
+            fmt_num(width),
+            fmt_num(height),
+        );
+        if radius > 0.0 {
+            fill_only.push_str(&format!(
+                " rx=\"{}\" ry=\"{}\"",
+                fmt_num(radius),
+                fmt_num(radius)
+            ));
+        }
+        push_fill_only(
+            &mut fill_only,
+            &mut defs,
+            rect.props.id,
+            &rect.style,
+            rect.local_bounds(),
+        );
+        fill_only.push_str(" stroke=\"none\"/>\n");
+        body.push_str(&fill_only);
+
+        let (hw, hh, aligned_r) = crate::element::stroke::aligned_rect_metrics(
+            width * 0.5,
+            height * 0.5,
+            radius,
+            rect.style.stroke_width,
+            rect.style.stroke_align,
+        );
+        let mut stroke_only = format!(
+            "    <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
+            fmt_num(-hw),
+            fmt_num(-hh),
+            fmt_num(hw * 2.0),
+            fmt_num(hh * 2.0),
+        );
+        if aligned_r > 0.0 {
+            stroke_only.push_str(&format!(
+                " rx=\"{}\" ry=\"{}\"",
+                fmt_num(aligned_r),
+                fmt_num(aligned_r)
+            ));
+        }
+        push_stroke_only(&mut stroke_only, &rect.style);
+        stroke_only.push_str("/>\n");
+        body.push_str(&stroke_only);
+        body
+    } else {
+        let mut shape = format!(
+            "    <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"",
+            fmt_num(-width * 0.5),
+            fmt_num(-height * 0.5),
+            fmt_num(width),
+            fmt_num(height),
+        );
+        if radius > 0.0 {
+            shape.push_str(&format!(
+                " rx=\"{}\" ry=\"{}\"",
+                fmt_num(radius),
+                fmt_num(radius)
+            ));
+        }
+        push_fill_stroke(
+            &mut shape,
+            &mut defs,
+            rect.props.id,
+            &rect.style,
+            rect.local_bounds(),
+        );
+        push_shape_line_style(&mut shape, &rect.style);
+        shape.push_str("/>\n");
+        shape
+    };
     wrap_group(
         rect.props.id,
         &rect.props.transform,
@@ -496,20 +554,46 @@ fn write_rectangle(rect: &Rectangle) -> String {
 }
 
 fn write_circle(circle: &Circle) -> String {
-    let mut shape = format!(
-        "    <circle cx=\"0\" cy=\"0\" r=\"{}\"",
-        fmt_num(circle.radius.abs())
-    );
     let mut defs = String::new();
-    push_fill_stroke(
-        &mut shape,
-        &mut defs,
-        circle.props.id,
-        &circle.style,
-        circle.local_bounds(),
-    );
-    push_shape_line_style(&mut shape, &circle.style);
-    shape.push_str("/>\n");
+    let radius = circle.radius.abs();
+    let shape = if circle.style.stroke_align != StrokeAlign::Center
+        && circle.style.stroke.is_some()
+        && circle.style.stroke_width > 0.0
+    {
+        let mut body = String::new();
+        let mut fill_only = format!("    <circle cx=\"0\" cy=\"0\" r=\"{}\"", fmt_num(radius));
+        push_fill_only(
+            &mut fill_only,
+            &mut defs,
+            circle.props.id,
+            &circle.style,
+            circle.local_bounds(),
+        );
+        fill_only.push_str(" stroke=\"none\"/>\n");
+        body.push_str(&fill_only);
+        let stroke_r = crate::element::stroke::aligned_circle_radius(
+            radius,
+            circle.style.stroke_width,
+            circle.style.stroke_align,
+        );
+        let mut stroke_only = format!("    <circle cx=\"0\" cy=\"0\" r=\"{}\"", fmt_num(stroke_r));
+        push_stroke_only(&mut stroke_only, &circle.style);
+        stroke_only.push_str("/>\n");
+        body.push_str(&stroke_only);
+        body
+    } else {
+        let mut shape = format!("    <circle cx=\"0\" cy=\"0\" r=\"{}\"", fmt_num(radius));
+        push_fill_stroke(
+            &mut shape,
+            &mut defs,
+            circle.props.id,
+            &circle.style,
+            circle.local_bounds(),
+        );
+        push_shape_line_style(&mut shape, &circle.style);
+        shape.push_str("/>\n");
+        shape
+    };
     wrap_group(
         circle.props.id,
         &circle.props.transform,
@@ -522,24 +606,66 @@ fn write_circle(circle: &Circle) -> String {
 }
 
 fn write_polygon(polygon: &Polygon) -> String {
+    let local = polygon.local_points();
     let mut points = String::new();
-    for (index, point) in polygon.local_points().iter().enumerate() {
+    for (index, point) in local.iter().enumerate() {
         if index > 0 {
             points.push(' ');
         }
         points.push_str(&format!("{},{}", fmt_num(point.x), fmt_num(point.y)));
     }
-    let mut shape = format!("    <polygon points=\"{points}\"");
     let mut defs = String::new();
-    push_fill_stroke(
-        &mut shape,
-        &mut defs,
-        polygon.props.id,
-        &polygon.style,
-        polygon.local_bounds(),
-    );
-    push_shape_line_style(&mut shape, &polygon.style);
-    shape.push_str("/>\n");
+    let shape = if polygon.style.stroke_align != StrokeAlign::Center
+        && polygon.style.stroke.is_some()
+        && polygon.style.stroke_width > 0.0
+    {
+        let mut body = String::new();
+        let mut fill_only = format!("    <polygon points=\"{points}\"");
+        push_fill_only(
+            &mut fill_only,
+            &mut defs,
+            polygon.props.id,
+            &polygon.style,
+            polygon.local_bounds(),
+        );
+        fill_only.push_str(" stroke=\"none\"/>\n");
+        body.push_str(&fill_only);
+        let outline = crate::element::stroke::aligned_stroke_outline(
+            &polygon.closed_outline(),
+            polygon.style.stroke_width,
+            polygon.style.stroke_align,
+        );
+        // drop duplicate closing point for <polygon>
+        let stroke_pts = if outline.len() >= 2 && outline.first() == outline.last() {
+            &outline[..outline.len() - 1]
+        } else {
+            outline.as_slice()
+        };
+        let mut stroke_attr = String::new();
+        for (index, point) in stroke_pts.iter().enumerate() {
+            if index > 0 {
+                stroke_attr.push(' ');
+            }
+            stroke_attr.push_str(&format!("{},{}", fmt_num(point.x), fmt_num(point.y)));
+        }
+        let mut stroke_only = format!("    <polygon points=\"{stroke_attr}\"");
+        push_stroke_only(&mut stroke_only, &polygon.style);
+        stroke_only.push_str("/>\n");
+        body.push_str(&stroke_only);
+        body
+    } else {
+        let mut shape = format!("    <polygon points=\"{points}\"");
+        push_fill_stroke(
+            &mut shape,
+            &mut defs,
+            polygon.props.id,
+            &polygon.style,
+            polygon.local_bounds(),
+        );
+        push_shape_line_style(&mut shape, &polygon.style);
+        shape.push_str("/>\n");
+        shape
+    };
     wrap_group(
         polygon.props.id,
         &polygon.props.transform,
@@ -819,6 +945,32 @@ fn prepend_defs(defs: &str, shape: &str) -> String {
     body.push_str("    </defs>\n");
     body.push_str(shape);
     body
+}
+
+fn push_fill_only(
+    shape: &mut String,
+    defs: &mut String,
+    id: ElementId,
+    style: &ElementStyle,
+    bounds: Rect,
+) {
+    if style.uses_gradient() {
+        let name = format!("fill-e{id}");
+        defs.push_str(&gradient_def(&name, style, bounds));
+        shape.push_str(" fill=\"url(#");
+        shape.push_str(&name);
+        shape.push_str(")\"");
+    } else {
+        match style.fill {
+            Some(color) => {
+                shape.push_str(" fill=\"");
+                shape.push_str(&rgb_hex(color));
+                shape.push('"');
+                push_alpha_attr(shape, "fill-opacity", color.a);
+            }
+            None => shape.push_str(" fill=\"none\""),
+        }
+    }
 }
 
 fn push_fill_stroke(

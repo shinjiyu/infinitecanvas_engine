@@ -1632,6 +1632,7 @@ function syncPropertyPanel(engine) {
   syncDash(style);
   syncChoice('prop-stroke-cap', style.strokeCap, style.strokeCapMixed);
   syncChoice('prop-stroke-join', style.strokeJoin, style.strokeJoinMixed);
+  syncChoice('prop-stroke-align', style.strokeAlign, style.strokeAlignMixed);
   const markers = document.getElementById('prop-line-markers');
   if (markers) markers.hidden = !style.hasLine;
   syncChoice('prop-start-marker', style.startMarker, style.startMarkerMixed);
@@ -1940,6 +1941,7 @@ function bindPropertyPanel(engine) {
   });
   bindChoice('prop-stroke-cap', 'strokeCap', (value) => value);
   bindChoice('prop-stroke-join', 'strokeJoin', (value) => value);
+  bindChoice('prop-stroke-align', 'strokeAlign', (value) => value);
   bindChoice('prop-start-marker', 'startMarker', (value) => value);
   bindChoice('prop-end-marker', 'endMarker', (value) => value);
   bindChoice('prop-blend-mode', 'blendMode', (value) => value);

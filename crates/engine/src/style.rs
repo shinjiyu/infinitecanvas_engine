@@ -27,7 +27,7 @@
 use crate::blend::BlendMode;
 use crate::element::{
     DropShadow, ElementId, ElementStyle, FillKind, FontWeight, GradientStop, Line, LineMarker,
-    Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin, TextAlign,
+    Polygon, PolygonKind, Rectangle, StrokeAlign, StrokeCap, StrokeJoin, TextAlign,
 };
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::{Color, Vec2};
@@ -144,6 +144,8 @@ pub struct StylePatch {
     pub stroke_cap: Option<StrokeCap>,
     /// 形状线结。文本描边不读这个字段。
     pub stroke_join: Option<StrokeJoin>,
+    /// 形状描边对齐。文本描边不读这个字段。
+    pub stroke_align: Option<StrokeAlign>,
     /// 矩形圆角半径，单位与矩形尺寸相同。只写到矩形上，并钳到短边一半。
     pub corner_radius: Option<f32>,
     /// 正多边形边数或星形角数。只写到 [`Polygon`] 上，并钳到 3–64。
@@ -209,6 +211,8 @@ pub struct SelectionStyle {
     pub stroke_cap: StyleField<StrokeCap>,
     /// 形状线结。文本不参与。
     pub stroke_join: StyleField<StrokeJoin>,
+    /// 形状描边对齐。文本不参与。
+    pub stroke_align: StyleField<StrokeAlign>,
     /// 矩形圆角。选择里没有矩形时为 [`StyleField::Absent`]。
     pub corner_radius: StyleField<f32>,
     /// 多边形边数或星形角数。选择里没有多边形或星形时为 [`StyleField::Absent`]。
@@ -527,6 +531,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut dashes = Vec::new();
     let mut caps = Vec::new();
     let mut joins = Vec::new();
+    let mut aligns = Vec::new();
     let mut radii = Vec::new();
     let mut side_counts = Vec::new();
     let mut inner_radii = Vec::new();
@@ -612,6 +617,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
+                aligns.push(style.stroke_align);
                 blends.push(style.blend_mode);
                 push_shadow(
                     &mut shadow_xs,
@@ -647,6 +653,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
+                aligns.push(style.stroke_align);
                 blends.push(style.blend_mode);
                 radii.push(corner_radius);
                 push_shadow(
@@ -684,6 +691,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 dashes.push(style.stroke_dash);
                 caps.push(style.stroke_cap);
                 joins.push(style.stroke_join);
+                aligns.push(style.stroke_align);
                 blends.push(style.blend_mode);
                 side_counts.push(sides as f32);
                 if kind == PolygonKind::Star {
@@ -757,6 +765,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         stroke_dash: fold(dashes),
         stroke_cap: fold(caps),
         stroke_join: fold(joins),
+        stroke_align: fold(aligns),
         corner_radius: fold(radii),
         sides: fold(side_counts),
         inner_radius: fold(inner_radii),
@@ -835,6 +844,9 @@ fn apply_shape_paint(style: &mut ElementStyle, patch: &StylePatch) {
     }
     if let Some(join) = patch.stroke_join {
         style.stroke_join = join;
+    }
+    if let Some(align) = patch.stroke_align {
+        style.stroke_align = align;
     }
     if let Some(kind) = patch.fill_kind {
         style.fill_kind = kind;
@@ -1020,7 +1032,7 @@ mod tests {
     use super::*;
     use crate::element::{
         DropShadow, FillKind, Frame, GradientStop, Image, Line, LineMarker, Path, Rectangle,
-        StrokeCap, StrokeJoin, Text,
+        StrokeAlign, StrokeCap, StrokeJoin, Text,
     };
     use crate::Element;
     use crate::{
@@ -1353,6 +1365,7 @@ mod tests {
             stroke_dash: Some(vec![8.0, 4.0, f32::NAN]),
             stroke_cap: Some(StrokeCap::Round),
             stroke_join: Some(StrokeJoin::Bevel),
+            stroke_align: Some(StrokeAlign::Inside),
             ..StylePatch::default()
         };
         let mut history = CommandHistory::new();
@@ -1367,12 +1380,14 @@ mod tests {
         assert!(json.contains("\"stroke_dash\""));
         assert!(json.contains("\"stroke_cap\":\"round\""));
         assert!(json.contains("\"stroke_join\":\"bevel\""));
+        assert!(json.contains("\"stroke_align\":\"inside\""));
         let restored = Scene::from_json(&json).unwrap();
         for id in [1, 2, 3, 4] {
             let style = shape_style(&restored, id);
             assert_eq!(style.stroke_dash, vec![8.0, 4.0]);
             assert_eq!(style.stroke_cap, StrokeCap::Round);
             assert_eq!(style.stroke_join, StrokeJoin::Bevel);
+            assert_eq!(style.stroke_align, StrokeAlign::Inside);
             assert_eq!(style.stroke_width, 6.0);
             assert!((style.opacity - 0.5).abs() < 1e-5);
         }
@@ -2456,5 +2471,42 @@ mod tests {
             AnyElement::Line(line) => assert_eq!(line.end_marker(), LineMarker::Arrow),
             other => panic!("line, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn stroke_align_defaults_center_and_undoes() {
+        let mut scene = Scene::new();
+        scene.add_rect(
+            Rectangle::new(1, Vec2::ZERO, Vec2::new(40.0, 20.0))
+                .with_style(ElementStyle::stroke_only(Color::BLACK, 8.0)),
+        );
+        assert_eq!(shape_style(&scene, 1).stroke_align, StrokeAlign::Center);
+        let old = scene.to_json().unwrap();
+        assert!(!old.contains("stroke_align"));
+        let restored = Scene::from_json(&old).unwrap();
+        assert_eq!(shape_style(&restored, 1).stroke_align, StrokeAlign::Center);
+
+        let patch = StylePatch {
+            stroke_align: Some(StrokeAlign::Outside),
+            ..StylePatch::default()
+        };
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1], &patch).unwrap()),
+            &mut scene,
+        );
+        assert_eq!(shape_style(&scene, 1).stroke_align, StrokeAlign::Outside);
+        assert!(scene.has_dirty_elements());
+        history.undo(&mut scene);
+        assert_eq!(shape_style(&scene, 1).stroke_align, StrokeAlign::Center);
+
+        let summary = selection_style(&scene, &[1]);
+        assert_eq!(
+            summary.stroke_align,
+            StyleField::Uniform(StrokeAlign::Center)
+        );
+        assert!(SetStyleCommand::from_patch(&scene, &[], &patch).is_none());
+        scene.set_locked(1, true);
+        assert!(SetStyleCommand::from_patch(&scene, &[1], &patch).is_none());
     }
 }

@@ -11,8 +11,9 @@ use super::blur::{
 use super::gradient::paint_gradient_fill;
 use super::shadow::{open_ring, outward_normals, soft_shadow_vertices, stroke_capsule_shadow};
 use super::stroke::{
-    bounds_containing, color_with_opacity, distance_to_polyline, effective_width, paint_color,
-    stroke_styled, transform_vertices, StrokePaint, HIT_SLOP, MITER_LIMIT,
+    aligned_stroke_outline, bounds_containing, color_with_opacity, distance_to_polyline,
+    effective_width, paint_color, stroke_styled, transform_vertices, StrokePaint, HIT_SLOP,
+    MITER_LIMIT,
 };
 use super::{Element, ElementId, ElementProps, ElementStyle, FillKind};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
@@ -369,9 +370,14 @@ impl Path {
                 if let Some(first) = ring.first().copied() {
                     closed.push(first);
                 }
+                let aligned = aligned_stroke_outline(
+                    &closed,
+                    self.style.stroke_width,
+                    self.style.stroke_align,
+                );
                 vertices.extend(transform_vertices(
                     stroke_styled(
-                        &closed,
+                        &aligned,
                         StrokePaint {
                             width: self.style.stroke_width,
                             color,

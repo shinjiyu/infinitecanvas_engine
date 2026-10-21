@@ -5,7 +5,7 @@
 //! 实线 + 平头 + 斜接走原来的三角形带。虚线、圆头/方头、圆角/斜角另生成
 //! 线段四边形、端点帽和外侧拐角，矩形和圆会把重合的首尾当成闭合环。
 
-use super::{ElementStyle, StrokeCap, StrokeJoin};
+use super::{ElementStyle, StrokeAlign, StrokeCap, StrokeJoin};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use std::f32::consts::PI;
 
@@ -791,6 +791,120 @@ pub(crate) fn transform_vertices(vertices: Vec<Vertex>, transform: &Transform) -
         .collect()
 }
 
+/// 按对齐方式偏移闭合轮廓，使居中描边落在内侧或外侧。
+///
+/// `inward` 为正时沿折线左侧法线内缩（对矩形/圆/多边形的闭合轮廓，左侧即朝向内部）。
+/// 开口折线原样返回。偏移量过大导致自交时仍尽量输出，由调用方钳制尺寸。
+pub(crate) fn offset_closed_polyline(points: &[Vec2], inward: f32) -> Vec<Vec2> {
+    if !inward.is_finite() || inward.abs() < 1e-8 {
+        return points.to_vec();
+    }
+    let (pts, closed) = open_or_loop(points);
+    if !closed || pts.len() < 3 {
+        return points.to_vec();
+    }
+    let count = pts.len();
+    let mut out = Vec::with_capacity(count + 1);
+    for index in 0..count {
+        let prev = pts[(index + count - 1) % count];
+        let curr = pts[index];
+        let next = pts[(index + 1) % count];
+        let Some(dir_in) = safe_dir(prev, curr) else {
+            out.push(curr);
+            continue;
+        };
+        let Some(dir_out) = safe_dir(curr, next) else {
+            out.push(curr);
+            continue;
+        };
+        let n0 = left_normal(dir_in);
+        let n1 = left_normal(dir_out);
+        let sum = n0 + n1;
+        let sum_len = sum.length();
+        if sum_len < 1e-5 {
+            out.push(curr + n0 * inward);
+            continue;
+        }
+        let miter = sum / sum_len;
+        let denom = miter.dot(n0);
+        if denom.abs() < 1e-4 {
+            out.push(curr + n0 * inward);
+        } else {
+            // 限制斜接，避免尖角爆炸
+            let scale =
+                (inward / denom).clamp(-inward.abs() * MITER_LIMIT, inward.abs() * MITER_LIMIT);
+            out.push(curr + miter * scale);
+        }
+    }
+    if let Some(first) = out.first().copied() {
+        out.push(first);
+    }
+    out
+}
+
+/// 把闭合轮廓改到描边对齐所需的中心线位置。开口路径不改。
+///
+/// Center 原样返回；Inside 内缩半线宽；Outside 外扩半线宽。
+pub(crate) fn aligned_stroke_outline(points: &[Vec2], width: f32, align: StrokeAlign) -> Vec<Vec2> {
+    if width <= 0.0 || !width.is_finite() {
+        return points.to_vec();
+    }
+    let half = width * 0.5;
+    let inward = match align {
+        StrokeAlign::Center => return points.to_vec(),
+        StrokeAlign::Inside => half,
+        StrokeAlign::Outside => -half,
+    };
+    offset_closed_polyline(points, inward)
+}
+
+/// 圆在居中描边对齐下的有效半径（中心线半径）。
+pub(crate) fn aligned_circle_radius(radius: f32, width: f32, align: StrokeAlign) -> f32 {
+    let radius = radius.abs();
+    if width <= 0.0 || !width.is_finite() {
+        return radius;
+    }
+    let half = width * 0.5;
+    match align {
+        StrokeAlign::Center => radius,
+        StrokeAlign::Inside => (radius - half).max(0.0),
+        StrokeAlign::Outside => radius + half,
+    }
+}
+
+/// 轴对齐矩形在描边对齐下的半宽、半高和圆角。
+///
+/// Inside 内缩；Outside 外扩。半宽/半高不会收成负数。
+pub(crate) fn aligned_rect_metrics(
+    half_w: f32,
+    half_h: f32,
+    corner_radius: f32,
+    width: f32,
+    align: StrokeAlign,
+) -> (f32, f32, f32) {
+    let half_w = half_w.abs();
+    let half_h = half_h.abs();
+    if width <= 0.0 || !width.is_finite() || align == StrokeAlign::Center {
+        return (
+            half_w,
+            half_h,
+            corner_radius.max(0.0).min(half_w).min(half_h),
+        );
+    }
+    let half = width * 0.5;
+    let (hw, hh, radius) = match align {
+        StrokeAlign::Center => (half_w, half_h, corner_radius),
+        StrokeAlign::Inside => (
+            (half_w - half).max(0.0),
+            (half_h - half).max(0.0),
+            (corner_radius - half).max(0.0),
+        ),
+        StrokeAlign::Outside => (half_w + half, half_h + half, corner_radius + half),
+    };
+    let radius = radius.max(0.0).min(hw).min(hh);
+    (hw, hh, radius)
+}
+
 /// 描边颜色：优先描边色，否则填充色，并乘上不透明度。
 pub(crate) fn paint_color(style: &ElementStyle) -> Color {
     color_with_opacity(
@@ -816,7 +930,7 @@ pub(crate) fn effective_width(stroke_width: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{StrokeCap, StrokeJoin};
+    use super::super::{StrokeAlign, StrokeCap, StrokeJoin};
     use super::*;
 
     fn pos(vertex: &Vertex) -> Vec2 {
@@ -1014,5 +1128,34 @@ mod tests {
         );
         assert!(covers(&vertices, Vec2::new(-40.0, -10.0)));
         assert!(!covers(&vertices, Vec2::new(-20.0, -10.0)));
+    }
+
+    #[test]
+    fn inside_outline_moves_toward_center_outside_away() {
+        let square = [
+            Vec2::new(-50.0, -50.0),
+            Vec2::new(50.0, -50.0),
+            Vec2::new(50.0, 50.0),
+            Vec2::new(-50.0, 50.0),
+            Vec2::new(-50.0, -50.0),
+        ];
+        let inside = aligned_stroke_outline(&square, 20.0, StrokeAlign::Inside);
+        let outside = aligned_stroke_outline(&square, 20.0, StrokeAlign::Outside);
+        let mid_top_inside = inside[0] + (inside[1] - inside[0]) * 0.5;
+        let mid_top_outside = outside[0] + (outside[1] - outside[0]) * 0.5;
+        assert!(
+            mid_top_inside.y > -50.0,
+            "inside top edge should move down, got {}",
+            mid_top_inside.y
+        );
+        assert!(
+            mid_top_outside.y < -50.0,
+            "outside top edge should move up, got {}",
+            mid_top_outside.y
+        );
+        assert!((aligned_circle_radius(40.0, 10.0, StrokeAlign::Inside) - 35.0).abs() < 1e-4);
+        assert!((aligned_circle_radius(40.0, 10.0, StrokeAlign::Outside) - 45.0).abs() < 1e-4);
+        let (hw, hh, r) = aligned_rect_metrics(50.0, 30.0, 8.0, 10.0, StrokeAlign::Inside);
+        assert!((hw - 45.0).abs() < 1e-4 && (hh - 25.0).abs() < 1e-4 && (r - 3.0).abs() < 1e-4);
     }
 }
