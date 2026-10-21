@@ -491,6 +491,16 @@ impl Polygon {
         )
     }
 
+    /// 内阴影顶点。关闭时为空。放在填充之后。
+    pub(crate) fn inner_shadow_vertices(&self) -> Vec<Vertex> {
+        super::shadow::soft_inner_shadow_vertices(
+            &self.local_points(),
+            self.style.inner_shadow,
+            self.style.opacity,
+            &self.props.transform,
+        )
+    }
+
     /// 到轮廓的有符号距离。内部为负，供 PNG 在本体外侧羽化投影。
     pub(crate) fn silhouette_distance(&self, point: Vec2) -> f32 {
         let outline = self.closed_outline();

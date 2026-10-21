@@ -529,9 +529,10 @@ fn mesh_for(scene: &Scene, element: &AnyElement) -> Mesh {
 fn generate_mesh(element: &AnyElement) -> Mesh {
     match element {
         AnyElement::Rectangle(rect) => {
-            // 阴影在填充之前，这样本体盖住自己的投影，z 顺序仍按元素。
+            // 外投影在填充之前；内阴影在填充之后、描边之前。
             let mut fill = rect.shadow_vertices();
             fill.extend(rect.generate_fill_vertices());
+            fill.extend(rect.inner_shadow_vertices());
             // 线段管线宽度固定，线宽变化靠填充缓冲里的三角形带立刻画出来。
             fill.extend(rect.stroke_ribbon_vertices());
             Mesh {
@@ -547,6 +548,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
         AnyElement::Circle(circle) => {
             let mut fill = circle.shadow_vertices();
             fill.extend(circle.generate_fill_vertices());
+            fill.extend(circle.inner_shadow_vertices());
             fill.extend(circle.stroke_ribbon_vertices());
             Mesh {
                 fill,
@@ -561,6 +563,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
         AnyElement::Polygon(polygon) => {
             let mut fill = polygon.shadow_vertices();
             fill.extend(polygon.generate_fill_vertices());
+            fill.extend(polygon.inner_shadow_vertices());
             fill.extend(polygon.stroke_ribbon_vertices());
             Mesh {
                 fill,
@@ -581,6 +584,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             if blurred {
                 fill.extend(image.plate_vertices());
             }
+            fill.extend(image.inner_shadow_vertices());
             Mesh {
                 fill,
                 stroke: Vec::new(),
@@ -594,6 +598,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
         AnyElement::Line(line) => {
             let mut fill = line.shadow_vertices();
             fill.extend(line.generate_vertices());
+            fill.extend(line.inner_shadow_vertices());
             Mesh {
                 fill,
                 stroke: Vec::new(),
@@ -607,6 +612,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
         AnyElement::Path(path) => {
             let mut fill = path.shadow_vertices();
             fill.extend(path.generate_vertices());
+            fill.extend(path.inner_shadow_vertices());
             Mesh {
                 fill,
                 stroke: Vec::new(),
@@ -621,7 +627,11 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             let textured = text.generate_vertices();
             let blurred = blur_active(text.blur_radius) && !textured.is_empty();
             Mesh {
-                fill: text.shadow_vertices(),
+                fill: {
+                    let mut fill = text.shadow_vertices();
+                    fill.extend(text.inner_shadow_vertices());
+                    fill
+                },
                 stroke: Vec::new(),
                 textured,
                 texture_id: text.texture_id.clone(),
@@ -634,6 +644,7 @@ fn generate_mesh(element: &AnyElement) -> Mesh {
             let rect = frame.shape_proxy();
             let mut fill = rect.shadow_vertices();
             fill.extend(rect.generate_fill_vertices());
+            fill.extend(rect.inner_shadow_vertices());
             fill.extend(rect.stroke_ribbon_vertices());
             Mesh {
                 fill,

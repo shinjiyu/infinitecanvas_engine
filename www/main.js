@@ -1596,6 +1596,7 @@ function syncPropertyPanel(engine) {
   syncPolygonFields(style);
   syncLayerBlur(style);
   syncShadow(style);
+  syncInnerShadow(style);
   syncImageCrop(engine);
   syncGradient(style);
   const blendRow = document.getElementById('prop-blend-row');
@@ -1861,6 +1862,7 @@ function bindPropertyPanel(engine) {
   bindPolygonFields(engine);
   bindLayerBlur(engine);
   bindShadow(engine);
+  bindInnerShadow(engine);
   bindImageCrop(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
 
@@ -1894,6 +1896,7 @@ function bindPropertyPanel(engine) {
   bindColor('prop-stroke', 'stroke');
   bindColor('prop-text-color', 'textColor');
   bindColor('prop-shadow-color', 'shadowColor');
+  bindColor('prop-inner-shadow-color', 'innerShadowColor');
 
   document.getElementById('prop-fill-enabled')?.addEventListener('change', (event) => {
     const input = event.currentTarget;
@@ -2439,6 +2442,143 @@ function bindShadow(engine) {
       engine.set_selection_style(patch);
     } else {
       engine.set_selection_style({ shadowOpacity: 0 });
+    }
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+  });
+}
+
+
+function syncInnerShadow(style) {
+  const block = document.getElementById('prop-inner-shadow');
+  if (block) block.hidden = !style.innerShadowSupported;
+  const mixed =
+    Boolean(style.innerShadowOpacityMixed) ||
+    Boolean(style.innerShadowBlurMixed) ||
+    Boolean(style.innerShadowSpreadMixed) ||
+    Boolean(style.innerShadowOffsetXMixed) ||
+    Boolean(style.innerShadowOffsetYMixed);
+  const mixedEl = document.getElementById('prop-inner-shadow-enabled-mixed');
+  if (mixedEl) mixedEl.hidden = !mixed;
+  const enabled = document.getElementById('prop-inner-shadow-enabled');
+  if (enabled instanceof HTMLInputElement && activeStyleControl !== 'prop-inner-shadow-enabled') {
+    enabled.indeterminate = mixed;
+    enabled.checked = !mixed && innerShadowLooksOn(style);
+  }
+  syncShadowNumber('prop-inner-shadow-x', style.innerShadowOffsetX, style.innerShadowOffsetXMixed);
+  syncShadowNumber('prop-inner-shadow-y', style.innerShadowOffsetY, style.innerShadowOffsetYMixed);
+  syncRange(
+    'prop-inner-shadow-blur',
+    'prop-inner-shadow-blur-label',
+    style.innerShadowBlur,
+    style.innerShadowBlurMixed,
+    (value) => String(value),
+  );
+  syncRange(
+    'prop-inner-shadow-spread',
+    'prop-inner-shadow-spread-label',
+    style.innerShadowSpread,
+    style.innerShadowSpreadMixed,
+    (value) => String(value),
+  );
+  syncColorRow(
+    'prop-inner-shadow-color',
+    null,
+    'prop-inner-shadow-color-mixed',
+    style.innerShadowColor,
+    style.innerShadowColorMixed,
+    false,
+    style.innerShadowSupported,
+  );
+  syncRange(
+    'prop-inner-shadow-opacity',
+    'prop-inner-shadow-opacity-label',
+    style.innerShadowOpacity,
+    style.innerShadowOpacityMixed,
+    (value) => `${Math.round(value * 100)}%`,
+  );
+}
+
+function innerShadowLooksOn(style) {
+  const opacity = Number(style.innerShadowOpacity);
+  const blur = Number(style.innerShadowBlur);
+  const spread = Number(style.innerShadowSpread);
+  const x = Number(style.innerShadowOffsetX);
+  const y = Number(style.innerShadowOffsetY);
+  if (!(opacity > 0.001)) return false;
+  return blur > 0.001 || spread > 0.001 || Math.abs(x) > 0.001 || Math.abs(y) > 0.001;
+}
+
+/**
+ * @param {WasmCanvas} engine
+ */
+function bindInnerShadow(engine) {
+  const previewNumber = (id, key) => {
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement)) return;
+    input.addEventListener('input', () => {
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return;
+      activeStyleControl = id;
+      engine.preview_selection_style({ [key]: value });
+    });
+    input.addEventListener('change', () => finishStyleEdit(engine));
+  };
+  previewNumber('prop-inner-shadow-x', 'innerShadowOffsetX');
+  previewNumber('prop-inner-shadow-y', 'innerShadowOffsetY');
+  const blur = document.getElementById('prop-inner-shadow-blur');
+  if (blur instanceof HTMLInputElement) {
+    blur.addEventListener('input', () => {
+      const value = Number(blur.value);
+      setText('prop-inner-shadow-blur-label', String(value));
+      activeStyleControl = 'prop-inner-shadow-blur';
+      engine.preview_selection_style({ innerShadowBlur: value });
+    });
+    blur.addEventListener('change', () => finishStyleEdit(engine));
+  }
+  const spread = document.getElementById('prop-inner-shadow-spread');
+  if (spread instanceof HTMLInputElement) {
+    spread.addEventListener('input', () => {
+      const value = Number(spread.value);
+      setText('prop-inner-shadow-spread-label', String(value));
+      activeStyleControl = 'prop-inner-shadow-spread';
+      engine.preview_selection_style({ innerShadowSpread: value });
+    });
+    spread.addEventListener('change', () => finishStyleEdit(engine));
+  }
+  const opacity = document.getElementById('prop-inner-shadow-opacity');
+  if (opacity instanceof HTMLInputElement) {
+    opacity.addEventListener('input', () => {
+      const value = Number(opacity.value);
+      setText('prop-inner-shadow-opacity-label', `${Math.round(value * 100)}%`);
+      activeStyleControl = 'prop-inner-shadow-opacity';
+      engine.preview_selection_style({ innerShadowOpacity: value });
+    });
+    opacity.addEventListener('change', () => finishStyleEdit(engine));
+  }
+  document.getElementById('prop-inner-shadow-enabled')?.addEventListener('change', (event) => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    if (input.checked) {
+      const style = engine.get_selection_style();
+      /** @type {Record<string, string | number>} */
+      const patch = { innerShadowOpacity: 0.45, innerShadowColor: '#000000' };
+      const unset =
+        !style ||
+        (!(Number(style.innerShadowOpacity) > 0) &&
+          !(Number(style.innerShadowBlur) > 0) &&
+          !(Number(style.innerShadowSpread) > 0) &&
+          !(Math.abs(Number(style.innerShadowOffsetX)) > 0) &&
+          !(Math.abs(Number(style.innerShadowOffsetY)) > 0));
+      if (unset) {
+        patch.innerShadowOffsetX = 4;
+        patch.innerShadowOffsetY = 4;
+        patch.innerShadowBlur = 8;
+        patch.innerShadowSpread = 0;
+      }
+      engine.set_selection_style(patch);
+    } else {
+      engine.set_selection_style({ innerShadowOpacity: 0 });
     }
     scheduleAutosave(engine);
     syncPropertyPanel(engine);

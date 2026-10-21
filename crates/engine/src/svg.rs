@@ -20,8 +20,8 @@
 
 use crate::blend::BlendMode;
 use crate::element::{
-    Circle, DropShadow, Element, ElementId, ElementStyle, FillKind, Image, Line, Path, Polygon,
-    Rectangle, StrokeAlign, StrokeCap, StrokeJoin, Text, TextAlign,
+    Circle, DropShadow, Element, ElementId, ElementStyle, FillKind, Image, InnerShadow, Line, Path,
+    Polygon, Rectangle, StrokeAlign, StrokeCap, StrokeJoin, Text, TextAlign,
 };
 use crate::persist::elements_in_paint_order;
 use crate::scene::{AnyElement, Scene};
@@ -328,6 +328,7 @@ fn embedded_image(scene: &Scene, image: &Image) -> Option<String> {
         &image.props.transform,
         image.alpha,
         &image.shadow,
+        &image.inner_shadow,
         image.blend_mode,
         image.blur_radius,
         &body,
@@ -547,6 +548,7 @@ fn write_rectangle(rect: &Rectangle) -> String {
         &rect.props.transform,
         rect.style.opacity,
         &rect.style.shadow,
+        &rect.style.inner_shadow,
         rect.style.blend_mode,
         rect.style.blur_radius,
         &prepend_defs(&defs, &shape),
@@ -599,6 +601,7 @@ fn write_circle(circle: &Circle) -> String {
         &circle.props.transform,
         circle.style.opacity,
         &circle.style.shadow,
+        &circle.style.inner_shadow,
         circle.style.blend_mode,
         circle.style.blur_radius,
         &prepend_defs(&defs, &shape),
@@ -671,6 +674,7 @@ fn write_polygon(polygon: &Polygon) -> String {
         &polygon.props.transform,
         polygon.style.opacity,
         &polygon.style.shadow,
+        &polygon.style.inner_shadow,
         polygon.style.blend_mode,
         polygon.style.blur_radius,
         &prepend_defs(&defs, &shape),
@@ -705,6 +709,7 @@ fn write_line(line: &Line) -> String {
         &line.props.transform,
         line.style.opacity,
         &line.style.shadow,
+        &line.style.inner_shadow,
         line.style.blend_mode,
         line.style.blur_radius,
         &body,
@@ -760,6 +765,7 @@ fn write_text(text: &Text) -> Option<String> {
         &text.props.transform,
         text.opacity,
         &text.shadow,
+        &text.inner_shadow,
         text.blend_mode,
         text.blur_radius,
         &body,
@@ -781,6 +787,7 @@ fn write_path(path: &Path) -> Option<String> {
         &path.props.transform,
         path.style.opacity,
         &path.style.shadow,
+        &path.style.inner_shadow,
         path.style.blend_mode,
         path.style.blur_radius,
         &body,
@@ -827,22 +834,27 @@ fn write_fill_shapes(path: &Path) -> Option<String> {
         &path.props.transform,
         path.style.opacity,
         &path.style.shadow,
+        &path.style.inner_shadow,
         path.style.blend_mode,
         path.style.blur_radius,
         &prepend_defs(&defs, &body),
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn wrap_group(
     id: u64,
     transform: &Transform,
     opacity: f32,
     shadow: &DropShadow,
+    inner_shadow: &InnerShadow,
     blend: BlendMode,
     blur_radius: f32,
     body: &str,
 ) -> String {
     let blurred = crate::element::blur::blur_active(blur_radius);
+    let has_inner = !inner_shadow.is_off();
+    let has_outer = !shadow.is_off();
     let mut group = format!("  <g id=\"e{id}\"");
     if let Some(matrix) = matrix_value(transform) {
         group.push_str(" transform=\"matrix(");
@@ -856,25 +868,42 @@ fn wrap_group(
     }
     if blurred {
         group.push_str(&format!(" filter=\"url(#e{id}-blur)\""));
-    } else if !shadow.is_off() {
+    } else if has_outer && has_inner {
+        group.push_str(&format!(" filter=\"url(#e{id}-shadows)\""));
+    } else if has_outer {
         group.push_str(&format!(" filter=\"url(#e{id}-shadow)\""));
+    } else if has_inner {
+        group.push_str(&format!(" filter=\"url(#e{id}-inner-shadow)\""));
     }
-    // Normal 不写。查看器不认识 mix-blend-mode 时按普通叠加上色。
     if blend != BlendMode::Normal {
         group.push_str(" style=\"mix-blend-mode:");
         group.push_str(blend.as_str());
         group.push('"');
     }
-    group.push_str(">\n");
+    group.push_str(
+        ">
+",
+    );
     if blurred {
         if let Some(filter) = blur_filter(id, transform, shadow, blur_radius) {
             group.push_str(&filter);
         }
-    } else if let Some(filter) = shadow_filter(id, transform, shadow) {
+    } else if has_outer && has_inner {
+        if let Some(filter) = combined_shadow_filter(id, transform, shadow, inner_shadow) {
+            group.push_str(&filter);
+        }
+    } else if has_outer {
+        if let Some(filter) = shadow_filter(id, transform, shadow) {
+            group.push_str(&filter);
+        }
+    } else if let Some(filter) = inner_shadow_filter(id, transform, inner_shadow) {
         group.push_str(&filter);
     }
     group.push_str(body);
-    group.push_str("  </g>\n");
+    group.push_str(
+        "  </g>
+",
+    );
     group
 }
 
@@ -933,6 +962,53 @@ fn shadow_filter(id: u64, transform: &Transform, shadow: &DropShadow) -> Option<
         fmt_num(deviation),
         rgb_hex(shadow.color),
         fmt_num(shadow.color.a),
+    ))
+}
+
+/// SVG 内阴影近似：偏移 + 高斯 + 从源图形抠出。和画布向内羽化环不是像素级一致。
+fn inner_shadow_filter(id: u64, transform: &Transform, shadow: &InnerShadow) -> Option<String> {
+    if shadow.is_off() {
+        return None;
+    }
+    let shadow = shadow.sanitized();
+    let offset = transform.transform_vector(shadow.offset);
+    let scale = transform.scale.x.abs().max(transform.scale.y.abs());
+    let deviation = (shadow.blur * 0.5 + shadow.spread * 0.35) * scale;
+    Some(format!(
+        "    <filter id=\"e{id}-inner-shadow\" filterUnits=\"objectBoundingBox\" x=\"-0.5\" y=\"-0.5\" width=\"2\" height=\"2\">\n      <feOffset dx=\"{}\" dy=\"{}\" in=\"SourceAlpha\" result=\"off\"/>\n      <feGaussianBlur in=\"off\" stdDeviation=\"{}\" result=\"blur\"/>\n      <feComposite in=\"blur\" in2=\"SourceAlpha\" operator=\"arithmetic\" k2=\"-1\" k3=\"1\" result=\"cut\"/>\n      <feFlood flood-color=\"{}\" flood-opacity=\"{}\" result=\"flood\"/>\n      <feComposite in=\"flood\" in2=\"cut\" operator=\"in\" result=\"shade\"/>\n      <feComposite in=\"shade\" in2=\"SourceGraphic\" operator=\"over\"/>\n    </filter>\n",
+        fmt_num(offset.x),
+        fmt_num(offset.y),
+        fmt_num(deviation),
+        rgb_hex(shadow.color),
+        fmt_num(shadow.color.a),
+    ))
+}
+
+fn combined_shadow_filter(
+    id: u64,
+    transform: &Transform,
+    shadow: &DropShadow,
+    inner: &InnerShadow,
+) -> Option<String> {
+    let outer = shadow.sanitized();
+    let inset = inner.sanitized();
+    let outer_off = transform.transform_vector(outer.offset);
+    let inner_off = transform.transform_vector(inset.offset);
+    let scale = transform.scale.x.abs().max(transform.scale.y.abs());
+    let outer_dev = outer.blur * scale * 0.5;
+    let inner_dev = (inset.blur * 0.5 + inset.spread * 0.35) * scale;
+    Some(format!(
+        "    <filter id=\"e{id}-shadows\" filterUnits=\"objectBoundingBox\" x=\"-4\" y=\"-4\" width=\"9\" height=\"9\">\n      <feDropShadow dx=\"{}\" dy=\"{}\" stdDeviation=\"{}\" flood-color=\"{}\" flood-opacity=\"{}\" result=\"drop\"/>\n      <feOffset dx=\"{}\" dy=\"{}\" in=\"SourceAlpha\" result=\"off\"/>\n      <feGaussianBlur in=\"off\" stdDeviation=\"{}\" result=\"blur\"/>\n      <feComposite in=\"blur\" in2=\"SourceAlpha\" operator=\"arithmetic\" k2=\"-1\" k3=\"1\" result=\"cut\"/>\n      <feFlood flood-color=\"{}\" flood-opacity=\"{}\" result=\"flood\"/>\n      <feComposite in=\"flood\" in2=\"cut\" operator=\"in\" result=\"shade\"/>\n      <feComposite in=\"shade\" in2=\"drop\" operator=\"over\"/>\n    </filter>\n",
+        fmt_num(outer_off.x),
+        fmt_num(outer_off.y),
+        fmt_num(outer_dev),
+        rgb_hex(outer.color),
+        fmt_num(outer.color.a),
+        fmt_num(inner_off.x),
+        fmt_num(inner_off.y),
+        fmt_num(inner_dev),
+        rgb_hex(inset.color),
+        fmt_num(inset.color.a),
     ))
 }
 

@@ -9,7 +9,10 @@ use super::blur::{
     BLUR_EXTENT,
 };
 use super::gradient::paint_gradient_fill;
-use super::shadow::{open_ring, outward_normals, soft_shadow_vertices, stroke_capsule_shadow};
+use super::shadow::{
+    open_ring, outward_normals, soft_inner_shadow_vertices, soft_shadow_vertices,
+    stroke_capsule_inner_shadow, stroke_capsule_shadow,
+};
 use super::stroke::{
     aligned_stroke_outline, bounds_containing, color_with_opacity, distance_to_polyline,
     effective_width, paint_color, stroke_styled, transform_vertices, StrokePaint, HIT_SLOP,
@@ -197,6 +200,32 @@ impl Path {
             &self.points,
             self.stroke_width() * 0.5,
             self.style.shadow,
+            self.style.opacity,
+            &self.props.transform,
+        )
+    }
+
+    /// 内阴影顶点。填充路径沿外轮廓；自由画笔沿胶囊。放在本体之后。
+    pub(crate) fn inner_shadow_vertices(&self) -> Vec<Vertex> {
+        if self.is_filled() {
+            let mut vertices = Vec::new();
+            for shape in &self.shapes {
+                let Some(exterior) = shape.rings.first() else {
+                    continue;
+                };
+                vertices.extend(soft_inner_shadow_vertices(
+                    exterior,
+                    self.style.inner_shadow,
+                    self.style.opacity,
+                    &self.props.transform,
+                ));
+            }
+            return vertices;
+        }
+        stroke_capsule_inner_shadow(
+            &self.points,
+            self.stroke_width() * 0.5,
+            self.style.inner_shadow,
             self.style.opacity,
             &self.props.transform,
         )
