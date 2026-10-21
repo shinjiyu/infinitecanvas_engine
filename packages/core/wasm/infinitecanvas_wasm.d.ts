@@ -679,6 +679,23 @@ export class InfiniteCanvas {
      */
     get_selection_style(): any;
     /**
+     * 读取当前选择的变换数值。
+     *
+     * - `supported`：有未锁定的选中根
+     * - `sizeSupported`：选择里有非直线目标，可改 W/H
+     * - `x` / `y`：本地原点世界坐标（`transform.translation`）
+     * - `width` / `height`：世界尺寸 `|local| * |scale|`；直线不参与
+     * - `rotation`：旋转角度（度），与旋转手柄同一字段
+     * - 多选不一致时对应 `*Mixed` 为 true，数值为 null
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const t = canvas.get_selection_transform();
+     * if (t.supported && !t.xMixed) xInput.value = t.x;
+     * ```
+     */
+    get_selection_transform(): any;
+    /**
      * 当前吸附阈值（屏幕像素）。
      */
     get_snap_threshold(): number;
@@ -1202,6 +1219,20 @@ export class InfiniteCanvas {
      */
     set_selection_style(patch: any): boolean;
     /**
+     * 把变换补丁写进当前选择并记一条撤销记录。
+     *
+     * 对象里出现的 `x` / `y` / `width`（或 `w`）/ `height`（或 `h`）/ `rotation`
+     * （或 `rotationDeg` / `rotation_deg`）才会修改。宽高必须为正有限数。
+     * 直线忽略宽高。多选时每个根写入同一绝对值。
+     * 空选、锁定、非法输入或没有变化时返回 false，不入栈。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_selection_transform({ x: 100, rotation: 15 });
+     * ```
+     */
+    set_selection_transform(patch: any): boolean;
+    /**
      * 开启或关闭拖拽吸附。
      *
      * 关闭后元素跟着指针走，不再产生对齐参考线。
@@ -1483,6 +1514,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_selection_box_bounds: (a: number) => any;
     readonly infinitecanvas_get_selection_count: (a: number) => number;
     readonly infinitecanvas_get_selection_style: (a: number) => any;
+    readonly infinitecanvas_get_selection_transform: (a: number) => any;
     readonly infinitecanvas_get_snap_threshold: (a: number) => number;
     readonly infinitecanvas_get_state: (a: number) => any;
     readonly infinitecanvas_get_structure_epoch: (a: number) => bigint;
@@ -1543,6 +1575,7 @@ export interface InitOutput {
     readonly infinitecanvas_set_image_crop: (a: number, b: any) => number;
     readonly infinitecanvas_set_rulers_visible: (a: number, b: number) => void;
     readonly infinitecanvas_set_selection_style: (a: number, b: any) => number;
+    readonly infinitecanvas_set_selection_transform: (a: number, b: any) => number;
     readonly infinitecanvas_set_snap_enabled: (a: number, b: number) => void;
     readonly infinitecanvas_set_snap_threshold: (a: number, b: number) => void;
     readonly infinitecanvas_set_text_editing: (a: number, b: bigint, c: number) => number;

@@ -891,6 +891,34 @@
             名称
             <input id="prop-frame-name" type="text" value="" aria-label="画板名称">
           </label>
+          <div id="prop-transform">
+            <label class="prop-row" for="prop-x">
+              X
+              <input id="prop-x" type="number" step="1" value="0" aria-label="位置 X">
+            </label>
+            <p id="prop-x-mixed" class="mixed-tag" hidden>X：多种</p>
+            <label class="prop-row" for="prop-y">
+              Y
+              <input id="prop-y" type="number" step="1" value="0" aria-label="位置 Y">
+            </label>
+            <p id="prop-y-mixed" class="mixed-tag" hidden>Y：多种</p>
+            <label class="prop-row" for="prop-w">
+              W
+              <input id="prop-w" type="number" min="0.01" step="1" value="0" aria-label="宽度">
+            </label>
+            <p id="prop-w-mixed" class="mixed-tag" hidden>W：多种</p>
+            <label class="prop-row" for="prop-h">
+              H
+              <input id="prop-h" type="number" min="0.01" step="1" value="0" aria-label="高度">
+            </label>
+            <p id="prop-h-mixed" class="mixed-tag" hidden>H：多种</p>
+            <label class="prop-row" for="prop-rotation" title="与画布旋转手柄同一字段，单位度">
+              旋转
+              <input id="prop-rotation" type="number" step="1" value="0" aria-label="旋转角度">
+              <span class="prop-value">°</span>
+            </label>
+            <p id="prop-rotation-mixed" class="mixed-tag" hidden>旋转：多种</p>
+          </div>
           <div class="align-grid">
             <button type="button" data-align="left" disabled title="左对齐">左</button>
             <button type="button" data-align="center" disabled title="水平居中">居中</button>
