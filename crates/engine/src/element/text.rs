@@ -23,8 +23,8 @@ use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 
 use super::blur::{blur_active, BLUR_EXTENT};
-use super::shadow::quad_shadow;
-use super::DropShadow;
+use super::shadow::{quad_inner_shadow, quad_shadow};
+use super::{DropShadow, InnerShadow};
 use web_time::{Duration, Instant};
 
 use super::{Element, ElementId, ElementProps};
@@ -419,6 +419,9 @@ pub struct Text {
     /// 有纹理且不在编辑时，按文字块包围盒画偏移羽化，不进字形光栅。
     #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
     pub shadow: DropShadow,
+    /// 内阴影。缺省关闭，关闭时不写入 JSON。不进字形光栅。
+    #[serde(default, skip_serializing_if = "InnerShadow::is_unset")]
+    pub inner_shadow: InnerShadow,
     /// 图层高斯模糊的标准差，世界单位。缺省 0。不进字形光栅。
     ///
     /// 0 不写入 JSON。纹理着色器用 5×5 核。命中仍是未模糊的文字块。
@@ -465,6 +468,7 @@ impl Text {
             pending_revision: 0,
             editing: false,
             shadow: DropShadow::default(),
+            inner_shadow: InnerShadow::default(),
             blur_radius: 0.0,
         }
     }
@@ -578,6 +582,7 @@ impl Text {
         self.pending_revision = 0;
         self.editing = false;
         self.shadow = self.shadow.sanitized();
+        self.inner_shadow = self.inner_shadow.sanitized();
         self.blur_radius = crate::element::blur::sanitize_blur(self.blur_radius);
     }
 
@@ -880,6 +885,21 @@ impl Text {
             Vec2::new(bounds.x, bounds.y),
             Vec2::new(bounds.width, bounds.height),
             self.shadow,
+            self.opacity,
+            &self.props.transform,
+        )
+    }
+
+    /// 文字块的内阴影。没有纹理或正在编辑时为空。
+    pub(crate) fn inner_shadow_vertices(&self) -> Vec<Vertex> {
+        if self.editing || self.texture_id.is_none() || !self.props.visible {
+            return Vec::new();
+        }
+        let bounds = self.local_bounds();
+        quad_inner_shadow(
+            Vec2::new(bounds.x, bounds.y),
+            Vec2::new(bounds.width, bounds.height),
+            self.inner_shadow,
             self.opacity,
             &self.props.transform,
         )

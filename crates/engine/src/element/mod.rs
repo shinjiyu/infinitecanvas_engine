@@ -24,7 +24,7 @@ pub use line::Line;
 pub use path::{FillShape, Path};
 pub use polygon::{Polygon, PolygonKind};
 pub use rect::Rectangle;
-pub use shadow::DropShadow;
+pub use shadow::{DropShadow, InnerShadow};
 pub use text::{
     estimate_size, lod_bucket, lod_scale, padding_world, raster_params, raster_texture_id,
     sanitize_letter_spacing, sanitize_line_height, FontWeight, RasterParams, Text, TextAlign,
@@ -381,6 +381,11 @@ pub struct ElementStyle {
     /// 投影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
     #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
     pub shadow: DropShadow,
+    /// 内阴影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
+    ///
+    /// 和 [`Self::shadow`] 可同时打开：外投影在填充后，内阴影叠在填充上。
+    #[serde(default, skip_serializing_if = "InnerShadow::is_unset")]
+    pub inner_shadow: InnerShadow,
     /// 填充种类。缺省纯色。旧文件没有这个字段时仍是纯色。
     #[serde(default, skip_serializing_if = "fill_kind_is_solid")]
     pub fill_kind: FillKind,
@@ -429,6 +434,7 @@ impl ElementStyle {
             stroke_join: StrokeJoin::Miter,
             stroke_align: StrokeAlign::Center,
             shadow: DropShadow::default(),
+            inner_shadow: InnerShadow::default(),
             fill_kind: FillKind::Solid,
             fill_stops: Vec::new(),
             fill_angle: 0.0,

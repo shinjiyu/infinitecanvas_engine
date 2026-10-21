@@ -3,7 +3,10 @@
 //! 两个端点之间生成带线宽的三角形带。命中测试使用点到线段距离。
 
 use super::blur::{blur_active, gaussian_capsule_vertices, gaussian_fill_vertices};
-use super::shadow::{soft_shadow_vertices, stroke_capsule_shadow};
+use super::shadow::{
+    soft_inner_shadow_vertices, soft_shadow_vertices, stroke_capsule_inner_shadow,
+    stroke_capsule_shadow,
+};
 use super::stroke::{
     arrow_points, bounds_containing, effective_width, marker_length_for, marker_width_for,
     paint_color, point_in_triangle, point_to_segment_distance, shorten_end, shorten_start,
@@ -275,6 +278,30 @@ impl Line {
             vertices.extend(soft_shadow_vertices(
                 &[tri[0], tri[1], tri[2], tri[0]],
                 self.style.shadow,
+                self.style.opacity,
+                &self.props.transform,
+            ));
+        }
+        vertices
+    }
+
+    /// 内阴影顶点。笔画胶囊与起止箭头剪影，放在本体之后。
+    pub(crate) fn inner_shadow_vertices(&self) -> Vec<Vertex> {
+        if self.style.inner_shadow.is_off() {
+            return Vec::new();
+        }
+        let (start, end, start_arrow, end_arrow) = self.local_shaft_and_markers();
+        let mut vertices = stroke_capsule_inner_shadow(
+            &[start, end],
+            self.stroke_width() * 0.5,
+            self.style.inner_shadow,
+            self.style.opacity,
+            &self.props.transform,
+        );
+        for tri in [start_arrow, end_arrow].into_iter().flatten() {
+            vertices.extend(soft_inner_shadow_vertices(
+                &[tri[0], tri[1], tri[2], tri[0]],
+                self.style.inner_shadow,
                 self.style.opacity,
                 &self.props.transform,
             ));

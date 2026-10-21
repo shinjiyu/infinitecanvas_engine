@@ -1,15 +1,15 @@
-//! 投影阴影。
+//! 投影与内阴影。
 //!
-//! 每个叶子一份 [`DropShadow`]：局部偏移、模糊半径、颜色（alpha 是浓度）。
-//! 颜色 alpha 为 0，或者偏移和模糊都是 0 时不绘制。JSON 缺省等于关闭，
+//! 每个叶子一份 [`DropShadow`]（外投影）和一份 [`InnerShadow`]（内阴影）。
+//! 字段都是局部偏移、模糊、颜色（alpha 是浓度）；内阴影另有可选 `spread`。
+//! 颜色 alpha 为 0，或者几何项都是 0 时不绘制。JSON 缺省等于关闭，
 //! 旧文档没有这些字段也能读入。和缺省值完全一样时不写回文件。
 //!
-//! 绘制是偏移后的轮廓，再加上沿外法线展开的羽化环，不是离屏高斯模糊。
-//! 矩形和圆用形状外轮廓（圆角矩形跟半径）。直线和路径用笔画胶囊，箭头另加三角形。
-//! 文本和图片用局部包围盒。命中测试和包围盒都不含阴影。
-//!
-//! 羽化环写在该元素自己的填充三角形之前，所以阴影在本体后面，并跟着 z 顺序。
-//! 文本和图片的纹理仍走纹理通道；它们的阴影落在填充通道里、位于该元素的绘制位置。
+//! 外投影：偏移后的轮廓，再加上沿外法线展开的羽化环，写在填充之前。
+//! 内阴影：沿内法线收缩的羽化环，写在填充之后、描边之前，看起来在形体内部。
+//! 两者可同时打开：外投影在本体后，内阴影叠在填充上。都不是离屏高斯。
+//! 矩形和圆用形状外轮廓。直线和路径用笔画胶囊。文本和图片用局部包围盒。
+//! 命中测试和包围盒都不含阴影。
 
 use infinitecanvas_math::{Color, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
@@ -119,6 +119,111 @@ impl DropShadow {
     }
 }
 
+fn default_inner_shadow_color() -> Color {
+    Color::new(0.0, 0.0, 0.0, 0.0)
+}
+
+/// 一个元素的内阴影（inset）。
+///
+/// 偏移在元素局部空间。颜色 alpha 为 0 时关闭。`spread` 为正时沿内法线扩大暗部。
+///
+/// # 示例
+/// ```
+/// use infinitecanvas_engine::InnerShadow;
+/// use infinitecanvas_math::{Color, Vec2};
+///
+/// let off = InnerShadow::default();
+/// assert!(off.is_off());
+/// let on = InnerShadow::new(Vec2::new(4.0, 4.0), 8.0, 0.0, Color::new(0.0, 0.0, 0.0, 0.45));
+/// assert!(!on.is_off());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct InnerShadow {
+    /// 局部空间偏移。缺省 `(0, 0)`。
+    #[serde(default)]
+    pub offset: Vec2,
+    /// 向内羽化半径。缺省 0。负数在 [`Self::sanitized`] 里收成 0。
+    #[serde(default)]
+    pub blur: f32,
+    /// 向内扩展暗部的宽度。缺省 0。负数收成 0。
+    #[serde(default)]
+    pub spread: f32,
+    /// 阴影颜色。alpha 是浓度，缺省 0（关闭）。
+    #[serde(default = "default_inner_shadow_color")]
+    pub color: Color,
+}
+
+impl Default for InnerShadow {
+    fn default() -> Self {
+        Self {
+            offset: Vec2::ZERO,
+            blur: 0.0,
+            spread: 0.0,
+            color: default_inner_shadow_color(),
+        }
+    }
+}
+
+impl InnerShadow {
+    /// 收成有限值后的内阴影。
+    pub fn new(offset: Vec2, blur: f32, spread: f32, color: Color) -> Self {
+        Self {
+            offset,
+            blur,
+            spread,
+            color,
+        }
+        .sanitized()
+    }
+
+    /// 非有限值收成 0，模糊 / 扩展和颜色通道钳到合法范围。
+    pub fn sanitized(self) -> Self {
+        Self {
+            offset: Vec2::new(finite_or_zero(self.offset.x), finite_or_zero(self.offset.y)),
+            blur: if self.blur.is_finite() {
+                self.blur.max(0.0)
+            } else {
+                0.0
+            },
+            spread: if self.spread.is_finite() {
+                self.spread.max(0.0)
+            } else {
+                0.0
+            },
+            color: Color::new(
+                finite_unit(self.color.r),
+                finite_unit(self.color.g),
+                finite_unit(self.color.b),
+                finite_unit(self.color.a),
+            ),
+        }
+    }
+
+    /// 不需要绘制。
+    pub fn is_off(&self) -> bool {
+        let shadow = self.sanitized();
+        if shadow.color.a <= 1.0e-4 {
+            return true;
+        }
+        shadow.blur <= 1.0e-4
+            && shadow.spread <= 1.0e-4
+            && shadow.offset.x.abs() <= 1.0e-4
+            && shadow.offset.y.abs() <= 1.0e-4
+    }
+
+    /// 和 [`Self::default`] 相同。序列化时整段省略。
+    pub fn is_unset(&self) -> bool {
+        let shadow = self.sanitized();
+        shadow.offset == Vec2::ZERO
+            && shadow.blur == 0.0
+            && shadow.spread == 0.0
+            && shadow.color.r == 0.0
+            && shadow.color.g == 0.0
+            && shadow.color.b == 0.0
+            && shadow.color.a == 0.0
+    }
+}
+
 /// 有符号距离上的浓度。距离小于等于 0（剪影内部）为 1，超过 `blur` 为 0。
 ///
 /// 中间用 smoothstep，外圈比线性衰减更软。`blur` 为 0 时内部仍是 1，外部是 0。
@@ -203,6 +308,126 @@ pub(crate) fn soft_shadow_vertices(
         ));
     }
     vertices
+}
+
+/// 闭合轮廓的内阴影。羽化沿内法线，画在填充之后才像嵌进形体。
+pub(crate) fn soft_inner_shadow_vertices(
+    outline: &[Vec2],
+    shadow: InnerShadow,
+    opacity: f32,
+    transform: &Transform,
+) -> Vec<Vertex> {
+    let shadow = shadow.sanitized();
+    if shadow.is_off() {
+        return Vec::new();
+    }
+    let ring = open_ring(outline);
+    if ring.len() < 3 {
+        return Vec::new();
+    }
+    let outward = outward_normals(&ring);
+    let inward: Vec<Vec2> = outward
+        .iter()
+        .map(|normal| Vec2::new(-normal.x, -normal.y))
+        .collect();
+
+    let edge: Vec<Vec2> = ring
+        .iter()
+        .zip(&inward)
+        .map(|(point, normal)| *point + *normal * shadow.spread + shadow.offset)
+        .collect();
+    if edge.len() < 3 {
+        return Vec::new();
+    }
+
+    let solid = shade_inner(shadow, opacity, 1.0);
+    let mut vertices = Vec::new();
+
+    if shadow.blur <= 1.0e-3 {
+        let rim_out = open_ring(&ring);
+        let rim_in = open_ring(&edge);
+        if rim_out.len() >= 3 && rim_in.len() >= 3 && rim_out.len() == rim_in.len() {
+            vertices.extend(feather_strip(&rim_out, &rim_in, solid, solid, transform));
+        }
+        return vertices;
+    }
+
+    let edge_outward = outward_normals(&edge);
+    let edge_inward: Vec<Vec2> = edge_outward
+        .iter()
+        .map(|normal| Vec2::new(-normal.x, -normal.y))
+        .collect();
+    for index in 0..FEATHER_RINGS {
+        let inner_d = shadow.blur * (index as f32) / (FEATHER_RINGS as f32);
+        let outer_d = shadow.blur * ((index + 1) as f32) / (FEATHER_RINGS as f32);
+        let near: Vec<Vec2> = edge
+            .iter()
+            .zip(&edge_inward)
+            .map(|(point, normal)| *point + *normal * inner_d)
+            .collect();
+        let far: Vec<Vec2> = edge
+            .iter()
+            .zip(&edge_inward)
+            .map(|(point, normal)| *point + *normal * outer_d)
+            .collect();
+        vertices.extend(feather_strip(
+            &near,
+            &far,
+            shade_inner(shadow, opacity, feather_coverage(inner_d, shadow.blur)),
+            shade_inner(shadow, opacity, feather_coverage(outer_d, shadow.blur)),
+            transform,
+        ));
+    }
+    vertices
+}
+
+fn shade_inner(shadow: InnerShadow, opacity: f32, coverage: f32) -> Color {
+    let alpha =
+        (shadow.color.a * opacity.clamp(0.0, 1.0) * coverage.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    Color::new(
+        shadow.color.r.clamp(0.0, 1.0),
+        shadow.color.g.clamp(0.0, 1.0),
+        shadow.color.b.clamp(0.0, 1.0),
+        alpha,
+    )
+}
+
+/// 开口笔画胶囊的内阴影。
+pub(crate) fn stroke_capsule_inner_shadow(
+    centerline: &[Vec2],
+    half_width: f32,
+    shadow: InnerShadow,
+    opacity: f32,
+    transform: &Transform,
+) -> Vec<Vertex> {
+    let outline = capsule_outline(centerline, half_width);
+    soft_inner_shadow_vertices(&outline, shadow, opacity, transform)
+}
+
+/// 轴对齐盒子的内阴影。
+pub(crate) fn quad_inner_shadow(
+    origin: Vec2,
+    size: Vec2,
+    shadow: InnerShadow,
+    opacity: f32,
+    transform: &Transform,
+) -> Vec<Vertex> {
+    let min = Vec2::new(
+        origin.x.min(origin.x + size.x),
+        origin.y.min(origin.y + size.y),
+    );
+    let max = Vec2::new(
+        origin.x.max(origin.x + size.x),
+        origin.y.max(origin.y + size.y),
+    );
+    let outline = [
+        Vec2::new(min.x, min.y),
+        Vec2::new(max.x, min.y),
+        Vec2::new(max.x, max.y),
+        Vec2::new(min.x, max.y),
+        Vec2::new(min.x, min.y),
+    ];
+    soft_inner_shadow_vertices(&outline, shadow, opacity, transform)
 }
 
 /// 开口笔画的胶囊剪影，再交给 [`soft_shadow_vertices`]。
@@ -555,6 +780,51 @@ mod tests {
         assert!(turned.iter().all(|vertex| vertex.position[1] >= 4.8));
         assert!(turned.iter().any(|vertex| vertex.position[0].abs() < 1.0e-2
             && (vertex.position[1] - 10.0).abs() < 1.0e-2));
+    }
+
+    #[test]
+    fn off_inner_shadow_emits_no_vertices_and_partial_json_stays_clear() {
+        let off = InnerShadow::default();
+        assert!(off.is_off());
+        assert!(off.is_unset());
+        assert!(soft_inner_shadow_vertices(&square(), off, 1.0, &Transform::identity()).is_empty());
+
+        let partial: InnerShadow = serde_json::from_str(r#"{"blur":4}"#).unwrap();
+        assert_eq!(partial.color.a, 0.0);
+        assert!(partial.is_off());
+
+        let empty: InnerShadow = serde_json::from_str("{}").unwrap();
+        assert!(empty.is_unset());
+    }
+
+    #[test]
+    fn soft_inner_shadow_stays_near_the_silhouette_and_fades_inward() {
+        let shadow = InnerShadow::new(Vec2::ZERO, 6.0, 0.0, black(0.5));
+        let vertices = soft_inner_shadow_vertices(&square(), shadow, 1.0, &Transform::identity());
+        assert!(!vertices.is_empty());
+        assert!(vertices.iter().all(|vertex| {
+            vertex.position[0] >= -6.5
+                && vertex.position[0] <= 6.5
+                && vertex.position[1] >= -6.5
+                && vertex.position[1] <= 6.5
+        }));
+        assert!(vertices.iter().any(|vertex| vertex.color[3] < 0.2));
+        assert!(vertices
+            .iter()
+            .any(|vertex| (vertex.color[3] - 0.5).abs() < 1.0e-3));
+    }
+
+    #[test]
+    fn inner_shadow_spread_and_offset_change_geometry() {
+        let base = InnerShadow::new(Vec2::ZERO, 4.0, 0.0, black(0.5));
+        let spread = InnerShadow::new(Vec2::ZERO, 4.0, 3.0, black(0.5));
+        let offset = InnerShadow::new(Vec2::new(3.0, 0.0), 4.0, 0.0, black(0.5));
+        let base_v = soft_inner_shadow_vertices(&square(), base, 1.0, &Transform::identity());
+        let spread_v = soft_inner_shadow_vertices(&square(), spread, 1.0, &Transform::identity());
+        let offset_v = soft_inner_shadow_vertices(&square(), offset, 1.0, &Transform::identity());
+        assert!(!base_v.is_empty());
+        assert_ne!(base_v[0].position, spread_v[0].position);
+        assert_ne!(base_v[0].position, offset_v[0].position);
     }
 
     #[test]

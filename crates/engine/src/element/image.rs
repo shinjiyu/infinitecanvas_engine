@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
 use crate::element::blur::{blur_active, BLUR_EXTENT};
-use crate::element::shadow::quad_shadow;
-use crate::element::{DropShadow, Element, ElementId, ElementProps};
+use crate::element::shadow::{quad_inner_shadow, quad_shadow};
+use crate::element::{DropShadow, Element, ElementId, ElementProps, InnerShadow};
 
 fn default_image_alpha() -> f32 {
     1.0
@@ -112,6 +112,9 @@ pub struct Image {
     /// 按裁剪后的显示矩形画偏移羽化，不模糊纹理像素。
     #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
     pub shadow: DropShadow,
+    /// 内阴影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
+    #[serde(default, skip_serializing_if = "InnerShadow::is_unset")]
+    pub inner_shadow: InnerShadow,
     /// 混合模式。JSON 可省略，缺省 [`BlendMode::Normal`]。Normal 不写出。
     #[serde(
         default = "crate::blend::default_blend_mode",
@@ -153,6 +156,7 @@ impl Image {
             alpha: 1.0,
             crop: default_image_crop(),
             shadow: DropShadow::default(),
+            inner_shadow: InnerShadow::default(),
             blend_mode: BlendMode::Normal,
             blur_radius: 0.0,
         }
@@ -242,6 +246,7 @@ impl Image {
             alpha: 1.0,
             crop: default_image_crop(),
             shadow: DropShadow::default(),
+            inner_shadow: InnerShadow::default(),
             blend_mode: BlendMode::Normal,
             blur_radius: 0.0,
         }
@@ -255,6 +260,7 @@ impl Image {
             self.texture_id = self.asset_id.clone();
         }
         self.shadow = self.shadow.sanitized();
+        self.inner_shadow = self.inner_shadow.sanitized();
         self.blur_radius = crate::element::blur::sanitize_blur(self.blur_radius);
     }
 
@@ -470,6 +476,21 @@ impl Image {
             Vec2::new(local.x, local.y),
             Vec2::new(local.width, local.height),
             self.shadow,
+            self.alpha,
+            &self.props.transform,
+        )
+    }
+
+    /// 裁剪后显示矩形的内阴影。关闭或不可见时为空。
+    pub(crate) fn inner_shadow_vertices(&self) -> Vec<Vertex> {
+        if !self.props.visible {
+            return Vec::new();
+        }
+        let local = self.visible_local_rect();
+        quad_inner_shadow(
+            Vec2::new(local.x, local.y),
+            Vec2::new(local.width, local.height),
+            self.inner_shadow,
             self.alpha,
             &self.props.transform,
         )
