@@ -26,6 +26,7 @@ mod input;
 mod renderer;
 mod style_api;
 mod texture_manager;
+mod transform_api;
 
 use infinitecanvas_engine::minimap::{self, MinimapFrame};
 use infinitecanvas_engine::{

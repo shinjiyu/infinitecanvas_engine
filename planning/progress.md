@@ -2,6 +2,17 @@
 
 **更新时间**: 2026-10-14
 
+## 属性面板数值变换 (#111)
+
+- [x] Engine：`TransformNumericPatch` / `selection_transform` / `apply_selection_transform`，复用 `TransformElementsCommand`；空选/锁定/非法为 no-op；`mark_dirty`
+- [x] 语义：X/Y = 本地原点（`translation`，与手柄中心一致）；W/H = 世界尺寸（改 scale）；直线禁用 W/H；旋转与手柄同一字段（度）
+- [x] 多选 mixed；批量写同一绝对值；无长宽比锁定
+- [x] WASM + 属性面板数字框，Enter/blur 提交；非法不推历史；无新快捷键
+
+```text
+属性面板 X/Y/W/H/旋转 ── set_selection_transform ──► TransformElementsCommand
+```
+
 ## Issue #80: 图层高斯模糊
 
 - [x] 叶子 `blur_radius`（f32，缺省 0，`serde(default)`）。旧 JSON 仍有效。0 不写入文件
