@@ -488,15 +488,27 @@ function saveSceneFile(engine) {
 }
 
 /**
+ * 读取侧栏「PNG 倍率」：1x / 2x / 3x，缺省 1x（与旧行为一致）。
+ * @returns {number}
+ */
+function selectedPngScale() {
+  const raw = Number(document.getElementById('png-scale')?.value || '1');
+  return raw === 2 || raw === 3 ? raw : 1;
+}
+
+/**
  * @param {WasmCanvas} engine
  * @param {boolean} selectionOnly
  */
 function exportPng(engine, selectionOnly) {
   try {
-    const bytes = engine.export_png(selectionOnly);
-    const name = selectionOnly ? 'selection.png' : 'viewport.png';
+    const scale = selectedPngScale();
+    const bytes = engine.export_png(selectionOnly, scale);
+    const suffix = scale === 1 ? '' : `@${scale}x`;
+    const name = selectionOnly ? `selection${suffix}.png` : `viewport${suffix}.png`;
     downloadBlob(name, new Blob([bytes], { type: 'image/png' }));
-    setStatus(selectionOnly ? '已导出选区 PNG' : '已导出视口 PNG');
+    const kind = selectionOnly ? '选区' : '视口';
+    setStatus(`已导出${kind} PNG（${scale}x）`);
   } catch (error) {
     setStatus(errorText(error), true);
   }

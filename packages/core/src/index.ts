@@ -108,10 +108,12 @@ export class InfiniteCanvas {
    * 导出视口或选中区域的 PNG。
    *
    * @param selectionOnly - 为 true 时只导出选中元素
+   * @param scale - 导出倍率，默认 `1`（与旧行为一致）。常用 `1` / `2` / `3`：
+   *   像素宽高 ≈ 逻辑区域 × 视口缩放 × scale；2x 面积约 4 倍。按更高分辨率重新采样。
    * @returns RGBA PNG 字节
    */
-  exportPng(selectionOnly = false): Uint8Array {
-    return this.requireWasm().export_png(selectionOnly);
+  exportPng(selectionOnly = false, scale = 1): Uint8Array {
+    return this.requireWasm().export_png(selectionOnly, scale);
   }
 
   /**

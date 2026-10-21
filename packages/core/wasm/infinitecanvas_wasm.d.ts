@@ -435,8 +435,9 @@ export class InfiniteCanvas {
      * 把一张画板导出为 PNG。区域是画板的世界包围盒，不含额外留白。
      *
      * 只绘制这张画板和它的子孙。空画板仍按矩形尺寸导出。
+     * `scale` 缺省 `1.0`；与 [`Self::export_png`] 相同的倍率语义。
      */
-    export_frame_png(frame_id: bigint): Uint8Array;
+    export_frame_png(frame_id: bigint, scale?: number | null): Uint8Array;
     /**
      * 把一张画板导出为 SVG。`viewBox` 是画板包围盒，超出部分隐藏。
      */
@@ -464,6 +465,9 @@ export class InfiniteCanvas {
      *
      * # 参数
      * - `selection_only`: `true` 时导出选中元素的包围盒；`false` 时导出当前视口
+     * - `scale`: 导出倍率，缺省 `1.0`（与旧行为一致）。常用 `1` / `2` / `3`：
+     *   像素宽高 ≈ 逻辑区域 × 视口缩放 × scale。2x 面积约 4 倍。按更高分辨率
+     *   重新采样，不是把 1x 位图放大。空选区报错；空视口导出空白 PNG。
      *
      * # 返回
      * RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
@@ -471,9 +475,9 @@ export class InfiniteCanvas {
      * id 的图片仍是纯色占位。分组本身不绘制；隐藏的组会连同子孙一起跳过。
      *
      * # 错误
-     * 没有选中元素、区域为空或编码失败
+     * 没有选中元素、区域为空、倍率非法或编码失败
      */
-    export_png(selection_only: boolean): Uint8Array;
+    export_png(selection_only: boolean, scale?: number | null): Uint8Array;
     /**
      * 把场景导出为 SVG 文本。
      *
@@ -1446,10 +1450,10 @@ export interface InitOutput {
     readonly infinitecanvas_distribute_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_duplicate_selection: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_enter_group: (a: number, b: bigint, c: bigint) => number;
-    readonly infinitecanvas_export_frame_png: (a: number, b: bigint) => [number, number, number, number];
+    readonly infinitecanvas_export_frame_png: (a: number, b: bigint, c: number) => [number, number, number, number];
     readonly infinitecanvas_export_frame_svg: (a: number, b: bigint) => [number, number, number, number];
     readonly infinitecanvas_export_json: (a: number) => [number, number, number, number];
-    readonly infinitecanvas_export_png: (a: number, b: number) => [number, number, number, number];
+    readonly infinitecanvas_export_png: (a: number, b: number, c: number) => [number, number, number, number];
     readonly infinitecanvas_export_svg: (a: number, b: number) => [number, number];
     readonly infinitecanvas_fit_scene: (a: number) => number;
     readonly infinitecanvas_flip_selection: (a: number, b: number, c: number) => number;
@@ -1554,9 +1558,9 @@ export interface InitOutput {
     readonly infinitecanvas_zoom_step: (a: number) => number;
     readonly infinitecanvas_zoom_to_fit: (a: number) => number;
     readonly infinitecanvas_zoom_to_selection: (a: number) => number;
-    readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined___js_sys_9cc5f2a5e2dd9295___Function_fn_wasm_bindgen_413c9591f4645d29___JsValue_____wasm_bindgen_413c9591f4645d29___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue__core_608f92abc48d28da___result__Result_____wasm_bindgen_413c9591f4645d29___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_413c9591f4645d29___convert__closures_____invoke___wasm_bindgen_413c9591f4645d29___JsValue______true_: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___js_sys_4cd4ef52bf73eaa4___Function_fn_wasm_bindgen_fe1d14e6b7d09dd3___JsValue_____wasm_bindgen_fe1d14e6b7d09dd3___sys__Undefined___js_sys_4cd4ef52bf73eaa4___Function_fn_wasm_bindgen_fe1d14e6b7d09dd3___JsValue_____wasm_bindgen_fe1d14e6b7d09dd3___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___wasm_bindgen_fe1d14e6b7d09dd3___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_fe1d14e6b7d09dd3___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___wasm_bindgen_fe1d14e6b7d09dd3___JsValue______true_: (a: number, b: number, c: any) => void;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
