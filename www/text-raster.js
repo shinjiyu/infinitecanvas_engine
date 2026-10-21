@@ -10,6 +10,7 @@
  * @param {number} job.rasterScale 像素 / 世界单位
  * @param {string} job.color CSS 颜色
  * @param {string} [job.align] `left` | `center` | `right`
+ * @param {string} [job.fontWeight] `regular` | `bold`（或 `400` / `700`）
  * @param {string} job.fontFamily CSS font-family，需要包含中文字体
  * @param {number} job.paddingWorld 世界单位边距
  * @returns {{ width: number, height: number, data: Uint8ClampedArray, worldWidth: number, worldHeight: number }}
@@ -22,6 +23,7 @@
  *   rasterScale: 1,
  *   color: '#f4f7fb',
  *   align: 'left',
+ *   fontWeight: 'regular',
  *   fontFamily: '"WenQuanYi Micro Hei", sans-serif',
  *   paddingWorld: 4,
  * });
@@ -35,10 +37,13 @@ export function rasterizeText(job) {
   const strokeWidthPx = Math.max(0, (Number(job.strokeWidthWorld) || 0) * rasterScale);
   const pad = paddingPx + Math.ceil(strokeWidthPx);
   const align = job.align === 'center' || job.align === 'right' ? job.align : 'left';
+  const rawWeight = String(job.fontWeight || 'regular').toLowerCase();
+  const fontWeight =
+    rawWeight === 'bold' || rawWeight === '700' ? '700' : '400';
   const fontFamily = job.fontFamily || 'sans-serif';
   const color = job.color || '#f4f7fb';
   const lines = content.split('\n');
-  const font = `${fontSizePx}px ${fontFamily}`;
+  const font = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
   const lineHeight = fontSizePx * 1.4;
 
   const measure = createSurface(1, 1).getContext('2d');

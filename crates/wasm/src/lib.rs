@@ -1476,6 +1476,11 @@ impl InfiniteCanvas {
                 );
                 let _ = Reflect::set(
                     &obj,
+                    &JsValue::from_str("fontWeight"),
+                    &JsValue::from_str(text.font_weight.as_str()),
+                );
+                let _ = Reflect::set(
+                    &obj,
                     &JsValue::from_str("fontFamily"),
                     &JsValue::from_str(&text.font_family),
                 );
@@ -2690,7 +2695,7 @@ impl InfiniteCanvas {
     ///
     /// # 返回
     /// 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
-    /// `color`, `align`, `fontFamily`, `paddingWorld`, `textureId`
+    /// `color`, `align`, `fontWeight`, `fontFamily`, `paddingWorld`, `textureId`
     #[wasm_bindgen]
     pub fn take_text_raster_jobs(&mut self) -> Array {
         let lod = lod_bucket(self.viewport.zoom());
@@ -2708,6 +2713,7 @@ impl InfiniteCanvas {
             let content = text.content.clone();
             let color = text.color.to_hex();
             let align = text.align.as_str();
+            let font_weight = text.font_weight.as_str();
             let font_family = text.font_family.clone();
             let revision = text.revision as f64;
             text.mark_raster_pending(lod);
@@ -2741,6 +2747,11 @@ impl InfiniteCanvas {
                 &JsValue::from_str(&color),
             );
             let _ = Reflect::set(&obj, &JsValue::from_str("align"), &JsValue::from_str(align));
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("fontWeight"),
+                &JsValue::from_str(font_weight),
+            );
             let _ = Reflect::set(
                 &obj,
                 &JsValue::from_str("fontFamily"),
@@ -4762,6 +4773,11 @@ impl InfiniteCanvas {
             &obj,
             &JsValue::from_str("align"),
             &JsValue::from_str(text.align.as_str()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("fontWeight"),
+            &JsValue::from_str(text.font_weight.as_str()),
         );
         let _ = Reflect::set(
             &obj,

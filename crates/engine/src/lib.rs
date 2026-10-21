@@ -73,9 +73,9 @@ pub use crop::{
     ImageCropSelection, SetImageCropCommand,
 };
 pub use element::{
-    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, FillShape, Frame,
-    GradientStop, Group, Image, Line, Path, Polygon, PolygonKind, Rectangle, StrokeCap, StrokeJoin,
-    Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
+    Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, FillShape,
+    FontWeight, Frame, GradientStop, Group, Image, Line, Path, Polygon, PolygonKind, Rectangle,
+    StrokeCap, StrokeJoin, Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };
 pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,
