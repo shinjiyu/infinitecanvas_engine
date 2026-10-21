@@ -99,8 +99,9 @@ pub use minimap::{
 };
 pub use orient::{apply_flip, apply_rotate_quarter, FlipAxis, OrientSelectionCommand, QuarterTurn};
 pub use persist::{
-    export_frame_png, export_selection_png, export_viewport_png, export_viewport_png_with_guides,
-    PersistError, SceneFile, SCENE_FORMAT_VERSION,
+    export_frame_png, export_frame_png_scaled, export_selection_png, export_selection_png_scaled,
+    export_viewport_png, export_viewport_png_scaled, export_viewport_png_with_guides, PersistError,
+    SceneFile, SCENE_FORMAT_VERSION,
 };
 pub use quadtree::QuadTree;
 pub use scene::OutlineSnapshot;

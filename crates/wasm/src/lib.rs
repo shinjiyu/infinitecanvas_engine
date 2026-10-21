@@ -36,7 +36,8 @@ use infinitecanvas_engine::{
         lod_bucket, raster_params, raster_texture_id, DEFAULT_FONT_SIZE, DEFAULT_TEXT_COLOR,
         DEFAULT_TEXT_CONTENT,
     },
-    export_frame_png, export_frame_svg, export_selection_png, export_svg, export_viewport_png,
+    export_frame_png_scaled, export_frame_svg, export_selection_png_scaled, export_svg,
+    export_viewport_png_scaled,
     guides::{
         handle_outward, moving_edge, resize_edge_correction, ruler_band, ruler_ticks,
         GuideSnapshot, RulerBand, RulerOrientation, GUIDE_HIT_PX, RULER_THICKNESS_PX,
@@ -2018,6 +2019,9 @@ impl InfiniteCanvas {
     ///
     /// # 参数
     /// - `selection_only`: `true` 时导出选中元素的包围盒；`false` 时导出当前视口
+    /// - `scale`: 导出倍率，缺省 `1.0`（与旧行为一致）。常用 `1` / `2` / `3`：
+    ///   像素宽高 ≈ 逻辑区域 × 视口缩放 × scale。2x 面积约 4 倍。按更高分辨率
+    ///   重新采样，不是把 1x 位图放大。空选区报错；空视口导出空白 PNG。
     ///
     /// # 返回
     /// RGBA PNG 字节。直线、箭头和自由路径按线宽栅格化。文本用 font8x8 点阵，
@@ -2025,13 +2029,14 @@ impl InfiniteCanvas {
     /// id 的图片仍是纯色占位。分组本身不绘制；隐藏的组会连同子孙一起跳过。
     ///
     /// # 错误
-    /// 没有选中元素、区域为空或编码失败
+    /// 没有选中元素、区域为空、倍率非法或编码失败
     #[wasm_bindgen]
-    pub fn export_png(&self, selection_only: bool) -> Result<Vec<u8>, JsValue> {
+    pub fn export_png(&self, selection_only: bool, scale: Option<f32>) -> Result<Vec<u8>, JsValue> {
+        let scale = scale.unwrap_or(1.0);
         let bytes = if selection_only {
-            export_selection_png(&self.scene, self.viewport.zoom())
+            export_selection_png_scaled(&self.scene, self.viewport.zoom(), scale)
         } else {
-            export_viewport_png(&self.scene, &self.viewport)
+            export_viewport_png_scaled(&self.scene, &self.viewport, false, scale)
         };
         bytes.map_err(|err| JsValue::from_str(&err.to_string()))
     }
@@ -2060,10 +2065,16 @@ impl InfiniteCanvas {
     /// 把一张画板导出为 PNG。区域是画板的世界包围盒，不含额外留白。
     ///
     /// 只绘制这张画板和它的子孙。空画板仍按矩形尺寸导出。
+    /// `scale` 缺省 `1.0`；与 [`Self::export_png`] 相同的倍率语义。
     #[wasm_bindgen]
-    pub fn export_frame_png(&self, frame_id: u64) -> Result<Vec<u8>, JsValue> {
-        export_frame_png(&self.scene, frame_id, self.viewport.zoom())
-            .map_err(|err| JsValue::from_str(&err.to_string()))
+    pub fn export_frame_png(&self, frame_id: u64, scale: Option<f32>) -> Result<Vec<u8>, JsValue> {
+        export_frame_png_scaled(
+            &self.scene,
+            frame_id,
+            self.viewport.zoom(),
+            scale.unwrap_or(1.0),
+        )
+        .map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
     /// 把一张画板导出为 SVG。`viewBox` 是画板包围盒，超出部分隐藏。

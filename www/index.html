@@ -837,6 +837,14 @@
             <button type="button" id="save-btn">保存</button>
             <button type="button" id="open-btn">打开</button>
           </div>
+          <label class="prop-row" for="png-scale" title="导出 PNG 倍率：像素宽高 = 逻辑区域 × 视口缩放 × 倍率。1x 与旧行为一致；2x / 3x 面积约 4 / 9 倍。按更高分辨率重新采样，不是放大 1x 位图。空选区会报错；空视口导出空白图。">
+            PNG 倍率
+            <select id="png-scale">
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="3">3x</option>
+            </select>
+          </label>
           <div class="row">
             <button type="button" id="png-btn">视口 PNG</button>
             <button type="button" id="png-selection-btn">选区 PNG</button>

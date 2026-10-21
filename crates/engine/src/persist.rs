@@ -88,7 +88,7 @@ pub enum PersistError {
     EmptyRegion,
     /// 要求导出选区，但没有选中元素
     NothingSelected,
-    /// `pixels_per_unit` 不是正的有限数
+    /// `pixels_per_unit` 或导出 `scale` 不是正的有限数
     InvalidScale,
     /// PNG 编码失败
     Encode(String),
@@ -113,7 +113,10 @@ impl std::fmt::Display for PersistError {
             PersistError::EmptyRegion => write!(f, "export region is empty"),
             PersistError::NothingSelected => write!(f, "no elements selected"),
             PersistError::InvalidScale => {
-                write!(f, "pixels per unit must be a positive finite number")
+                write!(
+                    f,
+                    "pixels per unit and export scale must be positive finite numbers"
+                )
             }
             PersistError::Encode(message) => write!(f, "png encode failed: {message}"),
             PersistError::NotAFrame => write!(f, "element is not a frame"),
@@ -358,7 +361,29 @@ pub fn export_viewport_png_with_guides(
     viewport: &Viewport,
     include_guides: bool,
 ) -> Result<Vec<u8>, PersistError> {
-    export_region_png(scene, viewport.bounds(), viewport.zoom(), include_guides)
+    export_viewport_png_scaled(scene, viewport, include_guides, 1.0)
+}
+
+/// 同 [`export_viewport_png_with_guides`]，并乘上导出倍率 `scale`。
+///
+/// `scale` 默认语义是 1.0（与旧行为一致）。2.0 / 3.0 时宽高各约 ×2 / ×3，
+/// 面积约 ×4 / ×9。像素中心采样；倍率越高，每个世界单位覆盖的像素越多，
+/// 边缘更细（等价于按更高分辨率栅格化，不是先出 1x 再放大）。
+///
+/// 空视口（宽或高 ≤ 0）仍返回 [`PersistError::EmptyRegion`]。
+pub fn export_viewport_png_scaled(
+    scene: &Scene,
+    viewport: &Viewport,
+    include_guides: bool,
+    scale: f32,
+) -> Result<Vec<u8>, PersistError> {
+    let scale = resolve_export_scale(scale)?;
+    export_region_png(
+        scene,
+        viewport.bounds(),
+        viewport.zoom() * scale,
+        include_guides,
+    )
 }
 
 /// 把选中元素的包围盒栅格化成 RGBA PNG
@@ -372,20 +397,29 @@ pub fn export_viewport_png_with_guides(
 /// # 返回
 /// PNG 字节
 pub fn export_selection_png(scene: &Scene, pixels_per_unit: f32) -> Result<Vec<u8>, PersistError> {
+    export_selection_png_scaled(scene, pixels_per_unit, 1.0)
+}
+
+/// 同 [`export_selection_png`]，并乘上导出倍率 `scale`（1.0 = 旧行为）。
+///
+/// 有效分辨率是 `pixels_per_unit * scale`。选中根全是画板时按画板裁剪导出，同样尊重倍率。
+/// 空选区返回 [`PersistError::NothingSelected`]。
+pub fn export_selection_png_scaled(
+    scene: &Scene,
+    pixels_per_unit: f32,
+    scale: f32,
+) -> Result<Vec<u8>, PersistError> {
     if !pixels_per_unit.is_finite() || pixels_per_unit <= 0.0 {
         return Err(PersistError::InvalidScale);
     }
+    let scale = resolve_export_scale(scale)?;
+    let ppu = pixels_per_unit * scale;
     if let Some(bounds) = selected_frame_crop(scene) {
         let allow = selected_frame_ids(scene);
-        return export_region_filtered(scene, bounds, pixels_per_unit, false, Some(&allow));
+        return export_region_filtered(scene, bounds, ppu, false, Some(&allow));
     }
     let bounds = selected_bounds(scene).ok_or(PersistError::NothingSelected)?;
-    export_region_png(
-        scene,
-        bounds.inflate(SELECTION_PADDING),
-        pixels_per_unit,
-        false,
-    )
+    export_region_png(scene, bounds.inflate(SELECTION_PADDING), ppu, false)
 }
 
 /// 把一张画板栅格化成 PNG。区域就是画板的世界包围盒，不含额外留白。
@@ -400,9 +434,32 @@ pub fn export_frame_png(
     frame_id: ElementId,
     pixels_per_unit: f32,
 ) -> Result<Vec<u8>, PersistError> {
+    export_frame_png_scaled(scene, frame_id, pixels_per_unit, 1.0)
+}
+
+/// 同 [`export_frame_png`]，并乘上导出倍率 `scale`（1.0 = 旧行为）。
+pub fn export_frame_png_scaled(
+    scene: &Scene,
+    frame_id: ElementId,
+    pixels_per_unit: f32,
+    scale: f32,
+) -> Result<Vec<u8>, PersistError> {
+    if !pixels_per_unit.is_finite() || pixels_per_unit <= 0.0 {
+        return Err(PersistError::InvalidScale);
+    }
+    let scale = resolve_export_scale(scale)?;
     let bounds = frame_export_bounds(scene, frame_id)?;
     let allow: HashSet<ElementId> = scene.subtree_ids(frame_id).into_iter().collect();
-    export_region_filtered(scene, bounds, pixels_per_unit, false, Some(&allow))
+    export_region_filtered(scene, bounds, pixels_per_unit * scale, false, Some(&allow))
+}
+
+/// 校验导出倍率：必须是正的有限数。常用 1 / 2 / 3。
+fn resolve_export_scale(scale: f32) -> Result<f32, PersistError> {
+    if scale.is_finite() && scale > 0.0 {
+        Ok(scale)
+    } else {
+        Err(PersistError::InvalidScale)
+    }
 }
 
 /// 画板的轴对齐世界包围盒。零尺寸或非有限值返回 [`PersistError::EmptyRegion`]。
@@ -1169,13 +1226,14 @@ fn encode_rgba(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, Persis
 #[cfg(test)]
 mod tests {
     use super::{
-        channel, export_selection_png, export_viewport_png, export_viewport_png_with_guides,
-        sample_rectangle, PersistError, IMAGE_PNG_PLACEHOLDER, MAX_PNG_DIMENSION,
-        SCENE_FORMAT_VERSION,
+        channel, export_frame_png, export_frame_png_scaled, export_selection_png,
+        export_selection_png_scaled, export_viewport_png, export_viewport_png_scaled,
+        export_viewport_png_with_guides, sample_rectangle, PersistError, IMAGE_PNG_PLACEHOLDER,
+        MAX_PNG_DIMENSION, SCENE_FORMAT_VERSION,
     };
     use crate::element::{
-        Circle, DropShadow, Element, ElementStyle, FillKind, GradientStop, Image, Line, Path,
-        Polygon, PolygonKind, Rectangle, Text, TextAlign,
+        Circle, DropShadow, Element, ElementStyle, FillKind, Frame, GradientStop, Image, Line,
+        Path, Polygon, PolygonKind, Rectangle, Text, TextAlign,
     };
     use crate::snap::GuideAxis;
     use crate::{AnyElement, BlendMode, Scene, Viewport};
@@ -1934,6 +1992,50 @@ mod tests {
             }
         }
         assert!(saw_red);
+    }
+
+    #[test]
+    fn png_export_scale_multiplies_pixel_dimensions() {
+        let mut scene = Scene::new();
+        let mut rect = Rectangle::new(1, Vec2::ZERO, Vec2::new(20.0, 10.0))
+            .with_style(ElementStyle::fill_only(Color::RED));
+        rect.props.selected = true;
+        scene.add_rect(rect);
+
+        let (w1, h1, _) = decode_png(&export_selection_png(&scene, 1.0).unwrap());
+        let (w2, h2, _) = decode_png(&export_selection_png_scaled(&scene, 1.0, 2.0).unwrap());
+        let (w3, h3, _) = decode_png(&export_selection_png_scaled(&scene, 1.0, 3.0).unwrap());
+        assert_eq!((w2, h2), (w1 * 2, h1 * 2));
+        assert_eq!((w3, h3), (w1 * 3, h1 * 3));
+        assert_eq!(w2 as u64 * h2 as u64, (w1 as u64) * (h1 as u64) * 4);
+
+        let mut viewport = Viewport::new(Vec2::new(40.0, 30.0));
+        viewport.resize(Vec2::new(40.0, 30.0));
+        let (vw1, vh1, _) = decode_png(&export_viewport_png(&scene, &viewport).unwrap());
+        let (vw2, vh2, _) =
+            decode_png(&export_viewport_png_scaled(&scene, &viewport, false, 2.0).unwrap());
+        assert_eq!((vw2, vh2), (vw1 * 2, vh1 * 2));
+
+        let frame_id = 7;
+        scene.add_frame(Frame::new(
+            frame_id,
+            Vec2::new(100.0, 100.0),
+            Vec2::new(50.0, 40.0),
+        ));
+        let (fw1, fh1, _) = decode_png(&export_frame_png(&scene, frame_id, 1.0).unwrap());
+        let (fw2, fh2, _) =
+            decode_png(&export_frame_png_scaled(&scene, frame_id, 1.0, 2.0).unwrap());
+        assert_eq!((fw1, fh1), (50, 40));
+        assert_eq!((fw2, fh2), (100, 80));
+
+        assert_eq!(
+            export_selection_png_scaled(&scene, 1.0, 0.0).unwrap_err(),
+            PersistError::InvalidScale
+        );
+        assert_eq!(
+            export_viewport_png_scaled(&scene, &viewport, false, f32::NAN).unwrap_err(),
+            PersistError::InvalidScale
+        );
     }
 
     #[test]
