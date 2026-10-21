@@ -157,7 +157,7 @@ export class InfiniteCanvas {
   /**
    * 读取当前选择的公共样式。多选不一致时对应字段为 mixed。
    *
-   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape`、`hasText`、`hasImage` 都是 false。图片参与 `opacity`、投影、`blendMode` 和图层模糊。矩形另有 `cornerRadius`（多选不一致时 `cornerRadiusMixed`）。多边形和星形另有 `sides`，星形另有 `innerRadius`。形状另有 `fillKind` / `fillStops` / `fillAngle` / `fillCenter` / `fillRadius`。形状、文本、图片还有 `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowColor` / `shadowOpacity`（多选不一致时为 mixed）和 `shadowSupported`。`blendMode` 为 `normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。`blurRadius` 是图层模糊标准差（多选不一致时 `blurRadiusMixed`），`blurSupported` 在有形状、文本或图片时为 true。画板算形状。未写出的字段互不清掉
+   * @returns WASM 返回的样式对象。没有选中可编辑元素时 `hasShape`、`hasText`、`hasImage` 都是 false。图片参与 `opacity`、投影、`blendMode` 和图层模糊。矩形另有 `cornerRadius`（多选不一致时 `cornerRadiusMixed`）。多边形和星形另有 `sides`，星形另有 `innerRadius`。形状另有 `fillKind` / `fillStops` / `fillAngle` / `fillCenter` / `fillRadius`。形状、文本、图片还有 `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowColor` / `shadowOpacity`（多选不一致时为 mixed）和 `shadowSupported`，以及对应的 `innerShadow*` / `innerShadowSupported`。`blendMode` 为 `normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。`blurRadius` 是图层模糊标准差（多选不一致时 `blurRadiusMixed`），`blurSupported` 在有形状、文本或图片时为 true。画板算形状。未写出的字段互不清掉
    */
   getSelectionStyle(): Record<string, unknown> {
     return this.requireWasm().get_selection_style() as Record<string, unknown>;
@@ -168,7 +168,7 @@ export class InfiniteCanvas {
    *
    * 只写需要改的字段。`fill` / `stroke` 传 `null` 表示清掉。
    *
-   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`、`strokeDash`、`strokeCap`、`strokeJoin`、`strokeAlign`、`cornerRadius`（仅矩形）、`sides`、`innerRadius`（仅星形）、`shadowOffsetX`、`shadowOffsetY`、`shadowBlur`、`shadowColor`（只改 RGB）、`shadowOpacity`、`fillKind`（`solid` / `linear` / `radial`）、`fillStops`、`fillAngle`、`fillCenter`、`fillRadius`、`blendMode`、`blurRadius`（图层模糊，也可写成 `blur_radius`）、`startMarker` / `endMarker`（仅直线：`none` / `arrow` / `triangle`）。未写出的字段保持原值。渐变和线型只作用于形状，文本描边不读这些字段。`blendMode` 写到形状、文本、图片和画板，不清模糊
+   * @param patch - `fill`、`stroke`、`strokeWidth`、`opacity`、`fontSize`、`textColor`、`strokeDash`、`strokeCap`、`strokeJoin`、`strokeAlign`、`cornerRadius`（仅矩形）、`sides`、`innerRadius`（仅星形）、`shadowOffsetX`、`shadowOffsetY`、`shadowBlur`、`shadowColor`（只改 RGB）、`shadowOpacity`、`innerShadowOffsetX`、`innerShadowOffsetY`、`innerShadowBlur`、`innerShadowSpread`、`innerShadowColor`、`innerShadowOpacity`、`fillKind`（`solid` / `linear` / `radial`）、`fillStops`、`fillAngle`、`fillCenter`、`fillRadius`、`blendMode`、`blurRadius`（图层模糊，也可写成 `blur_radius`）、`startMarker` / `endMarker`（仅直线：`none` / `arrow` / `triangle`）。未写出的字段保持原值。渐变和线型只作用于形状，文本描边不读这些字段。`blendMode` 写到形状、文本、图片和画板，不清模糊
    * @returns 是否写入了撤销栈
    */
   setSelectionStyle(patch: Record<string, unknown>): boolean {

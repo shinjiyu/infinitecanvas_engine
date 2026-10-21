@@ -20,7 +20,8 @@ use crate::element::blur::{
 };
 use crate::element::shadow::{composite_over, feather_coverage};
 use crate::element::{
-    Circle, DropShadow, Element, ElementStyle, Image, Polygon, PolygonKind, Rectangle, Text,
+    Circle, DropShadow, Element, ElementStyle, Image, InnerShadow, Polygon, PolygonKind, Rectangle,
+    Text,
 };
 use crate::guides::{GuideStore, ManualGuide};
 use crate::scene::{AnyElement, Scene};
@@ -834,7 +835,14 @@ fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
     let distance = |point: Vec2| rounded_box_sdf(point, half_abs, radius);
     if blur_active(rect.style.blur_radius) {
         let body = blurred_shape_body(&rect.style, local, rect.local_bounds(), distance(local));
-        return paint_with_shadow(body, local, rect.style.shadow, rect.style.opacity, distance);
+        return paint_with_shadows(
+            body,
+            local,
+            rect.style.shadow,
+            rect.style.inner_shadow,
+            rect.style.opacity,
+            distance,
+        );
     }
     let (in_fill, in_stroke) = if radius > 0.0 {
         let sdf = distance(local);
@@ -861,7 +869,14 @@ fn sample_rectangle(rect: &Rectangle, world: Vec2) -> Option<Color> {
             body = with_opacity(color, rect.style.opacity);
         }
     }
-    paint_with_shadow(body, local, rect.style.shadow, rect.style.opacity, distance)
+    paint_with_shadows(
+        body,
+        local,
+        rect.style.shadow,
+        rect.style.inner_shadow,
+        rect.style.opacity,
+        distance,
+    )
 }
 
 fn sample_polygon(polygon: &Polygon, world: Vec2) -> Option<Color> {
@@ -880,10 +895,11 @@ fn sample_polygon(polygon: &Polygon, world: Vec2) -> Option<Color> {
     } else {
         polygon.sample_local(local)
     };
-    paint_with_shadow(
+    paint_with_shadows(
         body,
         local,
         polygon.style.shadow,
+        polygon.style.inner_shadow,
         polygon.style.opacity,
         distance,
     )
@@ -898,10 +914,11 @@ fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
     let distance = |point: Vec2| point.length() - radius;
     if blur_active(circle.style.blur_radius) {
         let body = blurred_shape_body(&circle.style, local, circle.local_bounds(), distance(local));
-        return paint_with_shadow(
+        return paint_with_shadows(
             body,
             local,
             circle.style.shadow,
+            circle.style.inner_shadow,
             circle.style.opacity,
             distance,
         );
@@ -922,10 +939,11 @@ fn sample_circle(circle: &Circle, world: Vec2) -> Option<Color> {
             body = with_opacity(color, circle.style.opacity);
         }
     }
-    paint_with_shadow(
+    paint_with_shadows(
         body,
         local,
         circle.style.shadow,
+        circle.style.inner_shadow,
         circle.style.opacity,
         distance,
     )
@@ -949,13 +967,20 @@ fn sample_image(scene: &Scene, image: &Image, world: Vec2) -> Option<Color> {
         image_color_at_world(scene, image, world)
     };
     let visible = image.visible_local_rect();
-    paint_with_shadow(body, local, image.shadow, image.alpha, |point| {
-        axis_box_sdf(
-            point,
-            Vec2::new(visible.x, visible.y),
-            Vec2::new(visible.width, visible.height),
-        )
-    })
+    paint_with_shadows(
+        body,
+        local,
+        image.shadow,
+        image.inner_shadow,
+        image.alpha,
+        |point| {
+            axis_box_sdf(
+                point,
+                Vec2::new(visible.x, visible.y),
+                Vec2::new(visible.width, visible.height),
+            )
+        },
+    )
 }
 
 fn image_color_at_local(scene: &Scene, image: &Image, local: Vec2) -> Option<Color> {
@@ -993,10 +1018,11 @@ fn sample_line(line: &crate::element::Line, world: Vec2) -> Option<Color> {
             line.silhouette_distance(local),
             line.style.blur_radius,
         );
-        return paint_with_shadow(
+        return paint_with_shadows(
             body,
             local,
             line.style.shadow,
+            line.style.inner_shadow,
             line.style.opacity,
             |point| line.silhouette_distance(point),
         );
@@ -1005,10 +1031,11 @@ fn sample_line(line: &crate::element::Line, world: Vec2) -> Option<Color> {
     let Some(local) = try_local(&line.props.transform, world) else {
         return body;
     };
-    paint_with_shadow(
+    paint_with_shadows(
         body,
         local,
         line.style.shadow,
+        line.style.inner_shadow,
         line.style.opacity,
         |point| line.silhouette_distance(point),
     )
@@ -1036,10 +1063,11 @@ fn sample_path(path: &crate::element::Path, world: Vec2) -> Option<Color> {
                 path.style.blur_radius,
             )
         };
-        return paint_with_shadow(
+        return paint_with_shadows(
             body,
             local,
             path.style.shadow,
+            path.style.inner_shadow,
             path.style.opacity,
             |point| path.silhouette_distance(point),
         );
@@ -1048,10 +1076,11 @@ fn sample_path(path: &crate::element::Path, world: Vec2) -> Option<Color> {
     let Some(local) = try_local(&path.props.transform, world) else {
         return body;
     };
-    paint_with_shadow(
+    paint_with_shadows(
         body,
         local,
         path.style.shadow,
+        path.style.inner_shadow,
         path.style.opacity,
         |point| path.silhouette_distance(point),
     )
@@ -1074,13 +1103,20 @@ fn sample_text(text: &Text, world: Vec2) -> Option<Color> {
         text.color_at(world)
     };
     let bounds = text.local_bounds();
-    paint_with_shadow(body, local, text.shadow, text.opacity, |point| {
-        axis_box_sdf(
-            point,
-            Vec2::new(bounds.x, bounds.y),
-            Vec2::new(bounds.width, bounds.height),
-        )
-    })
+    paint_with_shadows(
+        body,
+        local,
+        text.shadow,
+        text.inner_shadow,
+        text.opacity,
+        |point| {
+            axis_box_sdf(
+                point,
+                Vec2::new(bounds.x, bounds.y),
+                Vec2::new(bounds.width, bounds.height),
+            )
+        },
+    )
 }
 
 /// 填充盖住内部，描边再盖在上面。颜色已经乘过不透明度。σ 接近 0 时不要调用。
@@ -1130,32 +1166,51 @@ fn axis_box_sdf(point: Vec2, origin: Vec2, size: Vec2) -> f32 {
     rounded_box_sdf(point - center, half, 0.0)
 }
 
-fn paint_with_shadow(
+fn paint_with_shadows(
     body: Option<Color>,
     local: Vec2,
     shadow: DropShadow,
+    inner: InnerShadow,
     opacity: f32,
     distance_at: impl Fn(Vec2) -> f32,
 ) -> Option<Color> {
-    if shadow.is_off() {
-        return body;
+    let mut painted = body;
+    if !shadow.is_off() {
+        let shadow = shadow.sanitized();
+        let coverage = feather_coverage(distance_at(local - shadow.offset), shadow.blur);
+        let alpha = shadow.color.a * opacity.clamp(0.0, 1.0) * coverage;
+        if alpha > 1.0e-4 {
+            let shadow_color = Color::new(
+                shadow.color.r,
+                shadow.color.g,
+                shadow.color.b,
+                alpha.clamp(0.0, 1.0),
+            );
+            painted = match painted {
+                Some(paint) => Some(composite_over(paint, shadow_color)),
+                None => Some(shadow_color),
+            };
+        }
     }
-    let shadow = shadow.sanitized();
-    let coverage = feather_coverage(distance_at(local - shadow.offset), shadow.blur);
-    let alpha = shadow.color.a * opacity.clamp(0.0, 1.0) * coverage;
-    if alpha <= 1.0e-4 {
-        return body;
+    if !inner.is_off() && distance_at(local) <= 0.0 {
+        let inner = inner.sanitized();
+        let d = distance_at(local - inner.offset) + inner.spread;
+        let coverage = feather_coverage(-d, inner.blur);
+        let alpha = inner.color.a * opacity.clamp(0.0, 1.0) * coverage;
+        if alpha > 1.0e-4 {
+            let shade = Color::new(
+                inner.color.r,
+                inner.color.g,
+                inner.color.b,
+                alpha.clamp(0.0, 1.0),
+            );
+            painted = match painted {
+                Some(paint) => Some(composite_over(shade, paint)),
+                None => Some(shade),
+            };
+        }
     }
-    let shadow_color = Color::new(
-        shadow.color.r,
-        shadow.color.g,
-        shadow.color.b,
-        alpha.clamp(0.0, 1.0),
-    );
-    match body {
-        Some(paint) => Some(composite_over(paint, shadow_color)),
-        None => Some(shadow_color),
-    }
+    painted
 }
 
 fn with_opacity(color: Color, opacity: f32) -> Option<Color> {

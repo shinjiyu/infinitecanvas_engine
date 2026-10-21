@@ -5,7 +5,7 @@
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
 //! 画板有自己的填充和描边；选中画板只改画板，不把样式写到子元素上。
 //!
-//! 投影、渐变、混合模式和图层模糊都是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
+//! 投影、内阴影、渐变、混合模式和图层模糊都是 [`StylePatch`] 上的可选字段，和圆角一样。没出现在补丁里就保持原值。
 //! 吸管只写填充和描边，并把渐变收成纯色，不会清掉图层模糊或混合模式。
 //!
 //! ```text
@@ -18,16 +18,16 @@
 //!                                      ├─ 矩形圆角（其它元素忽略该字段）
 //!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
 //!                                      ├─ 形状渐变（种类、色标、角度、圆心、半径）
-//!                                      ├─ 投影（形状、文本、图片、画板；不丢文本光栅）
+//!                                      ├─ 投影与内阴影（形状、文本、图片、画板；不丢文本光栅）
 //!                                      ├─ 混合模式写到形状、文本、图片和画板
 //!                                      ├─ 图层模糊（同上；不丢文本光栅，不扩大命中盒，也不清渐变或混合模式）
-//!                                      └─ 图片只改 alpha、投影、混合模式和图层模糊
+//!                                      └─ 图片只改 alpha、投影、内阴影、混合模式和图层模糊
 //! ```
 
 use crate::blend::BlendMode;
 use crate::element::{
-    DropShadow, ElementId, ElementStyle, FillKind, FontWeight, GradientStop, Line, LineMarker,
-    Polygon, PolygonKind, Rectangle, StrokeAlign, StrokeCap, StrokeJoin, TextAlign,
+    DropShadow, ElementId, ElementStyle, FillKind, FontWeight, GradientStop, InnerShadow, Line,
+    LineMarker, Polygon, PolygonKind, Rectangle, StrokeAlign, StrokeCap, StrokeJoin, TextAlign,
 };
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::{Color, Vec2};
@@ -66,6 +66,8 @@ pub struct TextPaint {
     pub letter_spacing: f32,
     /// 投影。文本不把它画进字形纹理。
     pub shadow: DropShadow,
+    /// 内阴影。文本不把它画进字形纹理。
+    pub inner_shadow: InnerShadow,
     /// 混合模式。
     pub blend_mode: BlendMode,
     /// 图层模糊标准差。不进字形纹理。
@@ -108,12 +110,14 @@ pub enum StyleSnapshot {
     },
     /// 文本。
     Text(TextPaint),
-    /// 图片。不透明度、投影、混合模式和图层模糊。不改资源表。
+    /// 图片。不透明度、投影、内阴影、混合模式和图层模糊。不改资源表。
     Image {
         /// [`crate::element::Image::alpha`]。
         alpha: f32,
         /// 显示矩形的投影。
         shadow: DropShadow,
+        /// 显示矩形的内阴影。
+        inner_shadow: InnerShadow,
         /// 混合模式。
         blend_mode: BlendMode,
         /// 图层模糊标准差。
@@ -172,6 +176,18 @@ pub struct StylePatch {
     pub shadow_color: Option<Color>,
     /// 投影浓度，写入颜色 alpha，范围 0 到 1。0 表示不绘制。
     pub shadow_opacity: Option<f32>,
+    /// 内阴影局部偏移 X。形状、文本和图片都写。
+    pub inner_shadow_offset_x: Option<f32>,
+    /// 内阴影局部偏移 Y。
+    pub inner_shadow_offset_y: Option<f32>,
+    /// 内阴影羽化半径。负数收成 0。
+    pub inner_shadow_blur: Option<f32>,
+    /// 内阴影扩展。负数收成 0。
+    pub inner_shadow_spread: Option<f32>,
+    /// 内阴影颜色的 RGB。不改 alpha，浓度走 [`Self::inner_shadow_opacity`]。
+    pub inner_shadow_color: Option<Color>,
+    /// 内阴影浓度，写入颜色 alpha，范围 0 到 1。0 表示不绘制。
+    pub inner_shadow_opacity: Option<f32>,
     /// 形状填充种类。文本和图片忽略。
     pub fill_kind: Option<FillKind>,
     /// 渐变色标。空数组清掉色标，线性/径向会退回纯色 [`ElementStyle::fill`]。
@@ -247,6 +263,20 @@ pub struct SelectionStyle {
     pub shadow_opacity: StyleField<f32>,
     /// 选择里有形状、文本或图片，可以改投影。画板算形状。
     pub shadow_supported: bool,
+    /// 内阴影偏移 X。
+    pub inner_shadow_offset_x: StyleField<f32>,
+    /// 内阴影偏移 Y。
+    pub inner_shadow_offset_y: StyleField<f32>,
+    /// 内阴影羽化半径。
+    pub inner_shadow_blur: StyleField<f32>,
+    /// 内阴影扩展。
+    pub inner_shadow_spread: StyleField<f32>,
+    /// 内阴影颜色的 RGB，alpha 固定为 1。
+    pub inner_shadow_color: StyleField<Color>,
+    /// 内阴影浓度。
+    pub inner_shadow_opacity: StyleField<f32>,
+    /// 选择里有形状、文本或图片，可以改内阴影。画板算形状。
+    pub inner_shadow_supported: bool,
     /// 形状填充种类。文本和图片不参与。
     pub fill_kind: StyleField<FillKind>,
     /// 形状渐变色标。文本和图片不参与。
@@ -365,11 +395,13 @@ impl StyleSnapshot {
                     text.blend_mode = mode;
                 }
                 apply_shadow(&mut text.shadow, patch);
+                apply_inner_shadow(&mut text.inner_shadow, patch);
                 apply_layer_blur(&mut text.blur_radius, patch);
             }
             Self::Image {
                 alpha,
                 shadow,
+                inner_shadow,
                 blend_mode,
                 blur_radius,
             } => {
@@ -380,6 +412,7 @@ impl StyleSnapshot {
                     *blend_mode = mode;
                 }
                 apply_shadow(shadow, patch);
+                apply_inner_shadow(inner_shadow, patch);
                 apply_layer_blur(blur_radius, patch);
             }
         }
@@ -470,12 +503,14 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             line_height: text.line_height,
             letter_spacing: text.letter_spacing,
             shadow: text.shadow,
+            inner_shadow: text.inner_shadow,
             blend_mode: text.blend_mode,
             blur_radius: crate::element::blur::sanitize_blur(text.blur_radius),
         })),
         AnyElement::Image(image) => Some(StyleSnapshot::Image {
             alpha: image.alpha,
             shadow: image.shadow,
+            inner_shadow: image.inner_shadow,
             blend_mode: image.blend_mode,
             blur_radius: crate::element::blur::sanitize_blur(image.blur_radius),
         }),
@@ -512,6 +547,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                 );
                 // 投影和图层模糊都不进字形纹理，只标脏让顶点重写。
                 text.shadow = paint.shadow;
+                text.inner_shadow = paint.inner_shadow;
                 text.blur_radius = crate::element::blur::sanitize_blur(paint.blur_radius);
                 true
             } else {
@@ -522,6 +558,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
             if let StyleSnapshot::Image {
                 alpha,
                 shadow,
+                inner_shadow,
                 blend_mode,
                 blur_radius,
             } = snapshot
@@ -529,6 +566,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                 image.blend_mode = *blend_mode;
                 image.set_alpha(*alpha);
                 image.shadow = *shadow;
+                image.inner_shadow = *inner_shadow;
                 image.blur_radius = crate::element::blur::sanitize_blur(*blur_radius);
                 true
             } else {
@@ -567,6 +605,12 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut shadow_blurs = Vec::new();
     let mut shadow_colors = Vec::new();
     let mut shadow_opacities = Vec::new();
+    let mut inner_xs = Vec::new();
+    let mut inner_ys = Vec::new();
+    let mut inner_blurs = Vec::new();
+    let mut inner_spreads = Vec::new();
+    let mut inner_colors = Vec::new();
+    let mut inner_opacities = Vec::new();
     let mut fill_kinds = Vec::new();
     let mut fill_stops = Vec::new();
     let mut fill_angles = Vec::new();
@@ -654,6 +698,15 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_opacities,
                     style.shadow,
                 );
+                push_inner_shadow(
+                    &mut inner_xs,
+                    &mut inner_ys,
+                    &mut inner_blurs,
+                    &mut inner_spreads,
+                    &mut inner_colors,
+                    &mut inner_opacities,
+                    style.inner_shadow,
+                );
                 layer_blurs.push(crate::element::blur::sanitize_blur(style.blur_radius));
             }
             Some(StyleSnapshot::Rectangle {
@@ -690,6 +743,15 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_colors,
                     &mut shadow_opacities,
                     style.shadow,
+                );
+                push_inner_shadow(
+                    &mut inner_xs,
+                    &mut inner_ys,
+                    &mut inner_blurs,
+                    &mut inner_spreads,
+                    &mut inner_colors,
+                    &mut inner_opacities,
+                    style.inner_shadow,
                 );
                 layer_blurs.push(crate::element::blur::sanitize_blur(style.blur_radius));
             }
@@ -735,6 +797,15 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_opacities,
                     style.shadow,
                 );
+                push_inner_shadow(
+                    &mut inner_xs,
+                    &mut inner_ys,
+                    &mut inner_blurs,
+                    &mut inner_spreads,
+                    &mut inner_colors,
+                    &mut inner_opacities,
+                    style.inner_shadow,
+                );
                 layer_blurs.push(crate::element::blur::sanitize_blur(style.blur_radius));
             }
             Some(StyleSnapshot::Text(text)) => {
@@ -757,11 +828,21 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_opacities,
                     text.shadow,
                 );
+                push_inner_shadow(
+                    &mut inner_xs,
+                    &mut inner_ys,
+                    &mut inner_blurs,
+                    &mut inner_spreads,
+                    &mut inner_colors,
+                    &mut inner_opacities,
+                    text.inner_shadow,
+                );
                 layer_blurs.push(text.blur_radius);
             }
             Some(StyleSnapshot::Image {
                 alpha,
                 shadow,
+                inner_shadow,
                 blend_mode,
                 blur_radius,
             }) => {
@@ -775,6 +856,15 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                     &mut shadow_colors,
                     &mut shadow_opacities,
                     shadow,
+                );
+                push_inner_shadow(
+                    &mut inner_xs,
+                    &mut inner_ys,
+                    &mut inner_blurs,
+                    &mut inner_spreads,
+                    &mut inner_colors,
+                    &mut inner_opacities,
+                    inner_shadow,
                 );
                 layer_blurs.push(blur_radius);
             }
@@ -808,6 +898,13 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         shadow_color: fold(shadow_colors),
         shadow_opacity: fold(shadow_opacities),
         shadow_supported: has_shape || has_text || has_image,
+        inner_shadow_offset_x: fold(inner_xs),
+        inner_shadow_offset_y: fold(inner_ys),
+        inner_shadow_blur: fold(inner_blurs),
+        inner_shadow_spread: fold(inner_spreads),
+        inner_shadow_color: fold(inner_colors),
+        inner_shadow_opacity: fold(inner_opacities),
+        inner_shadow_supported: has_shape || has_text || has_image,
         fill_kind: fold(fill_kinds),
         fill_stops: fold(fill_stops),
         fill_angle: fold(fill_angles),
@@ -900,6 +997,7 @@ fn apply_shape_paint(style: &mut ElementStyle, patch: &StylePatch) {
         style.blend_mode = mode;
     }
     apply_shadow(&mut style.shadow, patch);
+    apply_inner_shadow(&mut style.inner_shadow, patch);
     apply_layer_blur(&mut style.blur_radius, patch);
 }
 
@@ -929,6 +1027,35 @@ fn apply_shadow(shadow: &mut DropShadow, patch: &StylePatch) {
     *shadow = shadow.sanitized();
 }
 
+fn apply_inner_shadow(shadow: &mut InnerShadow, patch: &StylePatch) {
+    if let Some(x) = patch
+        .inner_shadow_offset_x
+        .filter(|value| value.is_finite())
+    {
+        shadow.offset.x = x;
+    }
+    if let Some(y) = patch
+        .inner_shadow_offset_y
+        .filter(|value| value.is_finite())
+    {
+        shadow.offset.y = y;
+    }
+    if let Some(blur) = patch.inner_shadow_blur.filter(|value| value.is_finite()) {
+        shadow.blur = blur.max(0.0);
+    }
+    if let Some(spread) = patch.inner_shadow_spread.filter(|value| value.is_finite()) {
+        shadow.spread = spread.max(0.0);
+    }
+    if let Some(color) = patch.inner_shadow_color {
+        let alpha = shadow.color.a;
+        shadow.color = Color::new(color.r, color.g, color.b, alpha);
+    }
+    if let Some(opacity) = patch.inner_shadow_opacity.filter(|value| value.is_finite()) {
+        shadow.color.a = opacity.clamp(0.0, 1.0);
+    }
+    *shadow = shadow.sanitized();
+}
+
 fn push_shadow(
     xs: &mut Vec<f32>,
     ys: &mut Vec<f32>,
@@ -941,6 +1068,24 @@ fn push_shadow(
     xs.push(shadow.offset.x);
     ys.push(shadow.offset.y);
     blurs.push(shadow.blur);
+    colors.push(Color::rgb(shadow.color.r, shadow.color.g, shadow.color.b));
+    opacities.push(shadow.color.a);
+}
+
+fn push_inner_shadow(
+    xs: &mut Vec<f32>,
+    ys: &mut Vec<f32>,
+    blurs: &mut Vec<f32>,
+    spreads: &mut Vec<f32>,
+    colors: &mut Vec<Color>,
+    opacities: &mut Vec<f32>,
+    shadow: InnerShadow,
+) {
+    let shadow = shadow.sanitized();
+    xs.push(shadow.offset.x);
+    ys.push(shadow.offset.y);
+    blurs.push(shadow.blur);
+    spreads.push(shadow.spread);
     colors.push(Color::rgb(shadow.color.r, shadow.color.g, shadow.color.b));
     opacities.push(shadow.color.a);
 }
@@ -1743,6 +1888,63 @@ mod tests {
         assert_eq!(legacy_style.fill_center, Vec2::ZERO);
         assert_eq!(legacy_style.fill_radius, 0.0);
         assert_eq!(legacy_style, ElementStyle::new());
+    }
+
+    #[test]
+    fn inner_shadow_is_one_style_patch_and_does_not_expand_hit_bounds() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(20.0, 20.0)));
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[],
+            &StylePatch {
+                inner_shadow_opacity: Some(0.4),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+        let before = match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => rect.world_bounds(),
+            other => panic!("rect, got {other:?}"),
+        };
+        let patch = StylePatch {
+            inner_shadow_offset_x: Some(3.0),
+            inner_shadow_offset_y: Some(2.0),
+            inner_shadow_blur: Some(8.0),
+            inner_shadow_spread: Some(1.0),
+            inner_shadow_color: Some(Color::rgb(0.0, 0.0, 0.1)),
+            inner_shadow_opacity: Some(0.45),
+            ..StylePatch::default()
+        };
+        let mut history = CommandHistory::new();
+        history.execute(
+            Box::new(SetStyleCommand::from_patch(&scene, &[1], &patch).unwrap()),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => {
+                assert_eq!(rect.style.inner_shadow.offset, Vec2::new(3.0, 2.0));
+                assert_eq!(rect.style.inner_shadow.blur, 8.0);
+                assert_eq!(rect.style.inner_shadow.spread, 1.0);
+                assert!((rect.style.inner_shadow.color.a - 0.45).abs() < 1.0e-5);
+                assert_eq!(rect.world_bounds(), before);
+                assert!(!rect.inner_shadow_vertices().is_empty());
+            }
+            other => panic!("rect, got {other:?}"),
+        }
+        history.undo(&mut scene);
+        match scene.get(1).unwrap() {
+            AnyElement::Rectangle(rect) => assert!(rect.style.inner_shadow.is_unset()),
+            other => panic!("rect, got {other:?}"),
+        }
+        let legacy = serde_json::json!({
+            "props": { "id": 9 },
+            "size": serde_json::to_value(Vec2::new(10.0, 10.0)).unwrap(),
+        });
+        let old: Rectangle = serde_json::from_value(legacy).unwrap();
+        assert!(old.style.inner_shadow.is_unset());
+        assert!(selection_style(&scene, &[1]).inner_shadow_supported);
     }
 
     #[test]

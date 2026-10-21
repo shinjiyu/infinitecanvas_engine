@@ -1,7 +1,7 @@
 //! 圆形元素
 use super::blur::{blur_active, gaussian_fill_vertices, gaussian_stroke_vertices};
 use super::gradient::paint_gradient_fill;
-use super::shadow::soft_shadow_vertices;
+use super::shadow::{soft_inner_shadow_vertices, soft_shadow_vertices};
 use super::stroke::{
     aligned_circle_radius, color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled,
     transform_vertices, StrokePaint,
@@ -90,6 +90,26 @@ impl Circle {
         soft_shadow_vertices(
             &points,
             self.style.shadow,
+            self.style.opacity,
+            &self.props.transform,
+        )
+    }
+
+    /// 内阴影顶点。关闭时为空。放在填充之后。
+    pub(crate) fn inner_shadow_vertices(&self) -> Vec<Vertex> {
+        const SEGMENTS: usize = 32;
+        let mut points = Vec::with_capacity(SEGMENTS + 1);
+        let step = 2.0 * PI / SEGMENTS as f32;
+        for index in 0..=SEGMENTS {
+            let angle = index as f32 * step;
+            points.push(Vec2::new(
+                angle.cos() * self.radius,
+                angle.sin() * self.radius,
+            ));
+        }
+        soft_inner_shadow_vertices(
+            &points,
+            self.style.inner_shadow,
             self.style.opacity,
             &self.props.transform,
         )

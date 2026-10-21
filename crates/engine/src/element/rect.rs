@@ -1,7 +1,7 @@
 //! 矩形元素
 use super::blur::{blur_active, gaussian_fill_vertices, gaussian_stroke_vertices};
 use super::gradient::paint_gradient_fill;
-use super::shadow::soft_shadow_vertices;
+use super::shadow::{soft_inner_shadow_vertices, soft_shadow_vertices};
 use super::stroke::{
     aligned_rect_metrics, color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled,
     transform_vertices, StrokePaint,
@@ -180,6 +180,16 @@ impl Rectangle {
         soft_shadow_vertices(
             &self.local_silhouette(),
             self.style.shadow,
+            self.style.opacity,
+            &self.props.transform,
+        )
+    }
+
+    /// 内阴影顶点。关闭时为空。轮廓跟圆角，放在填充之后。
+    pub(crate) fn inner_shadow_vertices(&self) -> Vec<Vertex> {
+        soft_inner_shadow_vertices(
+            &self.local_silhouette(),
+            self.style.inner_shadow,
             self.style.opacity,
             &self.props.transform,
         )

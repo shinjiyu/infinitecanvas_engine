@@ -38,6 +38,7 @@ impl InfiniteCanvas {
     /// - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
     /// - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
     /// - `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字。`shadowColor` 是 `#rrggbbaa`（面板只用 RGB，浓度在 `shadowOpacity`）。没有形状、文本或图片时 `shadowSupported` 为 false
+    /// - `innerShadowOffsetX` / `innerShadowOffsetY` / `innerShadowBlur` / `innerShadowSpread` / `innerShadowOpacity` 是数字。`innerShadowColor` 同投影。`innerShadowSupported` 与投影相同
     /// - `fillKind`：`solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
     ///   `fillAngle` 为度，`fillCenter` 为 `{x, y}`，`fillRadius` 为局部半径（0 表示自动）。
     ///   这几项只统计形状。多选不一致时对应的 `*Mixed` 为 true
@@ -84,6 +85,17 @@ impl InfiniteCanvas {
             "shadowSupported",
             JsValue::from(style.shadow_supported),
         );
+        write_number(&obj, "innerShadowOffsetX", &style.inner_shadow_offset_x);
+        write_number(&obj, "innerShadowOffsetY", &style.inner_shadow_offset_y);
+        write_number(&obj, "innerShadowBlur", &style.inner_shadow_blur);
+        write_number(&obj, "innerShadowSpread", &style.inner_shadow_spread);
+        write_number(&obj, "innerShadowOpacity", &style.inner_shadow_opacity);
+        write_color(&obj, "innerShadowColor", &style.inner_shadow_color);
+        js_set(
+            &obj,
+            "innerShadowSupported",
+            JsValue::from(style.inner_shadow_supported),
+        );
         write_number(&obj, "blurRadius", &style.blur_radius);
         js_set(&obj, "blurSupported", JsValue::from(style.blur_supported));
         write_color(&obj, "textColor", &style.text_color);
@@ -122,6 +134,7 @@ impl InfiniteCanvas {
     /// `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。对齐、字重、行高与字距只写到文本上。圆角只写到矩形上。
     /// `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
     /// `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
+    /// `innerShadowOffsetX` / `innerShadowOffsetY` / `innerShadowBlur` / `innerShadowSpread` / `innerShadowOpacity` 同理，也可蛇形命名。`innerShadowColor` 只改 RGB。
     /// `blurRadius` 也可以写成 `blur_radius`。形状、文本、图片和画板都接受图层模糊。负数收成 0。
     /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` / `strokeAlign` / `blendMode` 是小写名字。
     /// `fillKind` 是 `solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
@@ -469,6 +482,18 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
             .or_else(|| read_color(value, "shadow_color")),
         shadow_opacity: read_f32(value, "shadowOpacity")
             .or_else(|| read_f32(value, "shadow_opacity")),
+        inner_shadow_offset_x: read_f32(value, "innerShadowOffsetX")
+            .or_else(|| read_f32(value, "inner_shadow_offset_x")),
+        inner_shadow_offset_y: read_f32(value, "innerShadowOffsetY")
+            .or_else(|| read_f32(value, "inner_shadow_offset_y")),
+        inner_shadow_blur: read_f32(value, "innerShadowBlur")
+            .or_else(|| read_f32(value, "inner_shadow_blur")),
+        inner_shadow_spread: read_f32(value, "innerShadowSpread")
+            .or_else(|| read_f32(value, "inner_shadow_spread")),
+        inner_shadow_color: read_color(value, "innerShadowColor")
+            .or_else(|| read_color(value, "inner_shadow_color")),
+        inner_shadow_opacity: read_f32(value, "innerShadowOpacity")
+            .or_else(|| read_f32(value, "inner_shadow_opacity")),
         fill_kind: read_label(value, "fillKind", FillKind::parse)
             .or_else(|| read_label(value, "fill_kind", FillKind::parse)),
         fill_stops: read_stops(value, "fillStops").or_else(|| read_stops(value, "fill_stops")),

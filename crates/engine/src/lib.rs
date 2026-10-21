@@ -74,8 +74,8 @@ pub use crop::{
 };
 pub use element::{
     Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, FillShape,
-    FontWeight, Frame, GradientStop, Group, Image, Line, LineMarker, Path, Polygon, PolygonKind,
-    Rectangle, StrokeAlign, StrokeCap, StrokeJoin, Text, TextAlign, TextClickResolver,
+    FontWeight, Frame, GradientStop, Group, Image, InnerShadow, Line, LineMarker, Path, Polygon,
+    PolygonKind, Rectangle, StrokeAlign, StrokeCap, StrokeJoin, Text, TextAlign, TextClickResolver,
     TextPlacement, TextVisual,
 };
 pub use event::{

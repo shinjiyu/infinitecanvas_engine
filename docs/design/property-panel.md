@@ -41,6 +41,8 @@ PNG 按像素采样同一套渐变，描边像素仍是纯色。SVG 写成 `line
 
 投影写在形状的 `ElementStyle::shadow`、文本和图片各自的 `shadow` 上。`StylePatch` 里是可选的 `shadow_offset_x` / `shadow_offset_y` / `shadow_blur` / `shadow_color`（只改 RGB）/ `shadow_opacity`（只改 alpha）。未写出的字段保持原值。渐变和混合模式已经是同一补丁上的可选字段。勾选投影时，若当前是全零默认值，一次 `SetStyle` 写成偏移 (8, 8)、模糊 12、黑色、浓度 0.4；取消只把浓度写成 0。滑块和数字框走预览，松手一条历史。多选不一致时为 mixed。`shadowSupported` 在选择里有形状、文本或图片时为 true。偏移在局部空间，旋转和缩放会带着投影走。模糊是轮廓外扩的羽化环，不是离屏高斯。投影不改变命中和包围盒。隐藏元素不输出投影顶点。多边形和星形的剪影就是局部顶点环。
 
+内阴影写在 `ElementStyle::inner_shadow`、文本和图片各自的 `inner_shadow` 上（`serde(default)`，缺省关闭不写入 JSON）。`StylePatch` 里是可选的 `inner_shadow_offset_x` / `inner_shadow_offset_y` / `inner_shadow_blur` / `inner_shadow_spread` / `inner_shadow_color` / `inner_shadow_opacity`。未写出的字段保持原值。绘制是沿内法线的羽化环，放在填充之后、描边之前；和外投影同时打开时，外投影在本体后、内阴影叠在填充上。命中和包围盒不含内阴影。面板紧挨投影，无新快捷键。PNG 按同一近似采样；SVG 用 `feOffset`+`feGaussianBlur`+`feComposite` 近似，不保证像素级一致。
+
 混合模式写在形状（含画板）的 `ElementStyle.blend_mode`、文本和图片自己的 `blend_mode` 上。取值是 `normal`、`multiply`、`screen`、`overlay`、`darken`、`lighten`，缺省 `normal`。面板在 `blendModeSupported` 为 false 时隐藏下拉；多选不一致为 mixed。改一次是一条 `SetStyle`。空选、锁定、或改成当前值，都不入栈。没有新的快捷键。渐变烤在填充顶点里，合成时跟这个叶子的填充一起进同一层。改混合模式不清图层模糊。
 
 图层模糊写在形状（含画板）的 `ElementStyle::blur_radius`，以及文本和图片各自的 `blur_radius`。`StylePatch.blur_radius` 未写出时保持原值，也不改混合模式。0 是关闭，不写入 JSON。面板标签是「图层模糊」，和投影里的「模糊」分开，没有单独的快捷键。滑块和数字框走预览，松手一条 `SetStyle`。空选择、锁定、以及改成当前值都不入栈。多选不一致为 mixed。`blurSupported` 在选择里有形状、文本或图片时为 true，画板算形状。选中画板只改画板，不写到子元素。命中仍是未模糊包围盒。形状用有符号距离上的高斯 CDF；虚线在模糊打开时收成实心软带。图片和文本用 5×5 纹理核，不重做字形光栅。PNG 按同一近似采样；SVG 用 `feGaussianBlur`，不保证和顶点环一致。渐变和模糊同时打开时，软边用包围盒中心采到的一个颜色，不卷积整段渐变，也不清掉色标。模糊为 0 时渐变顶点恢复。布尔填充路径带孔时，实体是内缩后的耳切三角，孔不会被扇形填实。
