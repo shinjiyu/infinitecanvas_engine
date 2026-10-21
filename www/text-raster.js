@@ -11,6 +11,8 @@
  * @param {string} job.color CSS 颜色
  * @param {string} [job.align] `left` | `center` | `right`
  * @param {string} [job.fontWeight] `regular` | `bold`（或 `400` / `700`）
+ * @param {number} [job.lineHeight] 行高倍数（相对字号），缺省 1.2
+ * @param {number} [job.letterSpacing] 字距（世界单位），缺省 0；乘 rasterScale 得像素
  * @param {string} job.fontFamily CSS font-family，需要包含中文字体
  * @param {number} job.paddingWorld 世界单位边距
  * @returns {{ width: number, height: number, data: Uint8ClampedArray, worldWidth: number, worldHeight: number }}
@@ -24,6 +26,8 @@
  *   color: '#f4f7fb',
  *   align: 'left',
  *   fontWeight: 'regular',
+ *   lineHeight: 1.2,
+ *   letterSpacing: 0,
  *   fontFamily: '"WenQuanYi Micro Hei", sans-serif',
  *   paddingWorld: 4,
  * });
@@ -44,18 +48,25 @@ export function rasterizeText(job) {
   const color = job.color || '#f4f7fb';
   const lines = content.split('\n');
   const font = `${fontWeight} ${fontSizePx}px ${fontFamily}`;
-  const lineHeight = fontSizePx * 1.4;
+  const rawLineHeight = Number(job.lineHeight);
+  const lineHeightMult =
+    Number.isFinite(rawLineHeight) && rawLineHeight > 0 ? rawLineHeight : 1.2;
+  const lineHeight = fontSizePx * lineHeightMult;
+  const rawSpacing = Number(job.letterSpacing);
+  const letterSpacingPx =
+    Number.isFinite(rawSpacing) ? rawSpacing * rasterScale : 0;
 
   const measure = createSurface(1, 1).getContext('2d');
   if (!measure) {
     throw new Error('Canvas2D is not available');
   }
   measure.font = font;
+  applyLetterSpacing(measure, letterSpacingPx);
 
   let maxWidth = 1;
   const widths = lines.map((line) => {
     const sample = line.length > 0 ? line : ' ';
-    const width = measure.measureText(sample).width;
+    const width = measureLineWidth(measure, sample, letterSpacingPx);
     maxWidth = Math.max(maxWidth, width);
     return width;
   });
@@ -73,6 +84,7 @@ export function rasterizeText(job) {
   }
   ctx.clearRect(0, 0, width, height);
   ctx.font = font;
+  applyLetterSpacing(ctx, letterSpacingPx);
   ctx.fillStyle = color;
   ctx.textBaseline = 'middle';
   ctx.textAlign = align;
@@ -90,8 +102,7 @@ export function rasterizeText(job) {
     } else if (align === 'right') {
       x = pad + maxWidth;
     }
-    if (strokeWidthPx > 0) ctx.strokeText(line, x, y);
-    ctx.fillText(line, x, y);
+    drawLine(ctx, line, x, y, strokeWidthPx > 0, letterSpacingPx);
   });
 
   const image = ctx.getImageData(0, 0, width, height);
@@ -118,6 +129,78 @@ export function countInk(data, threshold = 16) {
     if (data[i] > threshold) count += 1;
   }
   return count;
+}
+
+/**
+ * @param {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} ctx
+ * @param {number} spacingPx
+ */
+function applyLetterSpacing(ctx, spacingPx) {
+  if (typeof ctx.letterSpacing === 'string' || 'letterSpacing' in ctx) {
+    try {
+      ctx.letterSpacing = `${spacingPx}px`;
+    } catch {
+      // ignore unsupported assignment
+    }
+  }
+}
+
+/**
+ * @param {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} ctx
+ * @param {string} text
+ * @param {number} spacingPx
+ * @returns {number}
+ */
+function measureLineWidth(ctx, text, spacingPx) {
+  if (supportsLetterSpacing(ctx) || Math.abs(spacingPx) < 1e-6) {
+    return ctx.measureText(text).width;
+  }
+  let width = 0;
+  const chars = Array.from(text);
+  chars.forEach((ch, index) => {
+    width += ctx.measureText(ch).width;
+    if (index < chars.length - 1) width += spacingPx;
+  });
+  return width;
+}
+
+/**
+ * @param {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} ctx
+ * @param {string} line
+ * @param {number} x
+ * @param {number} y
+ * @param {boolean} stroke
+ * @param {number} spacingPx
+ */
+function drawLine(ctx, line, x, y, stroke, spacingPx) {
+  if (supportsLetterSpacing(ctx) || Math.abs(spacingPx) < 1e-6 || line.length === 0) {
+    if (stroke) ctx.strokeText(line, x, y);
+    ctx.fillText(line, x, y);
+    return;
+  }
+  const chars = Array.from(line);
+  const widths = chars.map((ch) => ctx.measureText(ch).width);
+  const total =
+    widths.reduce((sum, w) => sum + w, 0) + spacingPx * Math.max(chars.length - 1, 0);
+  let cursor = x;
+  if (ctx.textAlign === 'center') cursor = x - total / 2;
+  else if (ctx.textAlign === 'right') cursor = x - total;
+  const prevAlign = ctx.textAlign;
+  ctx.textAlign = 'left';
+  chars.forEach((ch, index) => {
+    if (stroke) ctx.strokeText(ch, cursor, y);
+    ctx.fillText(ch, cursor, y);
+    cursor += widths[index] + spacingPx;
+  });
+  ctx.textAlign = prevAlign;
+}
+
+/**
+ * @param {CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D} ctx
+ * @returns {boolean}
+ */
+function supportsLetterSpacing(ctx) {
+  return typeof ctx.letterSpacing === 'string' || 'letterSpacing' in ctx;
 }
 
 /**

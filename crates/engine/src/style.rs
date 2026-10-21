@@ -1,7 +1,7 @@
 //! 选中元素的样式读取和修改。
 //!
 //! 矩形、圆、多边形、星形、直线、路径共用 [`ElementStyle`]。文本另外记录字号、文字颜色、
-//! 不透明度、可选描边、水平对齐和字重。图片参与不透明度（[`crate::element::Image::alpha`]）和投影，
+//! 不透明度、可选描边、水平对齐、字重、行高和字距。图片参与不透明度（[`crate::element::Image::alpha`]）和投影，
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
 //! 画板有自己的填充和描边；选中画板只改画板，不把样式写到子元素上。
 //!
@@ -14,7 +14,7 @@
 //!                 ├─ selection_style  多选不一致 → StyleField::Mixed
 //!                 └─ StylePatch ──► SetStyleCommand ──► mark_dirty
 //!                                      │
-//!                                      ├─ 文本字号 / 颜色 / 描边 / 对齐 / 字重变化时丢掉光栅
+//!                                      ├─ 文本字号 / 颜色 / 描边 / 对齐 / 字重 / 行高 / 字距变化时丢掉光栅
 //!                                      ├─ 矩形圆角（其它元素忽略该字段）
 //!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
 //!                                      ├─ 形状渐变（种类、色标、角度、圆心、半径）
@@ -60,6 +60,10 @@ pub struct TextPaint {
     pub align: TextAlign,
     /// 字重。
     pub font_weight: FontWeight,
+    /// 行高倍数（相对字号）。
+    pub line_height: f32,
+    /// 字距（世界单位）。
+    pub letter_spacing: f32,
     /// 投影。文本不把它画进字形纹理。
     pub shadow: DropShadow,
     /// 混合模式。
@@ -138,6 +142,10 @@ pub struct StylePatch {
     pub text_align: Option<TextAlign>,
     /// 文本字重。只写到文本上。
     pub font_weight: Option<FontWeight>,
+    /// 文本行高倍数。只写到文本上。
+    pub line_height: Option<f32>,
+    /// 文本字距（世界单位）。只写到文本上。
+    pub letter_spacing: Option<f32>,
     /// 形状虚线。空数组表示改回实线。文本描边不读这个字段。
     pub stroke_dash: Option<Vec<f32>>,
     /// 形状线帽。文本描边不读这个字段。
@@ -205,6 +213,10 @@ pub struct SelectionStyle {
     pub text_align: StyleField<TextAlign>,
     /// 文本字重。
     pub font_weight: StyleField<FontWeight>,
+    /// 文本行高倍数。
+    pub line_height: StyleField<f32>,
+    /// 文本字距（世界单位）。
+    pub letter_spacing: StyleField<f32>,
     /// 形状虚线。空数组是实线。文本不参与。
     pub stroke_dash: StyleField<Vec<f32>>,
     /// 形状线帽。文本不参与。
@@ -343,6 +355,12 @@ impl StyleSnapshot {
                 if let Some(weight) = patch.font_weight {
                     text.font_weight = weight;
                 }
+                if let Some(height) = finite_line_height(patch.line_height) {
+                    text.line_height = height;
+                }
+                if let Some(spacing) = finite_letter_spacing(patch.letter_spacing) {
+                    text.letter_spacing = spacing;
+                }
                 if let Some(mode) = patch.blend_mode {
                     text.blend_mode = mode;
                 }
@@ -449,6 +467,8 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             stroke_width: text.stroke_width,
             align: text.align,
             font_weight: text.font_weight,
+            line_height: text.line_height,
+            letter_spacing: text.letter_spacing,
             shadow: text.shadow,
             blend_mode: text.blend_mode,
             blur_radius: crate::element::blur::sanitize_blur(text.blur_radius),
@@ -466,7 +486,7 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
 
 /// 写回样式快照，并 [`Scene::mark_dirty`]。
 ///
-/// 文本的字号、颜色、描边、对齐或字重变化会丢掉光栅纹理。不透明度只改 tint，不重新光栅化。
+/// 文本的字号、颜色、描边、对齐、字重、行高或字距变化会丢掉光栅纹理。不透明度只改 tint，不重新光栅化。
 pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSnapshot) {
     let applied = match scene.get_mut(id) {
         Some(AnyElement::Rectangle(rect)) => assign_rectangle(rect, snapshot),
@@ -484,7 +504,12 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                     paint.stroke,
                     paint.stroke_width,
                 );
-                text.set_align_and_weight(paint.align, paint.font_weight);
+                text.set_typography(
+                    paint.align,
+                    paint.font_weight,
+                    paint.line_height,
+                    paint.letter_spacing,
+                );
                 // 投影和图层模糊都不进字形纹理，只标脏让顶点重写。
                 text.shadow = paint.shadow;
                 text.blur_radius = crate::element::blur::sanitize_blur(paint.blur_radius);
@@ -528,6 +553,8 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut text_colors = Vec::new();
     let mut text_aligns = Vec::new();
     let mut font_weights = Vec::new();
+    let mut line_heights = Vec::new();
+    let mut letter_spacings = Vec::new();
     let mut dashes = Vec::new();
     let mut caps = Vec::new();
     let mut joins = Vec::new();
@@ -719,6 +746,8 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 text_colors.push(text.color);
                 text_aligns.push(text.align);
                 font_weights.push(text.font_weight);
+                line_heights.push(text.line_height);
+                letter_spacings.push(text.letter_spacing);
                 blends.push(text.blend_mode);
                 push_shadow(
                     &mut shadow_xs,
@@ -762,6 +791,8 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         text_color: fold(text_colors),
         text_align: fold(text_aligns),
         font_weight: fold(font_weights),
+        line_height: fold(line_heights),
+        letter_spacing: fold(letter_spacings),
         stroke_dash: fold(dashes),
         stroke_cap: fold(caps),
         stroke_join: fold(joins),
@@ -1025,6 +1056,17 @@ fn finite_font(value: Option<f32>) -> Option<f32> {
     value
         .filter(|value| value.is_finite())
         .map(|value| value.max(1.0))
+}
+fn finite_line_height(value: Option<f32>) -> Option<f32> {
+    value
+        .filter(|v| v.is_finite())
+        .map(crate::element::sanitize_line_height)
+}
+
+fn finite_letter_spacing(value: Option<f32>) -> Option<f32> {
+    value
+        .filter(|v| v.is_finite())
+        .map(crate::element::sanitize_letter_spacing)
 }
 
 #[cfg(test)]
@@ -2384,6 +2426,7 @@ mod tests {
             other => panic!("text, got {other:?}"),
         }
     }
+
     #[test]
     fn line_markers_are_one_undoable_set_style_and_noop_on_non_lines() {
         let mut scene = Scene::new();
@@ -2508,5 +2551,137 @@ mod tests {
         assert!(SetStyleCommand::from_patch(&scene, &[], &patch).is_none());
         scene.set_locked(1, true);
         assert!(SetStyleCommand::from_patch(&scene, &[1], &patch).is_none());
+    }
+
+    #[test]
+    fn text_line_height_and_letter_spacing_are_one_undoable_set_style() {
+        use crate::element::{DEFAULT_LETTER_SPACING, DEFAULT_LINE_HEIGHT};
+
+        let mut scene = Scene::new();
+        scene.add_text(Text::new(1, Vec2::ZERO, "Hello"));
+        scene.add_text(
+            Text::new(2, Vec2::new(40.0, 0.0), "World")
+                .with_line_height(1.8)
+                .with_letter_spacing(2.0),
+        );
+        scene.add_rect(Rectangle::new(
+            3,
+            Vec2::new(80.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+
+        let mixed = selection_style(&scene, &[1, 2]);
+        assert_eq!(mixed.line_height, StyleField::Mixed);
+        assert_eq!(mixed.letter_spacing, StyleField::Mixed);
+        let shape_only = selection_style(&scene, &[3]);
+        assert_eq!(shape_only.line_height, StyleField::Absent);
+        assert_eq!(shape_only.letter_spacing, StyleField::Absent);
+
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[3],
+            &StylePatch {
+                line_height: Some(1.5),
+                letter_spacing: Some(1.0),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[1],
+            &StylePatch {
+                line_height: Some(DEFAULT_LINE_HEIGHT),
+                letter_spacing: Some(DEFAULT_LETTER_SPACING),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let mut locked = Scene::new();
+        let mut text = Text::new(1, Vec2::ZERO, "Lock");
+        text.props.locked = true;
+        locked.add_text(text);
+        assert!(SetStyleCommand::from_patch(
+            &locked,
+            &[1],
+            &StylePatch {
+                line_height: Some(2.0),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let mut history = CommandHistory::new();
+        let mut textured = Text::new(4, Vec2::new(0.0, 40.0), "Raster");
+        textured.texture_id = Some("glyph".to_string());
+        textured.raster_revision = textured.revision;
+        scene.add_text(textured);
+
+        history.execute(
+            Box::new(
+                SetStyleCommand::from_patch(
+                    &scene,
+                    &[1, 4],
+                    &StylePatch {
+                        line_height: Some(1.6),
+                        letter_spacing: Some(3.0),
+                        ..StylePatch::default()
+                    },
+                )
+                .unwrap(),
+            ),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert!((text.line_height - 1.6).abs() < 1e-5);
+                assert!((text.letter_spacing - 3.0).abs() < 1e-5);
+                assert!(text.texture_id.is_none());
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        let uniform = selection_style(&scene, &[1, 4]);
+        assert_eq!(uniform.line_height, StyleField::Uniform(1.6));
+        assert_eq!(uniform.letter_spacing, StyleField::Uniform(3.0));
+
+        assert!(history.undo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert!((text.line_height - DEFAULT_LINE_HEIGHT).abs() < 1e-5);
+                assert!((text.letter_spacing - DEFAULT_LETTER_SPACING).abs() < 1e-5);
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        assert!(history.redo(&mut scene));
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"line_height\":"));
+        assert!(json.contains("\"letter_spacing\":"));
+        let restored = Scene::from_json(&json).unwrap();
+        match restored.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert!((text.line_height - 1.6).abs() < 1e-5);
+                assert!((text.letter_spacing - 3.0).abs() < 1e-5);
+            }
+            other => panic!("text, got {other:?}"),
+        }
+
+        let legacy = serde_json::json!({
+            "version": 1,
+            "elements": [{
+                "type": "text",
+                "data": { "props": { "id": 9 }, "content": "Old" }
+            }]
+        });
+        let old = Scene::from_json(&legacy.to_string()).unwrap();
+        match old.get(9).unwrap() {
+            AnyElement::Text(text) => {
+                assert!((text.line_height - DEFAULT_LINE_HEIGHT).abs() < 1e-5);
+                assert!((text.letter_spacing - DEFAULT_LETTER_SPACING).abs() < 1e-5);
+            }
+            other => panic!("text, got {other:?}"),
+        }
     }
 }
