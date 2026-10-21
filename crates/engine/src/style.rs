@@ -1,7 +1,7 @@
 //! 选中元素的样式读取和修改。
 //!
 //! 矩形、圆、多边形、星形、直线、路径共用 [`ElementStyle`]。文本另外记录字号、文字颜色、
-//! 不透明度和可选描边。图片参与不透明度（[`crate::element::Image::alpha`]）和投影，
+//! 不透明度、可选描边、水平对齐和字重。图片参与不透明度（[`crate::element::Image::alpha`]）和投影，
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
 //! 画板有自己的填充和描边；选中画板只改画板，不把样式写到子元素上。
 //!
@@ -14,7 +14,7 @@
 //!                 ├─ selection_style  多选不一致 → StyleField::Mixed
 //!                 └─ StylePatch ──► SetStyleCommand ──► mark_dirty
 //!                                      │
-//!                                      ├─ 文本字号 / 颜色 / 描边变化时丢掉光栅
+//!                                      ├─ 文本字号 / 颜色 / 描边 / 对齐 / 字重变化时丢掉光栅
 //!                                      ├─ 矩形圆角（其它元素忽略该字段）
 //!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
 //!                                      ├─ 形状渐变（种类、色标、角度、圆心、半径）
@@ -26,8 +26,8 @@
 
 use crate::blend::BlendMode;
 use crate::element::{
-    DropShadow, ElementId, ElementStyle, FillKind, GradientStop, Polygon, PolygonKind, Rectangle,
-    StrokeCap, StrokeJoin,
+    DropShadow, ElementId, ElementStyle, FillKind, FontWeight, GradientStop, Polygon, PolygonKind,
+    Rectangle, StrokeCap, StrokeJoin, TextAlign,
 };
 use crate::scene::{AnyElement, Scene};
 use infinitecanvas_math::{Color, Vec2};
@@ -43,7 +43,7 @@ pub enum StyleField<T> {
     Mixed,
 }
 
-/// 文本上属性面板能改的外观。不含内容、对齐和字体，那些走文本编辑命令。
+/// 文本上属性面板能改的外观。不含内容和字体族，那些走文本编辑命令。
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextPaint {
     /// 世界单位字号。
@@ -56,6 +56,10 @@ pub struct TextPaint {
     pub stroke: Option<Color>,
     /// 世界单位描边宽度。0 表示不描边。
     pub stroke_width: f32,
+    /// 水平对齐。
+    pub align: TextAlign,
+    /// 字重。
+    pub font_weight: FontWeight,
     /// 投影。文本不把它画进字形纹理。
     pub shadow: DropShadow,
     /// 混合模式。
@@ -120,6 +124,10 @@ pub struct StylePatch {
     pub font_size: Option<f32>,
     /// 文本填充色。
     pub text_color: Option<Color>,
+    /// 文本水平对齐。只写到文本上。
+    pub text_align: Option<TextAlign>,
+    /// 文本字重。只写到文本上。
+    pub font_weight: Option<FontWeight>,
     /// 形状虚线。空数组表示改回实线。文本描边不读这个字段。
     pub stroke_dash: Option<Vec<f32>>,
     /// 形状线帽。文本描边不读这个字段。
@@ -177,6 +185,10 @@ pub struct SelectionStyle {
     pub font_size: StyleField<f32>,
     /// 文本填充色。
     pub text_color: StyleField<Color>,
+    /// 文本水平对齐。
+    pub text_align: StyleField<TextAlign>,
+    /// 文本字重。
+    pub font_weight: StyleField<FontWeight>,
     /// 形状虚线。空数组是实线。文本不参与。
     pub stroke_dash: StyleField<Vec<f32>>,
     /// 形状线帽。文本不参与。
@@ -288,6 +300,12 @@ impl StyleSnapshot {
                 if let Some(width) = finite_width(patch.stroke_width) {
                     text.stroke_width = width;
                 }
+                if let Some(align) = patch.text_align {
+                    text.align = align;
+                }
+                if let Some(weight) = patch.font_weight {
+                    text.font_weight = weight;
+                }
                 if let Some(mode) = patch.blend_mode {
                     text.blend_mode = mode;
                 }
@@ -388,6 +406,8 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             opacity: text.opacity,
             stroke: text.stroke,
             stroke_width: text.stroke_width,
+            align: text.align,
+            font_weight: text.font_weight,
             shadow: text.shadow,
             blend_mode: text.blend_mode,
             blur_radius: crate::element::blur::sanitize_blur(text.blur_radius),
@@ -405,7 +425,7 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
 
 /// 写回样式快照，并 [`Scene::mark_dirty`]。
 ///
-/// 文本的字号、颜色或描边变化会丢掉光栅纹理。不透明度只改 tint，不重新光栅化。
+/// 文本的字号、颜色、描边、对齐或字重变化会丢掉光栅纹理。不透明度只改 tint，不重新光栅化。
 pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSnapshot) {
     let applied = match scene.get_mut(id) {
         Some(AnyElement::Rectangle(rect)) => assign_rectangle(rect, snapshot),
@@ -423,6 +443,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                     paint.stroke,
                     paint.stroke_width,
                 );
+                text.set_align_and_weight(paint.align, paint.font_weight);
                 // 投影和图层模糊都不进字形纹理，只标脏让顶点重写。
                 text.shadow = paint.shadow;
                 text.blur_radius = crate::element::blur::sanitize_blur(paint.blur_radius);
@@ -464,6 +485,8 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut opacities = Vec::new();
     let mut font_sizes = Vec::new();
     let mut text_colors = Vec::new();
+    let mut text_aligns = Vec::new();
+    let mut font_weights = Vec::new();
     let mut dashes = Vec::new();
     let mut caps = Vec::new();
     let mut joins = Vec::new();
@@ -608,6 +631,8 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 opacities.push(text.opacity);
                 font_sizes.push(text.font_size);
                 text_colors.push(text.color);
+                text_aligns.push(text.align);
+                font_weights.push(text.font_weight);
                 blends.push(text.blend_mode);
                 push_shadow(
                     &mut shadow_xs,
@@ -649,6 +674,8 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         opacity: fold(opacities),
         font_size: fold(font_sizes),
         text_color: fold(text_colors),
+        text_align: fold(text_aligns),
+        font_weight: fold(font_weights),
         stroke_dash: fold(dashes),
         stroke_cap: fold(caps),
         stroke_join: fold(joins),
@@ -2081,5 +2108,163 @@ mod tests {
         let mut hidden = VertexCache::new();
         let _ = hidden.sync(&mut scene);
         assert!(hidden.fill_slice(1).is_none_or(|slice| slice.is_empty()));
+    }
+
+    #[test]
+    fn text_align_and_weight_are_one_undoable_set_style() {
+        use crate::element::{FontWeight, TextAlign};
+
+        let mut scene = Scene::new();
+        scene.add_text(Text::new(1, Vec2::ZERO, "Hello"));
+        scene.add_text(
+            Text::new(2, Vec2::new(40.0, 0.0), "World")
+                .with_align(TextAlign::Center)
+                .with_font_weight(FontWeight::Bold),
+        );
+        scene.add_rect(Rectangle::new(
+            3,
+            Vec2::new(80.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+
+        let mixed = selection_style(&scene, &[1, 2]);
+        assert_eq!(mixed.text_align, StyleField::Mixed);
+        assert_eq!(mixed.font_weight, StyleField::Mixed);
+        assert!(mixed.has_text);
+        let shape_only = selection_style(&scene, &[3]);
+        assert_eq!(shape_only.text_align, StyleField::Absent);
+        assert_eq!(shape_only.font_weight, StyleField::Absent);
+
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[],
+            &StylePatch {
+                text_align: Some(TextAlign::Right),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[3],
+            &StylePatch {
+                text_align: Some(TextAlign::Right),
+                font_weight: Some(FontWeight::Bold),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[1],
+            &StylePatch {
+                text_align: Some(TextAlign::Left),
+                font_weight: Some(FontWeight::Regular),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let mut locked = Scene::new();
+        let mut text = Text::new(1, Vec2::ZERO, "Lock");
+        text.props.locked = true;
+        locked.add_text(text);
+        assert!(SetStyleCommand::from_patch(
+            &locked,
+            &[1],
+            &StylePatch {
+                text_align: Some(TextAlign::Center),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let mut history = CommandHistory::new();
+        let mut textured = Text::new(4, Vec2::new(0.0, 40.0), "Raster");
+        textured.texture_id = Some("glyph".to_string());
+        textured.raster_revision = textured.revision;
+        scene.add_text(textured);
+
+        history.execute(
+            Box::new(
+                SetStyleCommand::from_patch(
+                    &scene,
+                    &[1, 4],
+                    &StylePatch {
+                        text_align: Some(TextAlign::Right),
+                        font_weight: Some(FontWeight::Bold),
+                        ..StylePatch::default()
+                    },
+                )
+                .unwrap(),
+            ),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        assert!(scene.has_dirty_elements());
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.align, TextAlign::Right);
+                assert_eq!(text.font_weight, FontWeight::Bold);
+                assert!(text.texture_id.is_none());
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        match scene.get(4).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.align, TextAlign::Right);
+                assert_eq!(text.font_weight, FontWeight::Bold);
+                assert!(text.texture_id.is_none());
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        let uniform = selection_style(&scene, &[1, 4]);
+        assert_eq!(uniform.text_align, StyleField::Uniform(TextAlign::Right));
+        assert_eq!(uniform.font_weight, StyleField::Uniform(FontWeight::Bold));
+
+        assert!(history.undo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.align, TextAlign::Left);
+                assert_eq!(text.font_weight, FontWeight::Regular);
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        assert!(history.redo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.align, TextAlign::Right);
+                assert_eq!(text.font_weight, FontWeight::Bold);
+            }
+            other => panic!("text, got {other:?}"),
+        }
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"align\":\"right\""));
+        assert!(json.contains("\"font_weight\":\"bold\""));
+        let restored = Scene::from_json(&json).unwrap();
+        match restored.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.align, TextAlign::Right);
+                assert_eq!(text.font_weight, FontWeight::Bold);
+            }
+            other => panic!("text, got {other:?}"),
+        }
+
+        let legacy = serde_json::json!({
+            "version": 1,
+            "elements": [{
+                "type": "text",
+                "data": { "props": { "id": 9 }, "content": "Old" }
+            }]
+        });
+        let old = Scene::from_json(&legacy.to_string()).unwrap();
+        match old.get(9).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.align, TextAlign::Left);
+                assert_eq!(text.font_weight, FontWeight::Regular);
+            }
+            other => panic!("text, got {other:?}"),
+        }
     }
 }

@@ -599,11 +599,13 @@ fn write_text(text: &Text) -> Option<String> {
         TextAlign::Center => "middle",
         TextAlign::Right => "end",
     };
+    let weight = text.font_weight.css_weight();
     let mut body = format!(
-        "    <text fill=\"{}\" font-size=\"{}\" font-family=\"{}\" text-anchor=\"{}\" dominant-baseline=\"text-before-edge\" xml:space=\"preserve\"",
+        "    <text fill=\"{}\" font-size=\"{}\" font-family=\"{}\" font-weight=\"{}\" text-anchor=\"{}\" dominant-baseline=\"text-before-edge\" xml:space=\"preserve\"",
         rgb_hex(text.color),
         fmt_num(font_size),
         xml_escape(&text.font_family),
+        weight,
         anchor,
     );
     push_alpha_attr(&mut body, "fill-opacity", text.color.a);
@@ -1609,7 +1611,7 @@ mod tests {
         scene.add_text(text);
         let svg = export_svg(&scene, false);
         assert!(svg.contains(concat!(
-            "<text fill=\"#ff0000\" font-size=\"16\" font-family=\"sans-serif\" ",
+            "<text fill=\"#ff0000\" font-size=\"16\" font-family=\"sans-serif\" font-weight=\"400\" ",
             "text-anchor=\"start\" dominant-baseline=\"text-before-edge\" xml:space=\"preserve\">",
         )));
         assert!(svg.contains("<tspan x=\"0\" y=\"0\">Hello</tspan>"));
@@ -1619,11 +1621,13 @@ mod tests {
         let mut text = Text::new(2, Vec2::new(4.0, 8.0), "A<B>&\"C\"\nnext")
             .with_font_size(20.0)
             .with_align(TextAlign::Center)
+            .with_font_weight(crate::element::FontWeight::Bold)
             .with_color(Color::new(0.0, 0.0, 1.0, 0.5));
         text.set_rotation(FRAC_PI_2);
         rotated.add_text(text);
         let svg = export_svg(&rotated, false);
         assert!(svg.contains("text-anchor=\"middle\""));
+        assert!(svg.contains("font-weight=\"700\""));
         assert!(svg.contains("fill=\"#0000ff\""));
         assert!(svg.contains("fill-opacity=\"0.5\""));
         assert!(svg.contains("transform=\"matrix(0 1 -1 0 4 8)\""));

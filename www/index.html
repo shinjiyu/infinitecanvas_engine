@@ -475,6 +475,7 @@
     }
 
     #prop-line-style[hidden] { display: none; }
+    #prop-line-markers[hidden] { display: none; }
 
     .prop-row select {
       width: 100%;
@@ -1007,6 +1008,30 @@
             </label>
             <p id="prop-stroke-join-mixed" class="mixed-tag" hidden>线结：多种</p>
           </div>
+          <div id="prop-line-markers" hidden>
+            <label class="prop-row" for="prop-start-marker">
+              <span>起点箭头</span>
+              <select id="prop-start-marker" aria-label="起点箭头">
+                <option value="" hidden>多种</option>
+                <option value="none">无</option>
+                <option value="arrow">箭头</option>
+                <option value="triangle">三角</option>
+              </select>
+              <span></span>
+            </label>
+            <p id="prop-start-marker-mixed" class="mixed-tag" hidden>起点箭头：多种</p>
+            <label class="prop-row" for="prop-end-marker">
+              <span>终点箭头</span>
+              <select id="prop-end-marker" aria-label="终点箭头">
+                <option value="" hidden>多种</option>
+                <option value="none">无</option>
+                <option value="arrow">箭头</option>
+                <option value="triangle">三角</option>
+              </select>
+              <span></span>
+            </label>
+            <p id="prop-end-marker-mixed" class="mixed-tag" hidden>终点箭头：多种</p>
+          </div>
           <div class="prop-row" id="prop-corner-radius-row" hidden>
             <span>圆角</span>
             <input id="prop-corner-radius" type="range" min="0" max="400" step="0.5" value="0" aria-label="圆角半径">
@@ -1129,6 +1154,27 @@
               <span id="prop-font-size-label" class="prop-value">32</span>
             </label>
             <p id="prop-font-size-mixed" class="mixed-tag" hidden>字号：多种</p>
+            <label class="prop-row" for="prop-text-align">
+              <span>对齐</span>
+              <select id="prop-text-align" aria-label="水平对齐">
+                <option value="" hidden>多种</option>
+                <option value="left">左</option>
+                <option value="center">中</option>
+                <option value="right">右</option>
+              </select>
+              <span></span>
+            </label>
+            <p id="prop-text-align-mixed" class="mixed-tag" hidden>对齐：多种</p>
+            <label class="prop-row" for="prop-font-weight">
+              <span>字重</span>
+              <select id="prop-font-weight" aria-label="字重">
+                <option value="" hidden>多种</option>
+                <option value="regular">常规</option>
+                <option value="bold">粗体</option>
+              </select>
+              <span></span>
+            </label>
+            <p id="prop-font-weight-mixed" class="mixed-tag" hidden>字重：多种</p>
             <div class="prop-row">
               <span>文字颜色</span>
               <input id="prop-text-color" type="color" value="#f4f7fb" aria-label="文字颜色">

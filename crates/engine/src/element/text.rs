@@ -1,6 +1,6 @@
 //! 文本元素
 //!
-//! 文本不在 GPU 里直接排版。元素保存内容、字号、颜色和对齐，
+//! 文本不在 GPU 里直接排版。元素保存内容、字号、颜色、对齐和字重，
 //! 由浏览器 Canvas2D / OffscreenCanvas 按缩放层级光栅化成 RGBA 纹理，
 //! 再交给现有的纹理管线绘制。SDF 留到后续。
 //!
@@ -82,6 +82,46 @@ impl TextAlign {
             "left" | "start" => Some(TextAlign::Left),
             "center" | "middle" => Some(TextAlign::Center),
             "right" | "end" => Some(TextAlign::Right),
+            _ => None,
+        }
+    }
+}
+
+/// 字重。
+///
+/// JSON 用小写 `regular` / `bold`。缺省 [`FontWeight::Regular`]（400），旧文件不写也能读。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FontWeight {
+    /// 常规，对应 CSS `font-weight: 400`。
+    #[default]
+    Regular,
+    /// 粗体，对应 CSS `font-weight: 700`。
+    Bold,
+}
+
+impl FontWeight {
+    /// 传给 Canvas2D / CSS 的字重关键字。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FontWeight::Regular => "regular",
+            FontWeight::Bold => "bold",
+        }
+    }
+
+    /// CSS `font` 简写里用的数值字重。
+    pub fn css_weight(self) -> u16 {
+        match self {
+            FontWeight::Regular => 400,
+            FontWeight::Bold => 700,
+        }
+    }
+
+    /// 从面板或接口字符串解析。接受 `regular`/`normal`/`400` 与 `bold`/`700`。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "regular" | "normal" | "400" => Some(FontWeight::Regular),
+            "bold" | "700" => Some(FontWeight::Bold),
             _ => None,
         }
     }
@@ -219,6 +259,8 @@ pub struct TextVisual {
     pub color: Color,
     /// 水平对齐。
     pub align: TextAlign,
+    /// 字重。
+    pub font_weight: FontWeight,
     /// CSS font-family。
     pub font_family: String,
     /// 世界单位布局尺寸。
@@ -291,6 +333,9 @@ pub struct Text {
     /// 水平对齐。JSON 中可省略，缺省为左对齐。值为 `left` / `center` / `right`。
     #[serde(default)]
     pub align: TextAlign,
+    /// 字重。JSON 中可省略，缺省为 `regular`。值为 `regular` / `bold`。
+    #[serde(default)]
+    pub font_weight: FontWeight,
     /// CSS font-family。JSON 中可省略。
     #[serde(default = "default_font_family")]
     pub font_family: String,
@@ -352,6 +397,7 @@ impl Text {
             stroke_width: 0.0,
             blend_mode: BlendMode::Normal,
             align: TextAlign::Left,
+            font_weight: FontWeight::Regular,
             font_family: DEFAULT_FONT_FAMILY.to_string(),
             texture_id: None,
             raster_lod: None,
@@ -383,6 +429,12 @@ impl Text {
     /// 设置水平对齐。
     pub fn with_align(mut self, align: TextAlign) -> Self {
         self.align = align;
+        self
+    }
+
+    /// 设置字重。
+    pub fn with_font_weight(mut self, weight: FontWeight) -> Self {
+        self.font_weight = weight;
         self
     }
 
@@ -516,6 +568,7 @@ impl Text {
             font_size: self.font_size,
             color: self.color,
             align: self.align,
+            font_weight: self.font_weight,
             font_family: self.font_family.clone(),
             size: self.size,
         }
@@ -530,6 +583,7 @@ impl Text {
         self.font_size = visual.font_size.max(1.0);
         self.color = visual.color;
         self.align = visual.align;
+        self.font_weight = visual.font_weight;
         self.font_family = visual.font_family.clone();
         self.size = visual.size;
         self.editing = false;
@@ -590,6 +644,17 @@ impl Text {
             self.size = estimate_size(&self.content, self.font_size);
             let _ = self.invalidate_raster();
         }
+    }
+
+    /// 写入对齐与字重。变化时丢掉光栅纹理。
+    pub(crate) fn set_align_and_weight(&mut self, align: TextAlign, font_weight: FontWeight) {
+        if self.align == align && self.font_weight == font_weight {
+            return;
+        }
+        self.align = align;
+        self.font_weight = font_weight;
+        self.size = estimate_size(&self.content, self.font_size);
+        let _ = self.invalidate_raster();
     }
 
     /// 进入或离开 DOM 编辑。编辑期间不请求光栅化，避免把旧字形画在输入框下面。
@@ -980,6 +1045,17 @@ mod tests {
         assert_eq!(TextAlign::parse("RIGHT"), Some(TextAlign::Right));
         assert_eq!(TextAlign::Center.as_str(), "center");
         assert!(TextAlign::parse("justify").is_none());
+    }
+
+    #[test]
+    fn font_weight_parse_roundtrip() {
+        assert_eq!(FontWeight::parse("bold"), Some(FontWeight::Bold));
+        assert_eq!(FontWeight::parse("700"), Some(FontWeight::Bold));
+        assert_eq!(FontWeight::parse("regular"), Some(FontWeight::Regular));
+        assert_eq!(FontWeight::parse("400"), Some(FontWeight::Regular));
+        assert_eq!(FontWeight::Bold.css_weight(), 700);
+        assert_eq!(FontWeight::Regular.as_str(), "regular");
+        assert!(FontWeight::parse("semibold").is_none());
     }
 
     #[test]

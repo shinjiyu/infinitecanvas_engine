@@ -27,7 +27,7 @@ pub use rect::Rectangle;
 pub use shadow::DropShadow;
 pub use text::{
     estimate_size, lod_bucket, lod_scale, padding_world, raster_params, raster_texture_id,
-    RasterParams, Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
+    FontWeight, RasterParams, Text, TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };
 
 use crate::blend::BlendMode;

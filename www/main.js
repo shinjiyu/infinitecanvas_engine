@@ -1620,12 +1620,22 @@ function syncPropertyPanel(engine) {
     false,
     style.textColorSupported,
   );
+  syncChoice('prop-text-align', style.textAlign, style.textAlignMixed);
+  syncChoice('prop-font-weight', style.fontWeight, style.fontWeightMixed);
+  const textAlignMixed = document.getElementById('prop-text-align-mixed');
+  if (textAlignMixed) textAlignMixed.hidden = !style.textAlignMixed;
+  const fontWeightMixed = document.getElementById('prop-font-weight-mixed');
+  if (fontWeightMixed) fontWeightMixed.hidden = !style.fontWeightMixed;
 
   const lineStyle = document.getElementById('prop-line-style');
   if (lineStyle) lineStyle.hidden = !style.hasShape;
   syncDash(style);
   syncChoice('prop-stroke-cap', style.strokeCap, style.strokeCapMixed);
   syncChoice('prop-stroke-join', style.strokeJoin, style.strokeJoinMixed);
+  const markers = document.getElementById('prop-line-markers');
+  if (markers) markers.hidden = !style.hasLine;
+  syncChoice('prop-start-marker', style.startMarker, style.startMarkerMixed);
+  syncChoice('prop-end-marker', style.endMarker, style.endMarkerMixed);
 }
 
 /**
@@ -1930,7 +1940,11 @@ function bindPropertyPanel(engine) {
   });
   bindChoice('prop-stroke-cap', 'strokeCap', (value) => value);
   bindChoice('prop-stroke-join', 'strokeJoin', (value) => value);
+  bindChoice('prop-start-marker', 'startMarker', (value) => value);
+  bindChoice('prop-end-marker', 'endMarker', (value) => value);
   bindChoice('prop-blend-mode', 'blendMode', (value) => value);
+  bindChoice('prop-text-align', 'textAlign', (value) => value);
+  bindChoice('prop-font-weight', 'fontWeight', (value) => value);
   bindGradient(engine);
 }
 
@@ -3158,6 +3172,8 @@ function openTextEditor(engine, info) {
   node.style.color = info.color || '#f4f7fb';
   node.style.fontFamily = info.fontFamily || 'sans-serif';
   node.style.textAlign = info.align || 'left';
+  const weight = String(info.fontWeight || 'regular').toLowerCase();
+  node.style.fontWeight = weight === 'bold' || weight === '700' ? '700' : '400';
   placeTextEditor(info);
   engine.set_text_editing(info.id, true);
   node.focus();
