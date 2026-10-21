@@ -258,9 +258,9 @@ pub struct Scene {
     ///
     /// 小地图用它判断缩略图要不要重画。不参与 [`PartialEq`]，也不写入 JSON。
     geometry_epoch: u64,
-    /// 元素自己的 `visible` 或 `locked` 发生变化时递增。
+    /// 元素自己的 `visible`、`locked` 或显示名称发生变化时递增。
     ///
-    /// 图层面板用它重读眼睛和锁。不推进 [`Self::structure_epoch`]，顶点缓存不会因此整表重排。
+    /// 图层面板用它重读眼睛、锁和名称。不推进 [`Self::structure_epoch`]，顶点缓存不会因此整表重排。
     /// 不参与 [`PartialEq`]，也不写入 JSON。
     flags_epoch: u64,
     /// 图片像素。同一张图多次使用只存一份。
@@ -368,7 +368,7 @@ impl Scene {
         self.selection_epoch = self.selection_epoch.wrapping_add(1);
     }
 
-    /// 可见性或锁定的版本。只有标志真正变化时递增。
+    /// 可见性、锁定或显示名称的版本。只有这些字段真正变化时递增。
     pub fn flags_epoch(&self) -> u64 {
         self.flags_epoch
     }
@@ -1369,6 +1369,79 @@ impl Scene {
         true
     }
 
+    /// 当前用于大纲显示的名称。
+    ///
+    /// 优先 [`ElementProps::name`]；为空时画板回退到 [`crate::Frame::name`]，其它类型返回空串。
+    /// 元素不存在时返回 `None`。
+    pub fn element_name(&self, id: ElementId) -> Option<String> {
+        let element = self.elements.get(&id)?;
+        Some(Self::display_name_of(element))
+    }
+
+    /// 写入显示名称。元素不存在时返回 `false`。
+    ///
+    /// - 非空：写入 [`ElementProps::name`]；画板同时同步 [`crate::Frame::name`]
+    /// - 空串：清空 `props.name`；画板把 `Frame::name` 恢复为缺省 `"Frame"`
+    ///
+    /// 不检查锁定：命令的撤销/重做也走这里。交互入口（[`crate::apply_rename_element`]）自行跳过锁定目标。
+    /// 相对当前存储值没有变化时返回 `false`。成功时推进 [`Self::flags_epoch`]，并 [`Self::mark_dirty`]。
+    pub fn set_name(&mut self, id: ElementId, name: &str) -> bool {
+        if !self.elements.contains_key(&id) {
+            return false;
+        }
+        let trimmed = name.trim();
+        let want_props = if trimmed.is_empty() {
+            String::new()
+        } else {
+            trimmed.to_string()
+        };
+        let want_frame = if trimmed.is_empty() {
+            "Frame".to_string()
+        } else {
+            trimmed.to_string()
+        };
+
+        let (props_before, frame_before) = match self.elements.get(&id) {
+            Some(AnyElement::Frame(frame)) => (frame.props.name.clone(), Some(frame.name.clone())),
+            Some(other) => (other.as_element().props().name.clone(), None),
+            None => return false,
+        };
+        let unchanged = props_before == want_props
+            && match frame_before {
+                Some(before) => before == want_frame,
+                None => true,
+            };
+        if unchanged {
+            return false;
+        }
+
+        if let Some(element) = self.elements.get_mut(&id) {
+            match element {
+                AnyElement::Frame(frame) => {
+                    frame.props.name = want_props;
+                    frame.name = want_frame;
+                }
+                other => {
+                    other.as_element_mut().props_mut().name = want_props;
+                }
+            }
+        }
+        self.bump_flags_epoch();
+        self.mark_dirty(id);
+        true
+    }
+
+    fn display_name_of(element: &AnyElement) -> String {
+        let props_name = element.as_element().props().name.trim();
+        if !props_name.is_empty() {
+            return element.as_element().props().name.clone();
+        }
+        match element {
+            AnyElement::Frame(frame) => frame.name.clone(),
+            _ => String::new(),
+        }
+    }
+
     /// 导出大纲面板用的场景树：根 → 组 → 叶子，带可见性和锁定。
     pub fn scene_tree(&self) -> SceneTree {
         let mut roots: Vec<ElementId> = self
@@ -2056,10 +2129,11 @@ impl Scene {
         }
         let props = self.elements.get(&id)?.as_element().props().clone();
         let element_type = self.elements.get(&id)?.as_element().type_name().to_string();
-        let name = match self.elements.get(&id) {
-            Some(AnyElement::Frame(frame)) => frame.name.clone(),
-            _ => String::new(),
-        };
+        let name = self
+            .elements
+            .get(&id)
+            .map(Self::display_name_of)
+            .unwrap_or_default();
         let parent_id = props.parent;
         let visible = props.visible;
         let locked = props.locked;
@@ -2379,6 +2453,7 @@ mod tests {
         assert_eq!(props.id, 4);
         assert!(props.parent.is_none());
         assert!(!props.locked);
+        assert!(props.name.is_empty());
         assert_eq!(props.z_index, 3);
     }
 

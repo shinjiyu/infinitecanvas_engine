@@ -637,6 +637,8 @@ impl Command for AddElementCommand {
 }
 
 /// 重命名画板。名称没变或目标不是画板时不要入栈。
+///
+/// 与 [`RenameElementCommand`] 共用 [`Scene::set_name`]，同时写入 `Frame::name` 与 `props.name`。
 #[derive(Debug)]
 pub struct RenameFrameCommand {
     id: ElementId,
@@ -649,22 +651,15 @@ impl RenameFrameCommand {
     pub fn applied(id: ElementId, before: String, after: String) -> Self {
         Self { id, before, after }
     }
-
-    fn write(scene: &mut Scene, id: ElementId, name: &str) {
-        if let Some(AnyElement::Frame(frame)) = scene.get_mut(id) {
-            frame.name = name.to_string();
-            scene.mark_dirty(id);
-        }
-    }
 }
 
 impl Command for RenameFrameCommand {
     fn execute(&mut self, scene: &mut Scene) {
-        Self::write(scene, self.id, &self.after);
+        let _ = scene.set_name(self.id, &self.after);
     }
 
     fn undo(&mut self, scene: &mut Scene) {
-        Self::write(scene, self.id, &self.before);
+        let _ = scene.set_name(self.id, &self.before);
     }
 
     fn name(&self) -> &'static str {
@@ -674,23 +669,88 @@ impl Command for RenameFrameCommand {
 
 /// 把名称写到画板。空操作（不是画板，或名称相同）返回 false，不入栈。
 ///
-/// 成功时 [`Scene::mark_dirty`]。
+/// 成功时 [`Scene::set_name`]（推进 flags epoch 并 mark_dirty）。
 pub fn apply_rename_frame(
     history: &mut CommandHistory,
     scene: &mut Scene,
     id: ElementId,
     name: &str,
 ) -> bool {
-    let Some(AnyElement::Frame(frame)) = scene.get(id) else {
+    let Some(AnyElement::Frame(_)) = scene.get(id) else {
         return false;
     };
-    if frame.name == name {
+    if scene.is_effectively_locked(id) {
         return false;
     }
-    let before = frame.name.clone();
-    let after = name.to_string();
-    RenameFrameCommand::write(scene, id, &after);
+    let before = scene.element_name(id).unwrap_or_default();
+    let after = name.trim().to_string();
+    if after.is_empty() || before == after {
+        return false;
+    }
+    if !scene.set_name(id, &after) {
+        return false;
+    }
     history.push_executed(Box::new(RenameFrameCommand::applied(id, before, after)));
+    true
+}
+
+/// 重命名任意元素。锁定、不存在、或名称未变时不要入栈。
+///
+/// 多选由调用方决定：图层面板按行改单个 id；属性面板仅单选时启用。
+#[derive(Debug)]
+pub struct RenameElementCommand {
+    id: ElementId,
+    before: String,
+    after: String,
+}
+
+impl RenameElementCommand {
+    /// 记录一次已经写进场景的改名，配合 [`CommandHistory::push_executed`]。
+    pub fn applied(id: ElementId, before: String, after: String) -> Self {
+        Self { id, before, after }
+    }
+}
+
+impl Command for RenameElementCommand {
+    fn execute(&mut self, scene: &mut Scene) {
+        let _ = scene.set_name(self.id, &self.after);
+    }
+
+    fn undo(&mut self, scene: &mut Scene) {
+        let _ = scene.set_name(self.id, &self.before);
+    }
+
+    fn name(&self) -> &'static str {
+        "RenameElement"
+    }
+}
+
+/// 写入元素显示名称。空选（调用方应先检查）、锁定、不存在或未变化时返回 false，不入栈。
+///
+/// `name` 两端空白会被去掉；空串表示清除自定义名（UI 回退到类型默认名；画板恢复 `"Frame"`）。
+pub fn apply_rename_element(
+    history: &mut CommandHistory,
+    scene: &mut Scene,
+    id: ElementId,
+    name: &str,
+) -> bool {
+    if !scene.contains(id) || scene.is_effectively_locked(id) {
+        return false;
+    }
+    let before = scene.element_name(id).unwrap_or_default();
+    let trimmed = name.trim();
+    // Compare display names so Frame default `Frame` (props empty) does not spuriously stack.
+    if before == trimmed {
+        return false;
+    }
+    if !scene.set_name(id, trimmed) {
+        return false;
+    }
+    history.push_executed(Box::new(RenameElementCommand::applied(
+        id,
+        before,
+        trimmed.to_string(),
+    )));
     true
 }
 
@@ -1873,7 +1933,7 @@ fn has_selected_ancestor(scene: &Scene, id: ElementId, selected: &HashSet<Elemen
 mod tests {
     use super::*;
     use crate::SelectionManager;
-    use crate::{element::Rectangle, math::Vec2};
+    use crate::{element::Frame, element::Rectangle, math::Vec2};
 
     #[test]
     fn test_move_command() {
@@ -2931,5 +2991,86 @@ mod tests {
         assert!(visible_of(&scene, 1));
         assert!(history.undo(&mut scene));
         assert!(scene.is_effectively_locked(group_id));
+    }
+
+    #[test]
+    fn rename_element_round_trips_and_skips_locked_or_unchanged() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0)));
+        let mut history = CommandHistory::new();
+        let flags = scene.flags_epoch();
+
+        assert!(apply_rename_element(&mut history, &mut scene, 1, " 标题 "));
+        assert_eq!(scene.element_name(1).as_deref(), Some("标题"));
+        assert_eq!(scene.get(1).unwrap().as_element().props().name, "标题");
+        assert!(scene.flags_epoch() > flags);
+        let tree_name = scene.scene_tree().roots[0].name.clone();
+        assert_eq!(tree_name, "标题");
+
+        assert!(!apply_rename_element(&mut history, &mut scene, 1, "标题"));
+        assert_eq!(history.undo_count(), 1);
+
+        assert!(history.undo(&mut scene));
+        assert_eq!(scene.element_name(1).as_deref(), Some(""));
+        assert!(scene.get(1).unwrap().as_element().props().name.is_empty());
+
+        assert!(history.redo(&mut scene));
+        assert_eq!(scene.element_name(1).as_deref(), Some("标题"));
+
+        scene.set_locked(1, true);
+        assert!(!apply_rename_element(&mut history, &mut scene, 1, "别的"));
+        assert_eq!(scene.element_name(1).as_deref(), Some("标题"));
+
+        assert!(!apply_rename_element(&mut history, &mut scene, 99, "幽灵"));
+    }
+
+    #[test]
+    fn rename_element_clears_to_type_default_and_json_round_trips() {
+        let mut scene = Scene::new();
+        scene.add_rect(Rectangle::new(1, Vec2::ZERO, Vec2::new(8.0, 8.0)));
+        scene.add_frame(
+            Frame::new(2, Vec2::new(40.0, 0.0), Vec2::new(20.0, 20.0)).with_name("封面"),
+        );
+        let mut history = CommandHistory::new();
+
+        assert!(apply_rename_element(&mut history, &mut scene, 1, "矩形甲"));
+        assert!(apply_rename_element(&mut history, &mut scene, 1, ""));
+        assert_eq!(scene.element_name(1).as_deref(), Some(""));
+        assert!(scene.get(1).unwrap().as_element().props().name.is_empty());
+
+        assert!(apply_rename_element(&mut history, &mut scene, 2, "内页"));
+        assert_eq!(scene.element_name(2).as_deref(), Some("内页"));
+        match scene.get(2) {
+            Some(AnyElement::Frame(frame)) => {
+                assert_eq!(frame.name, "内页");
+                assert_eq!(frame.props.name, "内页");
+            }
+            _ => panic!("expected frame"),
+        }
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"name\":\"内页\""));
+        let restored = Scene::from_json(&json).unwrap();
+        assert_eq!(restored.element_name(2).as_deref(), Some("内页"));
+        assert_eq!(restored.element_name(1).as_deref(), Some(""));
+
+        // Old props JSON without name still loads.
+        let props: crate::element::ElementProps = serde_json::from_str(
+            r#"{"id":9,"transform":{"translation":[0.0,0.0],"rotation":0.0,"scale":[1.0,1.0]},"visible":true,"selected":false,"z_index":0}"#,
+        )
+        .unwrap();
+        assert!(props.name.is_empty());
+    }
+
+    #[test]
+    fn rename_frame_helper_still_works_via_set_name() {
+        let mut scene = Scene::new();
+        scene.add_frame(Frame::new(1, Vec2::ZERO, Vec2::new(10.0, 10.0)).with_name("A"));
+        let mut history = CommandHistory::new();
+        assert!(apply_rename_frame(&mut history, &mut scene, 1, "B"));
+        assert_eq!(scene.element_name(1).as_deref(), Some("B"));
+        assert!(history.undo(&mut scene));
+        assert_eq!(scene.element_name(1).as_deref(), Some("A"));
+        assert!(!apply_rename_frame(&mut history, &mut scene, 1, ""));
     }
 }

@@ -6,6 +6,8 @@ import {
   groupSelected,
   idKey,
   indexTree,
+  renameDraft,
+  rowLabel,
   ungroupSelected,
   visibleRange,
 } from './layer-panel.js';
@@ -156,4 +158,23 @@ test('virtual window stays small for ten thousand rows', () => {
   assert.ok(mid.end - mid.start < 40);
   assert.ok(mid.start > 100);
   assert.ok(mid.end < 10_000);
+});
+
+
+test('named elements show custom names; empty falls back to type + id', () => {
+  assert.equal(rowLabel({ elementType: 'Rectangle', name: '背景' }, '3'), '背景');
+  assert.equal(rowLabel({ elementType: 'Rectangle', name: '' }, '3'), '矩形 3');
+  assert.equal(rowLabel({ elementType: 'Frame', name: '封面' }, '7'), '封面');
+  assert.equal(rowLabel({ elementType: 'Frame', name: '' }, '7'), '画板 7');
+  assert.equal(renameDraft({ name: '背景', label: '背景' }), '背景');
+  assert.equal(renameDraft({ name: '', label: '矩形 3' }), '矩形 3');
+});
+
+test('flatten carries name onto rows for rename', () => {
+  const roots = [
+    { id: 1, elementType: 'Rectangle', name: '甲', visible: true, locked: false, children: [] },
+  ];
+  const rows = flattenTree(roots, new Set());
+  assert.equal(rows[0].name, '甲');
+  assert.equal(rows[0].label, '甲');
 });

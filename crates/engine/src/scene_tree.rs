@@ -35,7 +35,8 @@ pub struct SceneTreeNode {
     pub id: ElementId,
     /// 与 [`crate::Element::type_name`] 相同，例如 `"Rectangle"`、`"Group"`、`"Frame"`。
     pub element_type: String,
-    /// 画板名称。其它元素为空字符串。旧快照可以省略。
+    /// 显示名称。优先 `ElementProps::name`；否则画板用 `Frame::name`；其它未命名元素为空串。
+    /// 旧快照可以省略。
     #[serde(default)]
     pub name: String,
     /// 父元素。根节点为 `None`。

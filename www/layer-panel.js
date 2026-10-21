@@ -5,6 +5,8 @@
  * 点击行选中画布元素，锁定的行也可以选中，但不能拖拽。画布选中反向高亮。
  * 拖拽改兄弟顺序或移入/移出组，走 `reorder_element`（Command，可撤销）。
  * 眼睛和锁调用 `set_element_visible` / `set_element_locked`，和快捷键同一条可撤销命令。
+ * 双击名称内联重命名：Enter 提交、Esc 取消；走 `rename_element`（可撤销）。
+ * 多选时仍可双击某一行改该行；属性面板仅单选时编辑。
  *
  * 兄弟列表在引擎里从后往前（下标 0 是最底层）。面板把每一层反过来画，
  * 最上面的一行是最前面的元素。
@@ -49,17 +51,34 @@ function isContainerType(elementType) {
 }
 
 /**
- * 画板显示名称。其它元素显示类型和 id。
+ * 有自定义名称时显示名称；否则显示类型默认名 + id。
+ * 画板未清空前引擎会带上 Frame::name（缺省 "Frame"）。
  *
  * @param {{ elementType?: string, name?: string }} node
  * @param {string} id
  * @returns {string}
  */
-function rowLabel(node, id) {
+export function rowLabel(node, id) {
   const name = typeof node.name === 'string' ? node.name.trim() : '';
-  if (node.elementType === 'Frame' && name) return name;
-  const type = TYPE_LABELS[node.elementType] || node.elementType;
+  if (name) return name;
+  const type = TYPE_LABELS[node.elementType] || node.elementType || '元素';
   return `${type} ${id}`;
+}
+
+/**
+ * 内联编辑时的初始文本：自定义名，或当前行上显示的类型默认标签。
+ *
+ * @param {object} row flattenTree 行
+ * @returns {string}
+ */
+export function renameDraft(row) {
+  if (!row) return '';
+  const node = row;
+  const name = typeof node.name === 'string' ? node.name.trim() : '';
+  if (name) return name;
+  // flatten 行把 label 已经算好；编辑框用当前可见文案更直观
+  if (typeof row.label === 'string' && row.label.trim()) return row.label.trim();
+  return '';
 }
 
 /**
@@ -131,6 +150,7 @@ export function flattenTree(roots, collapsed) {
         rawParentId,
         depth,
         elementType: node.elementType,
+        name: typeof node.name === 'string' ? node.name : '',
         visible: node.visible !== false,
         locked: Boolean(node.locked),
         ancestorLocked: Boolean(ancestorLocked),
@@ -373,6 +393,8 @@ export function attachLayerPanel(engine, hooks = {}) {
   let selectionFromPanel = false;
   /** @type {{ id: string, pointerId: number, startX: number, startY: number, active: boolean } | null} */
   let drag = null;
+  /** @type {{ id: string, input: HTMLInputElement } | null} */
+  let renaming = null;
 
   const panel = {
     /**
@@ -432,6 +454,8 @@ export function attachLayerPanel(engine, hooks = {}) {
   viewport.addEventListener('pointerdown', (event) => {
     if (!(event instanceof PointerEvent) || event.button !== 0) return;
     if (event.target instanceof Element && event.target.closest('button')) return;
+    if (event.target instanceof HTMLInputElement) return;
+    if (renaming) cancelRename(true);
     const rowEl = event.target instanceof Element ? event.target.closest('.layer-row') : null;
     if (!(rowEl instanceof HTMLElement)) return;
     const index = Number(rowEl.dataset.index);
@@ -531,6 +555,83 @@ export function attachLayerPanel(engine, hooks = {}) {
       panel.sync(true);
     }
   });
+
+  viewport.addEventListener('dblclick', (event) => {
+    if (!(event instanceof MouseEvent)) return;
+    if (event.target instanceof Element && event.target.closest('button')) return;
+    if (event.target instanceof HTMLInputElement) return;
+    const rowEl = event.target instanceof Element ? event.target.closest('.layer-row') : null;
+    if (!(rowEl instanceof HTMLElement)) return;
+    const row = rows[Number(rowEl.dataset.index)];
+    if (!row || row.locked || row.ancestorLocked) return;
+    event.preventDefault();
+    event.stopPropagation();
+    beginRename(row, rowEl);
+  });
+
+  /**
+   * @param {object} row
+   * @param {HTMLElement} rowEl
+   */
+  function beginRename(row, rowEl) {
+    if (typeof engine.rename_element !== 'function') return;
+    cancelRename(false);
+    const label = rowEl.querySelector('.label');
+    if (!(label instanceof HTMLElement)) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'layer-rename';
+    input.value = renameDraft(row);
+    input.setAttribute('aria-label', '重命名');
+    label.replaceChildren(input);
+    renaming = { id: row.id, input };
+    input.focus();
+    input.select();
+    input.addEventListener('keydown', (event) => {
+      if (!(event instanceof KeyboardEvent)) return;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        commitRename(row);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        cancelRename(true);
+      }
+    });
+    input.addEventListener('blur', () => {
+      if (!renaming || renaming.input !== input) return;
+      commitRename(row);
+    });
+  }
+
+  /**
+   * @param {object} row
+   */
+  function commitRename(row) {
+    if (!renaming || renaming.id !== row.id) return;
+    const next = renaming.input.value;
+    renaming = null;
+    if (typeof engine.rename_element !== 'function') {
+      panel.sync(true);
+      return;
+    }
+    const changed = engine.rename_element(wasmId(row.rawId), next);
+    if (changed) {
+      onEdit();
+      setStatus('已重命名');
+    }
+    panel.sync(true);
+  }
+
+  /**
+   * @param {boolean} repaint
+   */
+  function cancelRename(repaint) {
+    if (!renaming) return;
+    renaming = null;
+    if (repaint) panel.sync(true);
+  }
 
   /**
    * @returns {Array<bigint | number>}
@@ -650,7 +751,13 @@ export function attachLayerPanel(engine, hooks = {}) {
       twist.textContent = collapsed.has(row.id) ? '▸' : '▾';
       twist.setAttribute('aria-label', collapsed.has(row.id) ? '展开' : '折叠');
     }
-    if (label) label.textContent = row.label;
+    if (label) {
+      if (renaming && renaming.id === row.id && label.contains(renaming.input)) {
+        // keep the active input
+      } else {
+        label.textContent = row.label;
+      }
+    }
     if (eye instanceof HTMLButtonElement) {
       eye.textContent = row.visible ? '●' : '○';
       eye.setAttribute('aria-label', row.visible ? '隐藏' : '显示');

@@ -1918,7 +1918,8 @@ function bindOrientControls(engine) {
 }
 
 /**
- * 只选中一张画板时显示名称。改完名称记一条撤销。
+ * 单选时显示可编辑名称；多选或空选隐藏。
+ * 优先 `element_name`；旧构建回退到画板 `frame_name`。
  *
  * @param {WasmCanvas} engine
  */
@@ -1928,9 +1929,14 @@ function syncFrameName(engine) {
   if (!row || !(input instanceof HTMLInputElement)) return;
   const ids = typeof engine.get_selected_ids === 'function' ? Array.from(engine.get_selected_ids()) : [];
   let name = null;
-  if (ids.length === 1 && typeof engine.frame_name === 'function') {
-    const value = engine.frame_name(ids[0]);
-    if (typeof value === 'string') name = value;
+  if (ids.length === 1) {
+    if (typeof engine.element_name === 'function') {
+      const value = engine.element_name(ids[0]);
+      if (typeof value === 'string') name = value;
+    } else if (typeof engine.frame_name === 'function') {
+      const value = engine.frame_name(ids[0]);
+      if (typeof value === 'string') name = value;
+    }
   }
   row.hidden = name == null;
   if (name != null && document.activeElement !== input) input.value = name;
@@ -1989,15 +1995,26 @@ function bindPropertyPanel(engine) {
     const input = event.currentTarget;
     if (!(input instanceof HTMLInputElement)) return;
     const ids = Array.from(engine.get_selected_ids?.() || []);
-    if (ids.length !== 1 || typeof engine.rename_frame !== 'function') return;
-    const next = input.value.trim();
-    if (!next) {
-      syncFrameName(engine);
+    // Multi-select: property panel does not batch-rename (single only).
+    if (ids.length !== 1) return;
+    const next = input.value;
+    let changed = false;
+    if (typeof engine.rename_element === 'function') {
+      changed = engine.rename_element(ids[0], next);
+    } else if (typeof engine.rename_frame === 'function') {
+      const trimmed = next.trim();
+      if (!trimmed) {
+        syncFrameName(engine);
+        return;
+      }
+      changed = engine.rename_frame(ids[0], trimmed);
+    } else {
       return;
     }
-    if (engine.rename_frame(ids[0], next)) {
+    if (changed) {
       scheduleAutosave(engine);
-      setStatus('已重命名画板');
+      setStatus('已重命名');
+      layerPanel?.sync(true);
     }
     syncPropertyPanel(engine);
   });
