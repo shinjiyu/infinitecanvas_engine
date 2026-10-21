@@ -44,6 +44,7 @@ pub mod svg;
 pub mod svg_import;
 pub mod tool;
 pub mod transform_handles;
+pub mod transform_numeric;
 pub mod vertex_cache;
 pub mod viewport;
 
@@ -121,6 +122,9 @@ pub use style::{
 pub use svg::{export_frame_svg, export_svg, export_svg_with_guides};
 pub use svg_import::{apply_svg_import, import_svg, ImportSvgCommand, SvgImportError};
 pub use tool::{Tool, ToolManager};
+pub use transform_numeric::{
+    apply_selection_transform, selection_transform, SelectionTransform, TransformNumericPatch,
+};
 pub use vertex_cache::{
     rebuild_all_vertices, GpuVertexWrite, PaintSpan, RebuiltGeometry, TexturedDraw,
     VertexBufferKind, VertexCache, VertexSync,

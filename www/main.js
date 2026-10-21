@@ -1538,6 +1538,103 @@ function syncRange(id, labelId, value, mixed, format) {
 }
 
 /**
+ * 同步 X/Y/W/H/旋转。X/Y 是本地原点世界坐标；W/H 与选中框尺寸一致；
+ * 旋转与旋转手柄同一字段（度）。多选不一致时输入框留空。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncTransform(engine) {
+  const block = document.getElementById('prop-transform');
+  if (!block || typeof engine.get_selection_transform !== 'function') return;
+  const t = engine.get_selection_transform();
+  const supported = Boolean(t && t.supported);
+  block.hidden = !supported;
+  if (!supported || !t) return;
+  syncTransformNumber('prop-x', t.x, t.xMixed, true);
+  syncTransformNumber('prop-y', t.y, t.yMixed, true);
+  const sizeOk = Boolean(t.sizeSupported);
+  syncTransformNumber('prop-w', t.width, t.widthMixed, sizeOk);
+  syncTransformNumber('prop-h', t.height, t.heightMixed, sizeOk);
+  syncTransformNumber('prop-rotation', t.rotation, t.rotationMixed, true);
+}
+
+/**
+ * @param {string} id
+ * @param {unknown} value
+ * @param {unknown} mixed
+ * @param {boolean} enabled
+ */
+function syncTransformNumber(id, value, mixed, enabled) {
+  const mixedEl = document.getElementById(`${id}-mixed`);
+  if (mixedEl) mixedEl.hidden = !mixed;
+  const input = document.getElementById(id);
+  if (!(input instanceof HTMLInputElement)) return;
+  input.disabled = !enabled;
+  if (activeStyleControl === id) return;
+  if (mixed || typeof value !== 'number' || !Number.isFinite(value)) {
+    input.value = '';
+    return;
+  }
+  const rounded = Math.round(value * 1000) / 1000;
+  input.value = String(rounded);
+}
+
+/**
+ * Enter / blur 提交一条可撤销变换。非法输入拒绝且不推历史，并恢复面板。
+ *
+ * @param {WasmCanvas} engine
+ */
+function bindTransform(engine) {
+  if (typeof engine.set_selection_transform !== 'function') return;
+  /** @type {Array<[string, string]>} */
+  const fields = [
+    ['prop-x', 'x'],
+    ['prop-y', 'y'],
+    ['prop-w', 'width'],
+    ['prop-h', 'height'],
+    ['prop-rotation', 'rotation'],
+  ];
+  for (const [id, key] of fields) {
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement)) continue;
+    input.addEventListener('focus', () => {
+      activeStyleControl = id;
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+    });
+    input.addEventListener('change', () => {
+      activeStyleControl = null;
+      const raw = input.value.trim();
+      if (raw === '') {
+        syncTransform(engine);
+        return;
+      }
+      const value = Number(raw);
+      if (!Number.isFinite(value)) {
+        syncTransform(engine);
+        return;
+      }
+      if ((key === 'width' || key === 'height') && value <= 0) {
+        syncTransform(engine);
+        return;
+      }
+      if (engine.set_selection_transform({ [key]: value })) {
+        scheduleAutosave(engine);
+        setStatus('已更新变换');
+      }
+      syncTransform(engine);
+    });
+    input.addEventListener('blur', () => {
+      if (activeStyleControl === id) activeStyleControl = null;
+    });
+  }
+}
+
+/**
  * 按当前选择显示或隐藏属性面板，并把公共样式填进控件。
  * 多选不一致时标成「多种」，下一次编辑会写到全部选中元素。
  * 只选中图片时留下不透明度、图层模糊、投影、混合模式和裁剪；填充和描边仍只出现在形状或文本上。
@@ -1554,6 +1651,7 @@ function syncPropertyPanel(engine) {
 
   setText('prop-count', style.count ?? 0);
   syncFrameName(engine);
+  syncTransform(engine);
   const fillRow = document.getElementById('prop-fill-row');
   if (fillRow) fillRow.hidden = !style.hasShape;
   const strokeRow = document.getElementById('prop-stroke-row');
@@ -1875,6 +1973,7 @@ function bindPropertyPanel(engine) {
   };
   bindRange('prop-stroke-width', 'strokeWidth', 'prop-stroke-width-label', (value) => String(value));
   bindRange('prop-opacity', 'opacity', 'prop-opacity-label', (value) => `${Math.round(value * 100)}%`);
+  bindTransform(engine);
   bindCornerRadius(engine);
   bindPolygonFields(engine);
   bindLayerBlur(engine);

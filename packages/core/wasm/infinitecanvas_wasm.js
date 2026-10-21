@@ -1179,6 +1179,27 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 读取当前选择的变换数值。
+     *
+     * - `supported`：有未锁定的选中根
+     * - `sizeSupported`：选择里有非直线目标，可改 W/H
+     * - `x` / `y`：本地原点世界坐标（`transform.translation`）
+     * - `width` / `height`：世界尺寸 `|local| * |scale|`；直线不参与
+     * - `rotation`：旋转角度（度），与旋转手柄同一字段
+     * - 多选不一致时对应 `*Mixed` 为 true，数值为 null
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * const t = canvas.get_selection_transform();
+     * if (t.supported && !t.xMixed) xInput.value = t.x;
+     * ```
+     * @returns {any}
+     */
+    get_selection_transform() {
+        const ret = wasm.infinitecanvas_get_selection_transform(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 当前吸附阈值（屏幕像素）。
      * @returns {number}
      */
@@ -2067,6 +2088,25 @@ export class InfiniteCanvas {
      */
     set_selection_style(patch) {
         const ret = wasm.infinitecanvas_set_selection_style(this.__wbg_ptr, patch);
+        return ret !== 0;
+    }
+    /**
+     * 把变换补丁写进当前选择并记一条撤销记录。
+     *
+     * 对象里出现的 `x` / `y` / `width`（或 `w`）/ `height`（或 `h`）/ `rotation`
+     * （或 `rotationDeg` / `rotation_deg`）才会修改。宽高必须为正有限数。
+     * 直线忽略宽高。多选时每个根写入同一绝对值。
+     * 空选、锁定、非法输入或没有变化时返回 false，不入栈。
+     *
+     * # 示例（JavaScript）
+     * ```js
+     * canvas.set_selection_transform({ x: 100, rotation: 15 });
+     * ```
+     * @param {any} patch
+     * @returns {boolean}
+     */
+    set_selection_transform(patch) {
+        const ret = wasm.infinitecanvas_set_selection_transform(this.__wbg_ptr, patch);
         return ret !== 0;
     }
     /**
@@ -4137,7 +4177,7 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2908, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2912, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___wasm_bindgen_fe1d14e6b7d09dd3___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_fe1d14e6b7d09dd3___JsError___true_);
             return ret;
         },
