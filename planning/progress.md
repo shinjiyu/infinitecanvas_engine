@@ -24,6 +24,19 @@ PresenceState ── yrs Awareness ── MemoryProvider / overlay
                       └── 不进场景 JSON
 ```
 
+## Issue #110: Path 节点编辑（锚点/控制柄，可撤销）
+
+- [x] Engine：`PathPointHandles` / `stroke_polyline` / `path_edit`（命中、拖拽、`EditPathCommand`）；旧 Path JSON 无 `point_handles` 仍可读
+- [x] 单一 Path 节点模式：双击或面板按钮进入；拖拽更新几何 + `mark_dirty`；Esc / 点空白退出（与选择态协调）
+- [x] 空选/锁定/非 Path / 无变化不推历史
+- [x] WASM 光标反馈；无冲突快捷键
+- [x] PNG/SVG 走编辑后几何（展平折线）
+
+```text
+双击 / 面板 ── path_node_mode ── EditPath ── mark_dirty ── WebGPU / PNG / SVG
+```
+```
+
 ## 属性面板数值变换 (#111)
 
 - [x] Engine：`TransformNumericPatch` / `selection_transform` / `apply_selection_transform`，复用 `TransformElementsCommand`；空选/锁定/非法为 no-op；`mark_dirty`

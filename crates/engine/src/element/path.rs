@@ -22,6 +22,27 @@ use super::{Element, ElementId, ElementProps, ElementStyle, FillKind};
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 
+/// 自由画笔锚点上的可选三次贝塞尔控制柄。
+///
+/// 偏移相对锚点，单位是局部坐标。缺省或省略表示尖角（折线）。
+/// 旧 Path JSON 没有这个字段，反序列化后为空。
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct PathPointHandles {
+    /// 入向控制柄相对锚点的偏移。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hin: Option<Vec2>,
+    /// 出向控制柄相对锚点的偏移。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hout: Option<Vec2>,
+}
+
+impl PathPointHandles {
+    /// 两个柄都没有。
+    pub fn is_empty(self) -> bool {
+        self.hin.is_none() && self.hout.is_none()
+    }
+}
+
 /// 一条闭合环，局部坐标，不重复首点。
 ///
 /// JSON 缺省为空。布尔运算把外轮廓和孔都写成环。
@@ -67,6 +88,11 @@ pub struct Path {
     /// 闭合填充轮廓。空表示自由画笔。JSON 缺省为空，空时不写出。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shapes: Vec<FillShape>,
+    /// 与 `points` 对齐的可选贝塞尔控制柄。空表示全部尖角。
+    ///
+    /// 比 `points` 短时，缺少的下标视为无柄。旧文档省略本字段。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub point_handles: Vec<PathPointHandles>,
 }
 
 impl Path {
@@ -90,6 +116,7 @@ impl Path {
             points,
             style,
             shapes: Vec::new(),
+            point_handles: Vec::new(),
         }
     }
 
@@ -129,6 +156,26 @@ impl Path {
         &self.points
     }
 
+    /// 与 [`Self::points`] 对齐的控制柄。可能比点数短。
+    pub fn point_handles(&self) -> &[PathPointHandles] {
+        &self.point_handles
+    }
+
+    /// 是否带有任意贝塞尔控制柄。
+    pub fn has_curve_handles(&self) -> bool {
+        self.point_handles.iter().any(|handles| !handles.is_empty())
+    }
+
+    /// 描边用的局部折线。无控制柄时就是 `points`；有柄时把三次贝塞尔展平。
+    ///
+    /// 命中、渲染、SVG/PNG 都走这里，保证编辑后几何一致。
+    pub fn stroke_polyline(&self) -> Vec<Vec2> {
+        if !self.has_curve_handles() || self.points.len() < 2 {
+            return self.points.clone();
+        }
+        flatten_stroke_points(&self.points, &self.point_handles)
+    }
+
     /// 世界坐标处的导出颜色
     ///
     /// 点到折线的距离不超过半线宽时返回描边色。不含点选余量。
@@ -146,11 +193,12 @@ impl Path {
         if self.is_filled() {
             return self.filled_color_at(world);
         }
-        if self.points.is_empty() {
+        let poly = self.stroke_polyline();
+        if poly.is_empty() {
             return None;
         }
         let local = try_local(&self.props.transform, world)?;
-        if distance_to_polyline(local, &self.points) > self.stroke_width() * 0.5 {
+        if distance_to_polyline(local, &poly) > self.stroke_width() * 0.5 {
             return None;
         }
         let color = paint_color(&self.style);
@@ -173,7 +221,7 @@ impl Path {
                 distance
             }
         } else {
-            distance_to_polyline(local, &self.points) - self.stroke_width() * 0.5
+            distance_to_polyline(local, &self.stroke_polyline()) - self.stroke_width() * 0.5
         }
     }
 
@@ -197,7 +245,7 @@ impl Path {
             return vertices;
         }
         stroke_capsule_shadow(
-            &self.points,
+            &self.stroke_polyline(),
             self.stroke_width() * 0.5,
             self.style.shadow,
             self.style.opacity,
@@ -223,7 +271,7 @@ impl Path {
             return vertices;
         }
         stroke_capsule_inner_shadow(
-            &self.points,
+            &self.stroke_polyline(),
             self.stroke_width() * 0.5,
             self.style.inner_shadow,
             self.style.opacity,
@@ -308,9 +356,10 @@ impl Path {
             vertices.extend(self.shape_stroke_vertices());
             return vertices;
         }
+        let poly = self.stroke_polyline();
         if blur_active(self.style.blur_radius) {
             return gaussian_capsule_vertices(
-                &self.points,
+                &poly,
                 self.stroke_width() * 0.5,
                 paint_color(&self.style),
                 self.style.blur_radius,
@@ -318,7 +367,7 @@ impl Path {
             );
         }
         let vertices = stroke_styled(
-            &self.points,
+            &poly,
             StrokePaint {
                 width: self.stroke_width(),
                 color: paint_color(&self.style),
@@ -542,6 +591,57 @@ fn normal_sign_out_of_material(shape: &FillShape, ring: &[Vec2]) -> f32 {
     }
 }
 
+/// 把带可选控制柄的折线展成局部采样点。相邻锚点之间若任一侧有柄则按三次贝塞尔细分。
+fn flatten_stroke_points(points: &[Vec2], handles: &[PathPointHandles]) -> Vec<Vec2> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(points.len() * 4);
+    out.push(points[0]);
+    for i in 0..points.len().saturating_sub(1) {
+        let p0 = points[i];
+        let p3 = points[i + 1];
+        let hout = handles.get(i).and_then(|h| h.hout);
+        let hin = handles.get(i + 1).and_then(|h| h.hin);
+        match (hout, hin) {
+            (None, None) => {
+                push_distinct_local(&mut out, p3);
+            }
+            _ => {
+                let p1 = p0 + hout.unwrap_or(Vec2::ZERO);
+                let p2 = p3 + hin.unwrap_or(Vec2::ZERO);
+                flatten_cubic_local(p0, p1, p2, p3, &mut out);
+            }
+        }
+    }
+    out
+}
+
+fn flatten_cubic_local(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, out: &mut Vec<Vec2>) {
+    let length = (p0 - p1).length() + (p1 - p2).length() + (p2 - p3).length();
+    let steps = ((length / 2.0).ceil() as usize).clamp(4, 24);
+    for step in 1..=steps {
+        let t = step as f32 / steps as f32;
+        let u = 1.0 - t;
+        let point =
+            p0 * (u * u * u) + p1 * (3.0 * u * u * t) + p2 * (3.0 * u * t * t) + p3 * (t * t * t);
+        push_distinct_local(out, point);
+    }
+}
+
+fn push_distinct_local(points: &mut Vec<Vec2>, point: Vec2) {
+    if !point.x.is_finite() || !point.y.is_finite() {
+        return;
+    }
+    if points
+        .last()
+        .is_some_and(|last| (*last - point).length() <= 1.0e-4)
+    {
+        return;
+    }
+    points.push(point);
+}
+
 fn try_local(transform: &Transform, world: Vec2) -> Option<Vec2> {
     if !transform.scale.x.is_finite()
         || !transform.scale.y.is_finite()
@@ -578,7 +678,7 @@ impl Element for Path {
             return bounds_containing(&points, 0.0);
         }
         let pad = self.stroke_width() * 0.5 * MITER_LIMIT;
-        bounds_containing(&self.points, pad)
+        bounds_containing(&self.stroke_polyline(), pad)
     }
 
     fn type_name(&self) -> &'static str {
@@ -590,11 +690,12 @@ impl Element for Path {
             let local = self.props.transform.inverse_transform_point(point);
             return self.contains_local_fill(local) || self.filled_stroke_hit(local);
         }
-        if self.points.is_empty() {
+        let poly = self.stroke_polyline();
+        if poly.is_empty() {
             return false;
         }
         let local = self.props.transform.inverse_transform_point(point);
-        distance_to_polyline(local, &self.points) <= self.hit_radius()
+        distance_to_polyline(local, &poly) <= self.hit_radius()
     }
 }
 

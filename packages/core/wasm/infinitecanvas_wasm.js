@@ -401,6 +401,19 @@ export class InfiniteCanvas {
         return ret !== 0;
     }
     /**
+     * 在屏幕坐标处尝试进入节点编辑。
+     *
+     * 命中未锁定 Path 时选中它并打开节点模式，返回 true。
+     * 供双击使用；不占用工具快捷键。
+     * @param {number} x
+     * @param {number} y
+     * @returns {boolean}
+     */
+    begin_path_node_edit_at(x, y) {
+        const ret = wasm.infinitecanvas_begin_path_node_edit_at(this.__wbg_ptr, x, y);
+        return ret !== 0;
+    }
+    /**
      * 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
      *
      * # 参数
@@ -1054,6 +1067,14 @@ export class InfiniteCanvas {
         return ret;
     }
     /**
+     * 当前选中 Path 的节点列表（世界坐标），供调试或自定义 UI。
+     * @returns {any}
+     */
+    get_path_nodes() {
+        const ret = wasm.infinitecanvas_get_path_nodes(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * 获取性能统计信息
      *
      * # 返回
@@ -1699,6 +1720,30 @@ export class InfiniteCanvas {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * 当前选择是否可进入 Path 节点编辑（单一未锁定可见 Path）。
+     * @returns {boolean}
+     */
+    path_node_edit_supported() {
+        const ret = wasm.infinitecanvas_path_node_edit_supported(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 当前是否正在显示 Path 节点手柄。
+     * @returns {boolean}
+     */
+    path_node_handles_active() {
+        const ret = wasm.infinitecanvas_path_node_handles_active(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * 节点编辑模式是否打开。
+     * @returns {boolean}
+     */
+    path_node_mode() {
+        const ret = wasm.infinitecanvas_path_node_mode(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * 恢复到之前的工具
      */
     pop_temporary_tool() {
@@ -2083,6 +2128,16 @@ export class InfiniteCanvas {
     set_image_crop(patch) {
         const ret = wasm.infinitecanvas_set_image_crop(this.__wbg_ptr, patch);
         return ret !== 0;
+    }
+    /**
+     * 打开或关闭 Path 节点编辑。
+     *
+     * 只在选中单一未锁定可见 Path 时显示节点手柄，并隐藏包围盒缩放/旋转手柄。
+     * 关闭时提交未结束的拖动。没有新快捷键。
+     * @param {boolean} enabled
+     */
+    set_path_node_mode(enabled) {
+        wasm.infinitecanvas_set_path_node_mode(this.__wbg_ptr, enabled);
     }
     /**
      * 显示或隐藏标尺和手动参考线。
@@ -4248,12 +4303,12 @@ function __wbg_get_imports() {
             arg0.writeTexture(arg1, arg2, arg3, arg4);
         }, arguments); },
         __wbindgen_generic_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2919, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 2954, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___wasm_bindgen_fe1d14e6b7d09dd3___JsValue__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_fe1d14e6b7d09dd3___JsError___true_);
             return ret;
         },
         __wbindgen_generic_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 506, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 528, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_fe1d14e6b7d09dd3___convert__closures_____invoke___wasm_bindgen_fe1d14e6b7d09dd3___JsValue______true_);
             return ret;
         },

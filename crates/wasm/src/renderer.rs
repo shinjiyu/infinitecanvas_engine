@@ -5,6 +5,7 @@
 #[path = "blend_pass.rs"]
 mod blend_pass;
 
+use crate::path_edit_api::PathNodeChrome;
 use crate::texture_manager::TextureManager;
 use infinitecanvas_engine::{
     element::Element,
@@ -104,6 +105,8 @@ pub struct WebGPURenderer {
     cached_transform_frame: Option<SelectionFrame>,
     /// 裁剪模式的原图外框。窗口变化时覆盖层要重画。
     cached_crop_chrome: Option<CropChrome>,
+    /// Path 节点编辑覆盖层。
+    cached_path_node_chrome: Option<PathNodeChrome>,
     cached_selection_zoom: f32,
     last_stats: FrameRenderStats,
     uniform_buffer: wgpu::Buffer,
@@ -656,6 +659,7 @@ impl WebGPURenderer {
             selection_overlay_dirty: false,
             cached_transform_frame: None,
             cached_crop_chrome: None,
+            cached_path_node_chrome: None,
             cached_selection_zoom: f32::NAN,
             last_stats: FrameRenderStats::default(),
             uniform_buffer,
@@ -682,6 +686,7 @@ impl WebGPURenderer {
     /// - `transform_frame`: 选中框。有选中元素时带 8 个缩放手柄和 1 个旋转手柄
     /// - `grid_visible`: 为 false 时不画背景网格。网格顶点不计入场景几何是否变化
     /// - `crop_chrome`: 裁剪模式时藏起旋转手柄，并画出未裁区域的外框
+    /// - `path_node_chrome`: Path 节点编辑时画出锚点与控制柄
     pub fn render(
         &mut self,
         scene: &mut Scene,
@@ -690,6 +695,7 @@ impl WebGPURenderer {
         transform_frame: Option<SelectionFrame>,
         grid_visible: bool,
         crop_chrome: Option<CropChrome>,
+        path_node_chrome: Option<PathNodeChrome>,
     ) -> Result<(), JsValue> {
         let sync = self.vertex_cache.sync(scene);
         let selection_changed = self.sync_selection(
@@ -698,6 +704,7 @@ impl WebGPURenderer {
             transform_frame,
             viewport.zoom(),
             crop_chrome,
+            path_node_chrome,
         );
 
         let geometry_grew = self.ensure_geometry_capacity();
@@ -913,12 +920,14 @@ impl WebGPURenderer {
         transform_frame: Option<SelectionFrame>,
         zoom: f32,
         crop_chrome: Option<CropChrome>,
+        path_node_chrome: Option<PathNodeChrome>,
     ) -> bool {
         if !self.selection_overlay_dirty
             && self.cached_selection_epoch == scene.selection_epoch()
             && self.cached_selection_box == selection_box
             && self.cached_transform_frame == transform_frame
             && self.cached_crop_chrome == crop_chrome
+            && self.cached_path_node_chrome == path_node_chrome
             && self.cached_selection_zoom.to_bits() == zoom.to_bits()
         {
             return false;
@@ -930,6 +939,7 @@ impl WebGPURenderer {
             transform_frame,
             zoom,
             crop_chrome,
+            path_node_chrome.as_ref(),
         );
         self.selection_fill = fill;
         self.selection_stroke = stroke;
@@ -937,6 +947,7 @@ impl WebGPURenderer {
         self.cached_selection_box = selection_box;
         self.cached_transform_frame = transform_frame;
         self.cached_crop_chrome = crop_chrome;
+        self.cached_path_node_chrome = path_node_chrome;
         self.cached_selection_zoom = zoom;
         true
     }
@@ -1094,6 +1105,7 @@ impl WebGPURenderer {
         transform_frame: Option<SelectionFrame>,
         zoom: f32,
         crop_chrome: Option<CropChrome>,
+        path_node_chrome: Option<&PathNodeChrome>,
     ) -> (Vec<Vertex>, Vec<Vertex>) {
         let mut fill_vertices = Vec::new();
         let mut stroke_vertices = Vec::new();
@@ -1103,6 +1115,7 @@ impl WebGPURenderer {
         let selection_fill_color = [0.25, 0.55, 0.95, 0.15]; // 半透明蓝色填充
         let handle_fill = [1.0, 1.0, 1.0, 1.0];
         let crop_color = [0.95, 0.72, 0.25, 1.0];
+        let node_color = [0.20, 0.70, 0.55, 1.0];
         let hide_rotate = crop_chrome.is_some_and(|chrome| chrome.hide_rotate);
         let handle_stroke = if hide_rotate {
             crop_color
@@ -1154,6 +1167,35 @@ impl WebGPURenderer {
                         );
                     }
                 }
+            }
+        }
+
+        if let Some(chrome) = path_node_chrome {
+            let metrics = HandleMetrics::from_zoom(zoom);
+            let half = metrics.draw_half;
+            for node in &chrome.nodes {
+                if let Some(hin) = node.handle_in {
+                    push_segment(&mut stroke_vertices, node.anchor, hin, node_color);
+                    push_disc(&mut fill_vertices, hin, half * 0.85, node_color);
+                }
+                if let Some(hout) = node.handle_out {
+                    push_segment(&mut stroke_vertices, node.anchor, hout, node_color);
+                    push_disc(&mut fill_vertices, hout, half * 0.85, node_color);
+                }
+                push_handle_square(
+                    &mut fill_vertices,
+                    &mut stroke_vertices,
+                    // 节点方块不跟选中框旋转：用单位旋转的局部轴对齐世界轴
+                    SelectionFrame {
+                        center: node.anchor,
+                        half_size: Vec2::new(half, half),
+                        rotation: 0.0,
+                    },
+                    node.anchor,
+                    half,
+                    handle_fill,
+                    node_color,
+                );
             }
         }
 

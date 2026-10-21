@@ -870,6 +870,9 @@ function dispatchShortcut(shortcut, engine) {
     case 'escape':
       if (escapeAction(isHelpOpen()) === 'closeHelp') {
         setHelpOpen(false);
+      } else if (typeof engine.path_node_mode === 'function' && engine.path_node_mode()) {
+        engine.set_path_node_mode(false);
+        syncPropertyPanel(engine);
       } else if (typeof engine.crop_mode === 'function' && engine.crop_mode()) {
         engine.set_crop_mode(false);
         syncPropertyPanel(engine);
@@ -1698,6 +1701,7 @@ function syncPropertyPanel(engine) {
   syncShadow(style);
   syncInnerShadow(style);
   syncImageCrop(engine);
+  syncPathNodes(engine);
   syncGradient(style);
   const blendRow = document.getElementById('prop-blend-row');
   if (blendRow) blendRow.hidden = !style.blendModeSupported;
@@ -1990,6 +1994,7 @@ function bindPropertyPanel(engine) {
   bindShadow(engine);
   bindInnerShadow(engine);
   bindImageCrop(engine);
+  bindPathNodes(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
   bindRange('prop-line-height', 'lineHeight', 'prop-line-height-label', (value) => Number(value).toFixed(2));
   bindRange('prop-letter-spacing', 'letterSpacing', 'prop-letter-spacing-label', (value) => String(Number(value)));
@@ -2788,6 +2793,40 @@ function bindImageCrop(engine) {
   });
 }
 
+/**
+ * 单一 Path 时显示「编辑节点」。双击 Path 也可进入；Esc / 点空白退出。
+ * 不新增工具快捷键。
+ *
+ * @param {WasmCanvas} engine
+ */
+function syncPathNodes(engine) {
+  const block = document.getElementById('prop-path-nodes');
+  if (!block) return;
+  const supported =
+    typeof engine.path_node_edit_supported === 'function' && engine.path_node_edit_supported();
+  block.hidden = !supported;
+  const mode = document.getElementById('prop-path-node-mode');
+  if (mode) {
+    mode.classList.toggle(
+      'active',
+      typeof engine.path_node_mode === 'function' && engine.path_node_mode(),
+    );
+  }
+}
+
+/**
+ * @param {WasmCanvas} engine
+ */
+function bindPathNodes(engine) {
+  document.getElementById('prop-path-node-mode')?.addEventListener('click', () => {
+    if (typeof engine.set_path_node_mode !== 'function') return;
+    const next = !(typeof engine.path_node_mode === 'function' && engine.path_node_mode());
+    engine.set_path_node_mode(next);
+    setStatus(next ? '路径节点编辑已开启' : '已退出路径节点编辑');
+    syncPropertyPanel(engine);
+  });
+}
+
 function bindCornerRadius(engine) {
   const range = document.getElementById('prop-corner-radius');
   const number = document.getElementById('prop-corner-radius-number');
@@ -2913,6 +2952,12 @@ function bindInput(canvas, engine) {
     const info = engine.begin_text_edit_at(point.x, point.y);
     if (info) {
       openTextEditor(engine, info);
+      return;
+    }
+    if (typeof engine.begin_path_node_edit_at === 'function' && engine.begin_path_node_edit_at(point.x, point.y)) {
+      syncPropertyPanel(engine);
+      setStatus('路径节点编辑：拖拽锚点或控制柄，Esc 退出');
+      scheduleAutosave(engine);
       return;
     }
     renameFrameAt(engine, point);

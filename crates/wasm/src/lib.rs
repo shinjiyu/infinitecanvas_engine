@@ -23,6 +23,7 @@
 mod canvas;
 mod crop_api;
 mod input;
+mod path_edit_api;
 mod renderer;
 mod style_api;
 mod texture_manager;
@@ -214,6 +215,10 @@ pub struct InfiniteCanvas {
     crop_drag: Option<crop_api::CropDrag>,
     /// 属性面板拖动中的裁剪基线。
     crop_preview: Option<crop_api::CropPreview>,
+    /// Path 节点编辑模式。
+    path_node_mode: bool,
+    /// 节点/控制柄拖动。
+    path_node_drag: Option<path_edit_api::PathNodeDrag>,
     /// 小地图缩略图。几何版本或尺寸变了才重算，平移缩放不扫描元素。
     minimap_cache: Option<MinimapCache>,
     /// 已经上传到 GPU 的图片资源 id。和场景引用比较，多退少补。
@@ -283,6 +288,8 @@ impl InfiniteCanvas {
             crop_mode: false,
             crop_drag: None,
             crop_preview: None,
+            path_node_mode: false,
+            path_node_drag: None,
             minimap_cache: None,
             gpu_image_assets: HashSet::new(),
             eyedropper_gesture: None,
@@ -372,6 +379,13 @@ impl InfiniteCanvas {
         let selection_box = self.selection_box.bounds();
         let transform_frame = self.display_selection_frame();
         let crop_chrome = self.crop_overlay();
+        let path_node_chrome = self.path_node_overlay();
+        // 节点模式下隐藏包围盒手柄，只画锚点/控制柄。
+        let transform_frame = if path_node_chrome.is_some() {
+            None
+        } else {
+            transform_frame
+        };
         if let Some(renderer) = &mut self.webgpu_renderer {
             let started = js_sys::Date::now();
             renderer.render(
@@ -381,6 +395,7 @@ impl InfiniteCanvas {
                 transform_frame,
                 self.grid_visible,
                 crop_chrome,
+                path_node_chrome,
             )?;
             let stats = renderer.last_stats();
 
@@ -512,6 +527,7 @@ impl InfiniteCanvas {
     pub fn clear_selection(&mut self) {
         self.cancel_handle_gesture();
         self.selection_box.cancel();
+        self.path_node_mode = false;
         self.selection.clear(&mut self.scene);
     }
 
@@ -1912,6 +1928,9 @@ impl InfiniteCanvas {
         self.selected_guide = None;
         self.cancel_handle_gesture();
         self.cancel_style_preview();
+        self.cancel_crop_preview();
+        self.path_node_mode = false;
+        self.path_node_drag = None;
         let textures = self.snapshot_text_textures();
         self.pending_text_edit = None;
         self.scene = scene;
@@ -3393,6 +3412,11 @@ impl InfiniteCanvas {
         if self.tool_manager.current() != Tool::Select {
             return self.tool_manager.current().cursor().to_string();
         }
+        if let Some(cursor) =
+            self.path_node_cursor_at(self.viewport.screen_to_world(Vec2::new(x, y)))
+        {
+            return cursor.to_string();
+        }
         if let Some(drag) = &self.crop_drag {
             return cursor_for(HandleKind::Resize(drag.handle), drag.rotation).to_string();
         }
@@ -3562,6 +3586,9 @@ impl InfiniteCanvas {
     // ========== 选择工具事件处理 ==========
 
     fn handle_select_tool_down(&mut self, event: PointerEvent) {
+        if self.try_begin_path_node_drag(&event) {
+            return;
+        }
         if self.try_begin_handle_gesture(&event) {
             return;
         }
@@ -3592,7 +3619,11 @@ impl InfiniteCanvas {
                 self.selection_box.cancel();
             }
         } else {
-            // 点击空白区域：开始框选
+            // 点击空白区域：结束节点编辑并开始框选
+            if self.path_node_mode {
+                self.commit_path_node_gesture();
+                self.path_node_mode = false;
+            }
             if !additive {
                 self.selection.clear(&mut self.scene);
             }
@@ -3602,6 +3633,9 @@ impl InfiniteCanvas {
     }
 
     fn handle_select_tool_move(&mut self, event: PointerEvent) {
+        if self.update_path_node_drag(&event) {
+            return;
+        }
         if self.update_handle_gesture(&event) {
             return;
         }
@@ -3616,6 +3650,9 @@ impl InfiniteCanvas {
     }
 
     fn handle_select_tool_up(&mut self, event: PointerEvent) {
+        if self.finish_path_node_drag(event.pointer_id) {
+            return;
+        }
         if self.finish_handle_gesture(event.pointer_id) {
             return;
         }
@@ -4350,6 +4387,7 @@ impl InfiniteCanvas {
     /// 丢掉未提交的手柄拖动，元素回到按下时的变换。
     fn cancel_handle_gesture(&mut self) {
         self.cancel_crop_gesture();
+        self.cancel_path_node_gesture();
         if let Some(drag) = self.handle_drag.take() {
             let originals = drag.gesture.originals().to_vec();
             self.apply_transform_list(&originals);
@@ -4964,11 +5002,63 @@ mod tests {
             crop_mode: false,
             crop_drag: None,
             crop_preview: None,
+            path_node_mode: false,
+            path_node_drag: None,
             minimap_cache: None,
             gpu_image_assets: HashSet::new(),
             eyedropper_gesture: None,
             eyedropper_notice: None,
         }
+    }
+
+    #[test]
+    fn path_node_drag_is_one_undo_step_and_empty_click_exits_mode() {
+        let mut canvas = blank_canvas();
+        let path = Path::from_world_points(
+            1,
+            &[
+                Vec2::new(0.0, 0.0),
+                Vec2::new(40.0, 0.0),
+                Vec2::new(40.0, 30.0),
+            ],
+            ElementStyle::stroke_only(Color::BLACK, 2.0),
+        );
+        canvas.scene.add_path(path);
+        canvas.selection.select_element(&mut canvas.scene, 1, false);
+        canvas.set_path_node_mode(true);
+        assert!(canvas.path_node_handles_active());
+        let down = pointer_at(
+            &canvas,
+            canvas.viewport.world_to_screen(Vec2::new(40.0, 0.0)),
+        );
+        assert!(canvas.try_begin_path_node_drag(&down));
+        let mut move_event = pointer_at(
+            &canvas,
+            canvas.viewport.world_to_screen(Vec2::new(55.0, -8.0)),
+        );
+        move_event.pointer_id = down.pointer_id;
+        assert!(canvas.update_path_node_drag(&move_event));
+        assert!(canvas.finish_path_node_drag(down.pointer_id));
+        match canvas.scene.get(1).unwrap() {
+            AnyElement::Path(path) => {
+                assert!((path.points()[1] - Vec2::new(55.0, -8.0)).length() < 1.0);
+            }
+            _ => panic!("path"),
+        }
+        assert!(canvas.undo());
+        match canvas.scene.get(1).unwrap() {
+            AnyElement::Path(path) => {
+                assert!((path.points()[1] - Vec2::new(40.0, 0.0)).length() < 1.0e-3);
+            }
+            _ => panic!("path"),
+        }
+        // 点空白退出节点模式
+        let empty = pointer_at(
+            &canvas,
+            canvas.viewport.world_to_screen(Vec2::new(400.0, 400.0)),
+        );
+        canvas.handle_select_tool_down(empty);
+        assert!(!canvas.path_node_mode());
     }
 
     #[test]

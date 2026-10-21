@@ -32,6 +32,7 @@ pub mod guides;
 pub mod hit_test;
 pub mod minimap;
 pub mod orient;
+pub mod path_edit;
 pub mod persist;
 pub mod quadtree;
 pub mod scene;
@@ -76,9 +77,9 @@ pub use crop::{
 };
 pub use element::{
     Circle, DropShadow, Element, ElementId, ElementProps, ElementStyle, FillKind, FillShape,
-    FontWeight, Frame, GradientStop, Group, Image, InnerShadow, Line, LineMarker, Path, Polygon,
-    PolygonKind, Rectangle, StrokeAlign, StrokeCap, StrokeJoin, Text, TextAlign, TextClickResolver,
-    TextPlacement, TextVisual,
+    FontWeight, Frame, GradientStop, Group, Image, InnerShadow, Line, LineMarker, Path,
+    PathPointHandles, Polygon, PolygonKind, Rectangle, StrokeAlign, StrokeCap, StrokeJoin, Text,
+    TextAlign, TextClickResolver, TextPlacement, TextVisual,
 };
 pub use event::{
     Event, EventQueue, KeyboardEvent, Modifiers, PointerButton, PointerEvent, WheelDeltaMode,
@@ -101,6 +102,10 @@ pub use minimap::{
     viewport_minimap_rect, world_rect_to_minimap, world_to_minimap, MinimapFrame, MinimapOverview,
 };
 pub use orient::{apply_flip, apply_rotate_quarter, FlipAxis, OrientSelectionCommand, QuarterTurn};
+pub use path_edit::{
+    apply_path_geometry, hit_path_node, move_path_node, path_node_views, sole_editable_path,
+    EditPathCommand, PathGeometry, PathNodeHit, PathNodeIndex, PathNodePart, PathNodeView,
+};
 pub use persist::{
     export_frame_png, export_frame_png_scaled, export_selection_png, export_selection_png_scaled,
     export_viewport_png, export_viewport_png_scaled, export_viewport_png_with_guides, PersistError,

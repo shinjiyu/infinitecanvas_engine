@@ -237,6 +237,13 @@ export class InfiniteCanvas {
      */
     are_rulers_visible(): boolean;
     /**
+     * 在屏幕坐标处尝试进入节点编辑。
+     *
+     * 命中未锁定 Path 时选中它并打开节点模式，返回 true。
+     * 供双击使用；不占用工具快捷键。
+     */
+    begin_path_node_edit_at(x: number, y: number): boolean;
+    /**
      * 双击命中文本时返回编辑框几何。没命中文本返回 `null`。
      *
      * # 参数
@@ -594,6 +601,10 @@ export class InfiniteCanvas {
      * 和 `selected`。隐藏标尺时仍返回数据，绘制由调用方决定。
      */
     get_manual_guides(): Array<any>;
+    /**
+     * 当前选中 Path 的节点列表（世界坐标），供调试或自定义 UI。
+     */
+    get_path_nodes(): any;
     /**
      * 获取性能统计信息
      *
@@ -956,6 +967,18 @@ export class InfiniteCanvas {
      */
     paste_elements(json: string, dx: number, dy: number, focus_x?: number | null, focus_y?: number | null): Array<any>;
     /**
+     * 当前选择是否可进入 Path 节点编辑（单一未锁定可见 Path）。
+     */
+    path_node_edit_supported(): boolean;
+    /**
+     * 当前是否正在显示 Path 节点手柄。
+     */
+    path_node_handles_active(): boolean;
+    /**
+     * 节点编辑模式是否打开。
+     */
+    path_node_mode(): boolean;
+    /**
      * 恢复到之前的工具
      */
     pop_temporary_tool(): void;
@@ -1202,6 +1225,13 @@ export class InfiniteCanvas {
      * 返回 false，也不入栈。不改世界变换。
      */
     set_image_crop(patch: any): boolean;
+    /**
+     * 打开或关闭 Path 节点编辑。
+     *
+     * 只在选中单一未锁定可见 Path 时显示节点手柄，并隐藏包围盒缩放/旋转手柄。
+     * 关闭时提交未结束的拖动。没有新快捷键。
+     */
+    set_path_node_mode(enabled: boolean): void;
     /**
      * 显示或隐藏标尺和手动参考线。
      *
@@ -1504,6 +1534,7 @@ export interface InitOutput {
     readonly infinitecanvas_align_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_apply_sampled_style_at: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_are_rulers_visible: (a: number) => number;
+    readonly infinitecanvas_begin_path_node_edit_at: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_begin_text_edit_at: (a: number, b: number, c: number) => any;
     readonly infinitecanvas_boolean_selection: (a: number, b: number, c: number) => number;
     readonly infinitecanvas_boolean_selection_ready: (a: number) => number;
@@ -1547,6 +1578,7 @@ export interface InitOutput {
     readonly infinitecanvas_get_last_draw_calls: (a: number) => number;
     readonly infinitecanvas_get_last_vertex_count: (a: number) => number;
     readonly infinitecanvas_get_manual_guides: (a: number) => any;
+    readonly infinitecanvas_get_path_nodes: (a: number) => any;
     readonly infinitecanvas_get_performance_stats: (a: number) => any;
     readonly infinitecanvas_get_redo_count: (a: number) => number;
     readonly infinitecanvas_get_ruler_major_step: (a: number) => number;
@@ -1592,6 +1624,9 @@ export interface InitOutput {
     readonly infinitecanvas_nudge_selection: (a: number, b: number, c: number, d: number) => number;
     readonly infinitecanvas_pan: (a: number, b: number, c: number) => void;
     readonly infinitecanvas_paste_elements: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number];
+    readonly infinitecanvas_path_node_edit_supported: (a: number) => number;
+    readonly infinitecanvas_path_node_handles_active: (a: number) => number;
+    readonly infinitecanvas_path_node_mode: (a: number) => number;
     readonly infinitecanvas_pop_temporary_tool: (a: number) => void;
     readonly infinitecanvas_preview_image_crop: (a: number, b: any) => number;
     readonly infinitecanvas_preview_selection_style: (a: number, b: any) => number;
@@ -1618,6 +1653,7 @@ export interface InitOutput {
     readonly infinitecanvas_set_grid_visible: (a: number, b: number) => void;
     readonly infinitecanvas_set_image_alpha: (a: number, b: bigint, c: number) => number;
     readonly infinitecanvas_set_image_crop: (a: number, b: any) => number;
+    readonly infinitecanvas_set_path_node_mode: (a: number, b: number) => void;
     readonly infinitecanvas_set_rulers_visible: (a: number, b: number) => void;
     readonly infinitecanvas_set_selection_locked: (a: number, b: number) => number;
     readonly infinitecanvas_set_selection_style: (a: number, b: any) => number;
