@@ -399,8 +399,8 @@
       function loop() {
         wasm.render();
         
-        // 渲染远程选择
-        renderRemoteSelections();
+        // Remote presence (cursors + selections)
+        paintRemotePresence();
         
         // FPS
         fc++;
@@ -721,12 +721,6 @@
         { resolveScreenRect }
       );
     }
-
-    // Hook presence paint into the existing rAF status loop if present; else poll lightly.
-    const _origMain = null;
-    setInterval(() => {
-      try { paintRemotePresence(); } catch (_) { /* wasm not ready */ }
-    }, 50);
 
     main();
   </script>
