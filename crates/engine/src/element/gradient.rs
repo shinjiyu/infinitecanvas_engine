@@ -185,6 +185,11 @@ impl ElementStyle {
     pub fn radial_radius(&self, bounds: Rect) -> f32 {
         radial_radius(self.fill_radius, bounds)
     }
+
+    /// 线性渐变在局部空间的起止点，供 SVG `linearGradient`（userSpaceOnUse）使用。
+    pub fn linear_axis_endpoints(&self, bounds: Rect) -> (Vec2, Vec2) {
+        linear_axis_endpoints(bounds, self.fill_angle)
+    }
 }
 
 /// 把凸轮廓铺成渐变填充，再变到世界坐标。
@@ -240,6 +245,17 @@ fn radial_radius(radius: f32, bounds: Rect) -> f32 {
     } else {
         1.0
     }
+}
+
+/// 线性渐变在局部空间里的起止点，与 [`ElementStyle::gradient_offset`] 同一条轴。
+///
+/// SVG `linearGradient`（`userSpaceOnUse`）用这对端点，非正方形包围盒上的斜角
+/// 与画布采样一致；旧的 objectBoundingBox 单位方映射在宽高比不是 1 时会偏。
+pub(crate) fn linear_axis_endpoints(bounds: Rect, angle_deg: f32) -> (Vec2, Vec2) {
+    let (dir, min_p, span) = linear_frame(bounds, angle_deg);
+    let start = dir * min_p;
+    let end = dir * (min_p + span);
+    (start, end)
 }
 
 fn linear_offset(local: Vec2, bounds: Rect, angle_deg: f32) -> f32 {

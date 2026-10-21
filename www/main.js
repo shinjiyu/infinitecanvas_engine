@@ -517,7 +517,9 @@ function exportPng(engine, selectionOnly) {
 /**
  * 下载场景或选中元素的 SVG。
  *
- * 全部导出时 viewBox 是可见元素的包围盒；选区导出只包含当前选中元素。
+ * 全部导出时 viewBox 是可见元素的包围盒（含投影 / 模糊光晕留边）；选区导出只包含当前选中元素。
+ * 渐变、外投影、图层模糊会写入 SVG 渐变与滤镜；与 PNG 对照时，滤镜是浏览器高斯近似，
+ * 不保证像素一致（交付要像素级请用 PNG）。不新增快捷键。
  *
  * @param {WasmCanvas} engine
  * @param {boolean} selectedOnly
