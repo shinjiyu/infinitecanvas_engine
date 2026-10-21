@@ -1481,6 +1481,16 @@ impl InfiniteCanvas {
                 );
                 let _ = Reflect::set(
                     &obj,
+                    &JsValue::from_str("lineHeight"),
+                    &JsValue::from(text.line_height),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("letterSpacing"),
+                    &JsValue::from(text.letter_spacing),
+                );
+                let _ = Reflect::set(
+                    &obj,
                     &JsValue::from_str("fontFamily"),
                     &JsValue::from_str(&text.font_family),
                 );
@@ -2695,7 +2705,7 @@ impl InfiniteCanvas {
     ///
     /// # 返回
     /// 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
-    /// `color`, `align`, `fontWeight`, `fontFamily`, `paddingWorld`, `textureId`
+    /// `color`, `align`, `fontWeight`, `lineHeight`, `letterSpacing`, `fontFamily`, `paddingWorld`, `textureId`
     #[wasm_bindgen]
     pub fn take_text_raster_jobs(&mut self) -> Array {
         let lod = lod_bucket(self.viewport.zoom());
@@ -2708,12 +2718,20 @@ impl InfiniteCanvas {
             if !text.needs_raster(lod) {
                 continue;
             }
-            let params = raster_params(text.font_size, lod, &text.content);
+            let params = raster_params(
+                text.font_size,
+                lod,
+                &text.content,
+                text.line_height,
+                text.letter_spacing,
+            );
             let texture_id = raster_texture_id(id, text.revision, lod);
             let content = text.content.clone();
             let color = text.color.to_hex();
             let align = text.align.as_str();
             let font_weight = text.font_weight.as_str();
+            let line_height = text.line_height;
+            let letter_spacing = text.letter_spacing;
             let font_family = text.font_family.clone();
             let revision = text.revision as f64;
             text.mark_raster_pending(lod);
@@ -2751,6 +2769,16 @@ impl InfiniteCanvas {
                 &obj,
                 &JsValue::from_str("fontWeight"),
                 &JsValue::from_str(font_weight),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("lineHeight"),
+                &JsValue::from(line_height),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("letterSpacing"),
+                &JsValue::from(letter_spacing),
             );
             let _ = Reflect::set(
                 &obj,
@@ -4778,6 +4806,16 @@ impl InfiniteCanvas {
             &obj,
             &JsValue::from_str("fontWeight"),
             &JsValue::from_str(text.font_weight.as_str()),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("lineHeight"),
+            &JsValue::from(text.line_height),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("letterSpacing"),
+            &JsValue::from(text.letter_spacing),
         );
         let _ = Reflect::set(
             &obj,

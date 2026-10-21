@@ -48,6 +48,12 @@ pub const TEXT_PADDING_EM: f32 = 0.15;
 /// 能画中文和英文的字体栈。前面是常见的 CJK 字体，最后回退到 sans-serif。
 pub const DEFAULT_FONT_FAMILY: &str = "\"WenQuanYi Micro Hei\", \"Noto Sans CJK SC\", \"Noto Sans SC\", \"Source Han Sans SC\", \"PingFang SC\", \"Microsoft YaHei\", \"Droid Sans Fallback\", sans-serif";
 
+/// 行高倍数缺省。相对字号；旧 JSON 缺字段时用它。
+pub const DEFAULT_LINE_HEIGHT: f32 = 1.2;
+
+/// 字距缺省（世界单位）。0 表示字符紧挨测量宽度，不加额外间距。
+pub const DEFAULT_LETTER_SPACING: f32 = 0.0;
+
 /// 单张文字纹理的边长上限，留在 WebGPU 常见限制之内。
 const MAX_RASTER_EDGE: f32 = 4096.0;
 
@@ -127,6 +133,24 @@ impl FontWeight {
     }
 }
 
+/// 把行高倍数收成可用值。非有限或过小抬到下限。
+pub fn sanitize_line_height(value: f32) -> f32 {
+    if !value.is_finite() {
+        DEFAULT_LINE_HEIGHT
+    } else {
+        value.clamp(0.5, 10.0)
+    }
+}
+
+/// 把字距收成有限值。
+pub fn sanitize_letter_spacing(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(-100.0, 100.0)
+    } else {
+        DEFAULT_LETTER_SPACING
+    }
+}
+
 /// 把缩放量化到 LOD 档。
 ///
 /// 同一档内不重新光栅化。档位按 `log2(zoom)` 四舍五入到 1/4，
@@ -177,8 +201,16 @@ pub struct RasterParams {
 ///
 /// 世界尺寸 = 纹理像素 / `scale`。调用方用这个比例回写元素尺寸，
 /// 这样换档之后四边形大小不变，只是纹理更清晰。
-pub fn raster_params(font_size: f32, lod: i32, content: &str) -> RasterParams {
+pub fn raster_params(
+    font_size: f32,
+    lod: i32,
+    content: &str,
+    line_height: f32,
+    letter_spacing: f32,
+) -> RasterParams {
     let font_size = font_size.max(1.0);
+    let line_height = sanitize_line_height(line_height);
+    let letter_spacing = sanitize_letter_spacing(letter_spacing);
     let mut scale = lod_scale(lod);
     let mut font_px = font_size * scale;
     if font_px < 4.0 {
@@ -192,8 +224,9 @@ pub fn raster_params(font_size: f32, lod: i32, content: &str) -> RasterParams {
     let padding = padding_world(font_size) * scale;
     let max_chars = max_line_chars(content).max(1) as f32;
     let lines = line_count(content).max(1) as f32;
-    let est_w = max_chars * font_px + padding * 2.0;
-    let est_h = lines * font_px * 1.25 + padding * 2.0;
+    let spacing_px = letter_spacing * scale;
+    let est_w = max_chars * font_px + (max_chars - 1.0).max(0.0) * spacing_px + padding * 2.0;
+    let est_h = lines * font_px * line_height + padding * 2.0;
     let fit = (MAX_RASTER_EDGE / est_w.max(1.0))
         .min(MAX_RASTER_EDGE / est_h.max(1.0))
         .min(1.0);
@@ -218,11 +251,14 @@ pub fn raster_texture_id(element_id: ElementId, revision: u64, lod: i32) -> Stri
 /// 在第一次真实测量回来之前，用字号估算命中盒。
 ///
 /// 中文大约 1em 宽，英文更窄。估算宁大勿小，提交光栅化结果后会被替换。
-pub fn estimate_size(content: &str, font_size: f32) -> Vec2 {
+pub fn estimate_size(content: &str, font_size: f32, line_height: f32, letter_spacing: f32) -> Vec2 {
     let font_size = font_size.max(1.0);
+    let line_height = sanitize_line_height(line_height);
+    let letter_spacing = sanitize_letter_spacing(letter_spacing);
     let chars = max_line_chars(content).max(1) as f32;
     let lines = line_count(content).max(1) as f32;
-    Vec2::new(font_size * chars, font_size * 1.25 * lines)
+    let width = font_size * chars + (chars - 1.0).max(0.0) * letter_spacing;
+    Vec2::new(width.max(font_size), font_size * line_height * lines)
 }
 
 fn line_count(content: &str) -> usize {
@@ -261,6 +297,10 @@ pub struct TextVisual {
     pub align: TextAlign,
     /// 字重。
     pub font_weight: FontWeight,
+    /// 行高倍数。
+    pub line_height: f32,
+    /// 字距（世界单位）。
+    pub letter_spacing: f32,
     /// CSS font-family。
     pub font_family: String,
     /// 世界单位布局尺寸。
@@ -283,13 +323,18 @@ fn default_font_family() -> String {
     DEFAULT_FONT_FAMILY.to_string()
 }
 
+fn default_line_height() -> f32 {
+    DEFAULT_LINE_HEIGHT
+}
+
 /// 文本元素。
 ///
 /// 位置是锚点，不是几何中心。左对齐时锚点在左上角，居中和右对齐分别在上边中点、右上角。
 ///
 /// 场景 JSON 只保存排版字段。`texture_id`、LOD、`revision`、`editing` 用 `#[serde(skip)]`，
 /// 导入后按当前缩放重新光栅化。缺省的 `font_size`、`color`、`opacity`、`stroke`、
-/// `stroke_width`、`align`、`font_family`、`size` 使用 serde 默认值；未知字段会被忽略。
+/// `stroke_width`、`align`、`font_weight`、`line_height`、`letter_spacing`、`font_family`、`size`
+/// 使用 serde 默认值；未知字段会被忽略。
 ///
 /// # 示例
 /// ```
@@ -336,6 +381,12 @@ pub struct Text {
     /// 字重。JSON 中可省略，缺省为 `regular`。值为 `regular` / `bold`。
     #[serde(default)]
     pub font_weight: FontWeight,
+    /// 行高倍数。JSON 中可省略，缺省 [`DEFAULT_LINE_HEIGHT`]。
+    #[serde(default = "default_line_height")]
+    pub line_height: f32,
+    /// 字距（世界单位）。JSON 中可省略，缺省 0。
+    #[serde(default)]
+    pub letter_spacing: f32,
     /// CSS font-family。JSON 中可省略。
     #[serde(default = "default_font_family")]
     pub font_family: String,
@@ -388,7 +439,12 @@ impl Text {
         props.transform.translation = position;
         Self {
             props,
-            size: estimate_size(&content, font_size),
+            size: estimate_size(
+                &content,
+                font_size,
+                DEFAULT_LINE_HEIGHT,
+                DEFAULT_LETTER_SPACING,
+            ),
             content,
             font_size,
             color: DEFAULT_TEXT_COLOR,
@@ -398,6 +454,8 @@ impl Text {
             blend_mode: BlendMode::Normal,
             align: TextAlign::Left,
             font_weight: FontWeight::Regular,
+            line_height: DEFAULT_LINE_HEIGHT,
+            letter_spacing: DEFAULT_LETTER_SPACING,
             font_family: DEFAULT_FONT_FAMILY.to_string(),
             texture_id: None,
             raster_lod: None,
@@ -415,7 +473,12 @@ impl Text {
     pub fn with_font_size(mut self, font_size: f32) -> Self {
         self.font_size = font_size.max(1.0);
         if self.texture_id.is_none() {
-            self.size = estimate_size(&self.content, self.font_size);
+            self.size = estimate_size(
+                &self.content,
+                self.font_size,
+                self.line_height,
+                self.letter_spacing,
+            );
         }
         self
     }
@@ -435,6 +498,34 @@ impl Text {
     /// 设置字重。
     pub fn with_font_weight(mut self, weight: FontWeight) -> Self {
         self.font_weight = weight;
+        self
+    }
+
+    /// 设置行高倍数。
+    pub fn with_line_height(mut self, line_height: f32) -> Self {
+        self.line_height = sanitize_line_height(line_height);
+        if self.texture_id.is_none() {
+            self.size = estimate_size(
+                &self.content,
+                self.font_size,
+                self.line_height,
+                self.letter_spacing,
+            );
+        }
+        self
+    }
+
+    /// 设置字距（世界单位）。
+    pub fn with_letter_spacing(mut self, letter_spacing: f32) -> Self {
+        self.letter_spacing = sanitize_letter_spacing(letter_spacing);
+        if self.texture_id.is_none() {
+            self.size = estimate_size(
+                &self.content,
+                self.font_size,
+                self.line_height,
+                self.letter_spacing,
+            );
+        }
         self
     }
 
@@ -465,12 +556,19 @@ impl Text {
         if !self.stroke_width.is_finite() || self.stroke_width < 0.0 {
             self.stroke_width = 0.0;
         }
+        self.line_height = sanitize_line_height(self.line_height);
+        self.letter_spacing = sanitize_letter_spacing(self.letter_spacing);
         if !self.size.x.is_finite()
             || !self.size.y.is_finite()
             || self.size.x <= 0.0
             || self.size.y <= 0.0
         {
-            self.size = estimate_size(&self.content, self.font_size);
+            self.size = estimate_size(
+                &self.content,
+                self.font_size,
+                self.line_height,
+                self.letter_spacing,
+            );
         }
         self.texture_id = None;
         self.raster_lod = None;
@@ -569,6 +667,8 @@ impl Text {
             color: self.color,
             align: self.align,
             font_weight: self.font_weight,
+            line_height: self.line_height,
+            letter_spacing: self.letter_spacing,
             font_family: self.font_family.clone(),
             size: self.size,
         }
@@ -584,6 +684,8 @@ impl Text {
         self.color = visual.color;
         self.align = visual.align;
         self.font_weight = visual.font_weight;
+        self.line_height = sanitize_line_height(visual.line_height);
+        self.letter_spacing = sanitize_letter_spacing(visual.letter_spacing);
         self.font_family = visual.font_family.clone();
         self.size = visual.size;
         self.editing = false;
@@ -600,7 +702,12 @@ impl Text {
             return None;
         }
         self.content = content;
-        self.size = estimate_size(&self.content, self.font_size);
+        self.size = estimate_size(
+            &self.content,
+            self.font_size,
+            self.line_height,
+            self.letter_spacing,
+        );
         self.invalidate_raster()
     }
 
@@ -641,19 +748,43 @@ impl Text {
         self.stroke = stroke;
         self.stroke_width = stroke_width;
         if raster_changed {
-            self.size = estimate_size(&self.content, self.font_size);
+            self.size = estimate_size(
+                &self.content,
+                self.font_size,
+                self.line_height,
+                self.letter_spacing,
+            );
             let _ = self.invalidate_raster();
         }
     }
 
-    /// 写入对齐与字重。变化时丢掉光栅纹理。
-    pub(crate) fn set_align_and_weight(&mut self, align: TextAlign, font_weight: FontWeight) {
-        if self.align == align && self.font_weight == font_weight {
+    /// 写入对齐、字重、行高与字距。变化时丢掉光栅纹理。
+    pub(crate) fn set_typography(
+        &mut self,
+        align: TextAlign,
+        font_weight: FontWeight,
+        line_height: f32,
+        letter_spacing: f32,
+    ) {
+        let line_height = sanitize_line_height(line_height);
+        let letter_spacing = sanitize_letter_spacing(letter_spacing);
+        if self.align == align
+            && self.font_weight == font_weight
+            && self.line_height == line_height
+            && self.letter_spacing == letter_spacing
+        {
             return;
         }
         self.align = align;
         self.font_weight = font_weight;
-        self.size = estimate_size(&self.content, self.font_size);
+        self.line_height = line_height;
+        self.letter_spacing = letter_spacing;
+        self.size = estimate_size(
+            &self.content,
+            self.font_size,
+            self.line_height,
+            self.letter_spacing,
+        );
         let _ = self.invalidate_raster();
     }
 
@@ -1032,7 +1163,7 @@ mod tests {
     #[test]
     fn raster_params_shrink_long_runs() {
         let content = "你".repeat(400);
-        let params = raster_params(32.0, lod_bucket(4.0), &content);
+        let params = raster_params(32.0, lod_bucket(4.0), &content, DEFAULT_LINE_HEIGHT, 0.0);
         let est = content.chars().count() as f32 * params.font_size_px
             + params.padding_world * params.scale * 2.0;
         assert!(est <= MAX_RASTER_EDGE + 1.0);
@@ -1281,5 +1412,37 @@ mod tests {
             .transform_point(han.glyph_sample_local(0, 0, 3, 3).unwrap());
         assert_eq!(han.color_at(border), Some(Color::BLACK));
         assert_eq!(han.color_at(hole), None);
+    }
+    #[test]
+    fn line_height_and_letter_spacing_sanitize_and_serde_defaults() {
+        assert!((sanitize_line_height(f32::NAN) - DEFAULT_LINE_HEIGHT).abs() < 1e-5);
+        assert!((sanitize_line_height(0.1) - 0.5).abs() < 1e-5);
+        assert!((sanitize_line_height(99.0) - 10.0).abs() < 1e-5);
+        assert!((sanitize_letter_spacing(f32::INFINITY) - DEFAULT_LETTER_SPACING).abs() < 1e-5);
+        assert!((sanitize_letter_spacing(-200.0) + 100.0).abs() < 1e-5);
+
+        let text = Text::new(1, Vec2::ZERO, "Hi")
+            .with_line_height(1.75)
+            .with_letter_spacing(2.5);
+        let json = serde_json::to_string(&text).unwrap();
+        assert!(json.contains("\"line_height\":"));
+        assert!(json.contains("\"letter_spacing\":"));
+        let round: Text = serde_json::from_str(&json).unwrap();
+        assert!((round.line_height - 1.75).abs() < 1e-5);
+        assert!((round.letter_spacing - 2.5).abs() < 1e-5);
+
+        let legacy = serde_json::json!({
+            "props": { "id": 2 },
+            "content": "Old",
+            "font_size": 32.0
+        });
+        let old: Text = serde_json::from_value(legacy).unwrap();
+        assert!((old.line_height - DEFAULT_LINE_HEIGHT).abs() < 1e-5);
+        assert!((old.letter_spacing - DEFAULT_LETTER_SPACING).abs() < 1e-5);
+
+        let taller = estimate_size("A\nB", 10.0, 2.0, 0.0);
+        let spaced = estimate_size("AB", 10.0, 1.2, 5.0);
+        assert!((taller.y - 40.0).abs() < 1e-4);
+        assert!((spaced.x - 25.0).abs() < 1e-4);
     }
 }

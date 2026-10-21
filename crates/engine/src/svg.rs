@@ -711,7 +711,7 @@ fn write_line(line: &Line) -> String {
     )
 }
 
-/// 文本锚点在局部原点。行距是字号的 1.25 倍，和 [`Text`] 的估算高度一致。
+/// 文本锚点在局部原点。行距用 [`Text::line_height`]，字距用 [`Text::letter_spacing`]。
 fn write_text(text: &Text) -> Option<String> {
     if text.content.is_empty() {
         return None;
@@ -727,6 +727,7 @@ fn write_text(text: &Text) -> Option<String> {
         TextAlign::Right => "end",
     };
     let weight = text.font_weight.css_weight();
+    let letter_spacing = crate::element::sanitize_letter_spacing(text.letter_spacing);
     let mut body = format!(
         "    <text fill=\"{}\" font-size=\"{}\" font-family=\"{}\" font-weight=\"{}\" text-anchor=\"{}\" dominant-baseline=\"text-before-edge\" xml:space=\"preserve\"",
         rgb_hex(text.color),
@@ -735,6 +736,11 @@ fn write_text(text: &Text) -> Option<String> {
         weight,
         anchor,
     );
+    if letter_spacing != 0.0 {
+        body.push_str(" letter-spacing=\"");
+        body.push_str(&fmt_num(letter_spacing));
+        body.push('"');
+    }
     push_alpha_attr(&mut body, "fill-opacity", text.color.a);
     if text.stroke_width > 0.0 {
         let stroke = text.stroke.unwrap_or(text.color);
@@ -746,7 +752,7 @@ fn write_text(text: &Text) -> Option<String> {
         push_alpha_attr(&mut body, "stroke-opacity", stroke.a);
     }
     body.push_str(">\n");
-    let line_height = font_size * 1.25;
+    let line_height = font_size * crate::element::sanitize_line_height(text.line_height);
     for (index, line) in text.content.split('\n').enumerate() {
         body.push_str(&format!(
             "      <tspan x=\"0\" y=\"{}\">{}</tspan>\n",
@@ -1787,7 +1793,19 @@ mod tests {
         assert!(svg.contains("fill-opacity=\"0.5\""));
         assert!(svg.contains("transform=\"matrix(0 1 -1 0 4 8)\""));
         assert!(svg.contains("<tspan x=\"0\" y=\"0\">A&lt;B&gt;&amp;&quot;C&quot;</tspan>"));
-        assert!(svg.contains("<tspan x=\"0\" y=\"25\">next</tspan>"));
+        assert!(svg.contains("<tspan x=\"0\" y=\"24\">next</tspan>"));
+
+        let mut spaced = Scene::new();
+        spaced.add_text(
+            Text::new(3, Vec2::ZERO, "A\nB")
+                .with_font_size(10.0)
+                .with_line_height(2.0)
+                .with_letter_spacing(4.0)
+                .with_font_family("sans-serif"),
+        );
+        let svg = export_svg(&spaced, false);
+        assert!(svg.contains("letter-spacing=\"4\""));
+        assert!(svg.contains("<tspan x=\"0\" y=\"20\">B</tspan>"));
     }
 
     #[test]

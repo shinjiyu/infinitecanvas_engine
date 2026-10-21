@@ -1622,10 +1622,28 @@ function syncPropertyPanel(engine) {
   );
   syncChoice('prop-text-align', style.textAlign, style.textAlignMixed);
   syncChoice('prop-font-weight', style.fontWeight, style.fontWeightMixed);
+  syncRange(
+    'prop-line-height',
+    'prop-line-height-label',
+    style.lineHeight,
+    style.lineHeightMixed,
+    (value) => Number(value).toFixed(2),
+  );
+  syncRange(
+    'prop-letter-spacing',
+    'prop-letter-spacing-label',
+    style.letterSpacing,
+    style.letterSpacingMixed,
+    (value) => String(Number(value)),
+  );
   const textAlignMixed = document.getElementById('prop-text-align-mixed');
   if (textAlignMixed) textAlignMixed.hidden = !style.textAlignMixed;
   const fontWeightMixed = document.getElementById('prop-font-weight-mixed');
   if (fontWeightMixed) fontWeightMixed.hidden = !style.fontWeightMixed;
+  const lineHeightMixed = document.getElementById('prop-line-height-mixed');
+  if (lineHeightMixed) lineHeightMixed.hidden = !style.lineHeightMixed;
+  const letterSpacingMixed = document.getElementById('prop-letter-spacing-mixed');
+  if (letterSpacingMixed) letterSpacingMixed.hidden = !style.letterSpacingMixed;
 
   const lineStyle = document.getElementById('prop-line-style');
   if (lineStyle) lineStyle.hidden = !style.hasShape;
@@ -1863,6 +1881,8 @@ function bindPropertyPanel(engine) {
   bindShadow(engine);
   bindImageCrop(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
+  bindRange('prop-line-height', 'lineHeight', 'prop-line-height-label', (value) => Number(value).toFixed(2));
+  bindRange('prop-letter-spacing', 'letterSpacing', 'prop-letter-spacing-label', (value) => String(Number(value)));
 
   document.getElementById('prop-frame-name')?.addEventListener('change', (event) => {
     const input = event.currentTarget;
@@ -3176,6 +3196,12 @@ function openTextEditor(engine, info) {
   node.style.textAlign = info.align || 'left';
   const weight = String(info.fontWeight || 'regular').toLowerCase();
   node.style.fontWeight = weight === 'bold' || weight === '700' ? '700' : '400';
+  const lineHeight = Number(info.lineHeight);
+  node.style.lineHeight = Number.isFinite(lineHeight) && lineHeight > 0 ? String(lineHeight) : '1.2';
+  const letterSpacing = Number(info.letterSpacing);
+  const zoom = (Number(info.screenFontSize) || 0) / (Number(info.fontSize) || 1) || 1;
+  const spacingScreen = Number.isFinite(letterSpacing) ? letterSpacing * zoom : 0;
+  node.style.letterSpacing = `${spacingScreen}px`;
   placeTextEditor(info);
   engine.set_text_editing(info.id, true);
   node.focus();

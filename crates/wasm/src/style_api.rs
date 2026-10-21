@@ -44,7 +44,8 @@ impl InfiniteCanvas {
     /// - `blendMode` 为 `normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。
     ///   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true。未写出时不改模糊
     /// - `blurRadius` 是图层高斯模糊的标准差。没有形状、文本或图片时 `blurSupported` 为 false。多选不一致时 `blurRadiusMixed` 为 true。画板算形状。未写出时不改渐变或混合模式
-    /// - `textAlign` 为 `left` / `center` / `right`。`fontWeight` 为 `regular` / `bold`。只统计文本。多选不一致时对应的 `*Mixed` 为 true
+    /// - `textAlign` 为 `left` / `center` / `right`。`fontWeight` 为 `regular` / `bold`。
+    ///   `lineHeight` 为行高倍数，`letterSpacing` 为世界单位字距。只统计文本。多选不一致时对应的 `*Mixed` 为 true
     /// - `startMarker` / `endMarker`：`none` / `arrow` / `triangle`。仅直线（`hasLine`）。多选不一致时对应 `*Mixed` 为 true
     ///
     /// # 示例（JavaScript）
@@ -88,6 +89,8 @@ impl InfiniteCanvas {
         write_color(&obj, "textColor", &style.text_color);
         write_label(&obj, "textAlign", &style.text_align, TextAlign::as_str);
         write_label(&obj, "fontWeight", &style.font_weight, FontWeight::as_str);
+        write_number(&obj, "lineHeight", &style.line_height);
+        write_number(&obj, "letterSpacing", &style.letter_spacing);
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
         write_label(&obj, "strokeJoin", &style.stroke_join, StrokeJoin::as_str);
@@ -115,7 +118,8 @@ impl InfiniteCanvas {
     /// `cornerRadius` 也可以写成 `corner_radius`。`sides` 也可以写成 `points`，并钳到 3–64。
     /// `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
     /// `textColor` 是十六进制颜色。`textAlign` 为 `left` / `center` / `right`，也可写成 `text_align` / `align`。
-    /// `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。对齐与字重只写到文本上。圆角只写到矩形上。
+    /// `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。
+    /// `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。对齐、字重、行高与字距只写到文本上。圆角只写到矩形上。
     /// `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
     /// `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
     /// `blurRadius` 也可以写成 `blur_radius`。形状、文本、图片和画板都接受图层模糊。负数收成 0。
@@ -445,6 +449,9 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
             .or_else(|| read_label(value, "align", TextAlign::parse)),
         font_weight: read_label(value, "fontWeight", FontWeight::parse)
             .or_else(|| read_label(value, "font_weight", FontWeight::parse)),
+        line_height: read_f32(value, "lineHeight").or_else(|| read_f32(value, "line_height")),
+        letter_spacing: read_f32(value, "letterSpacing")
+            .or_else(|| read_f32(value, "letter_spacing")),
         stroke_dash: read_dash(value, "strokeDash"),
         stroke_cap: read_label(value, "strokeCap", StrokeCap::parse),
         stroke_join: read_label(value, "strokeJoin", StrokeJoin::parse),
