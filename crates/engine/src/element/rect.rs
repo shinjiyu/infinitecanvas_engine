@@ -3,8 +3,8 @@ use super::blur::{blur_active, gaussian_fill_vertices, gaussian_stroke_vertices}
 use super::gradient::paint_gradient_fill;
 use super::shadow::soft_shadow_vertices;
 use super::stroke::{
-    color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled, transform_vertices,
-    StrokePaint,
+    aligned_rect_metrics, color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled,
+    transform_vertices, StrokePaint,
 };
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Color, Rect, Vec2, Vertex};
@@ -307,17 +307,7 @@ impl Rectangle {
         let half_w = self.size.x / 2.0;
         let half_h = self.size.y / 2.0;
         if !dash_is_solid(&self.style.stroke_dash) {
-            let local = if radius > 0.0 {
-                self.rounded_outline(radius)
-            } else {
-                vec![
-                    Vec2::new(-half_w, -half_h),
-                    Vec2::new(half_w, -half_h),
-                    Vec2::new(half_w, half_h),
-                    Vec2::new(-half_w, half_h),
-                    Vec2::new(-half_w, -half_h),
-                ]
-            };
+            let local = self.stroke_outline_points();
             return transform_vertices(
                 stroke_centerline(&local, color, &self.style.stroke_dash),
                 &self.props.transform,
@@ -359,6 +349,30 @@ impl Rectangle {
         ]
     }
 
+    /// 按描边对齐得到局部闭合轮廓（用于粗描边和虚线中心线）。
+    fn stroke_outline_points(&self) -> Vec<Vec2> {
+        let radius = self.effective_corner_radius();
+        let half_w = self.size.x.abs() / 2.0;
+        let half_h = self.size.y.abs() / 2.0;
+        let (hw, hh, aligned_radius) = aligned_rect_metrics(
+            half_w,
+            half_h,
+            radius,
+            self.style.stroke_width,
+            self.style.stroke_align,
+        );
+        if aligned_radius > 0.0 {
+            return self.rounded_outline_sized(hw, hh, aligned_radius);
+        }
+        vec![
+            Vec2::new(-hw, -hh),
+            Vec2::new(hw, -hh),
+            Vec2::new(hw, hh),
+            Vec2::new(-hw, hh),
+            Vec2::new(-hw, -hh),
+        ]
+    }
+
     /// 按线宽生成描边三角形，放进填充缓冲后画布才能看出线宽。
     ///
     /// WebGPU 的线段管线宽度固定为 1 像素，所以粗描边不走 [`Self::generate_stroke_vertices`]。
@@ -371,21 +385,8 @@ impl Rectangle {
             return Vec::new();
         }
         let color = color_with_opacity(stroke, self.style.opacity);
-        let radius = self.effective_corner_radius();
+        let points = self.stroke_outline_points();
         if blur_active(self.style.blur_radius) {
-            let points = if radius > 0.0 {
-                self.rounded_outline(radius)
-            } else {
-                let half_w = self.size.x / 2.0;
-                let half_h = self.size.y / 2.0;
-                vec![
-                    Vec2::new(-half_w, -half_h),
-                    Vec2::new(half_w, -half_h),
-                    Vec2::new(half_w, half_h),
-                    Vec2::new(-half_w, half_h),
-                    Vec2::new(-half_w, -half_h),
-                ]
-            };
             return gaussian_stroke_vertices(
                 &points,
                 self.style.stroke_width * 0.5,
@@ -394,19 +395,6 @@ impl Rectangle {
                 &self.props.transform,
             );
         }
-        let points = if radius > 0.0 {
-            self.rounded_outline(radius)
-        } else {
-            let half_w = self.size.x / 2.0;
-            let half_h = self.size.y / 2.0;
-            vec![
-                Vec2::new(-half_w, -half_h),
-                Vec2::new(half_w, -half_h),
-                Vec2::new(half_w, half_h),
-                Vec2::new(-half_w, half_h),
-                Vec2::new(-half_w, -half_h),
-            ]
-        };
         transform_vertices(
             stroke_styled(
                 &points,
@@ -426,6 +414,11 @@ impl Rectangle {
     fn rounded_outline(&self, radius: f32) -> Vec<Vec2> {
         let half_w = self.size.x.abs() * 0.5;
         let half_h = self.size.y.abs() * 0.5;
+        self.rounded_outline_sized(half_w, half_h, radius)
+    }
+
+    /// 指定半宽半高和圆角的局部圆角轮廓。
+    fn rounded_outline_sized(&self, half_w: f32, half_h: f32, radius: f32) -> Vec<Vec2> {
         let radius = radius.min(half_w).min(half_h);
         // 顺时针绕一圈（屏幕 Y 向下）：右上、右下、左下、左上。
         let corners = [

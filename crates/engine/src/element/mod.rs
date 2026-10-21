@@ -12,7 +12,7 @@ pub mod path;
 pub mod polygon;
 pub mod rect;
 pub(crate) mod shadow;
-mod stroke;
+pub(crate) mod stroke;
 pub mod text;
 
 pub use circle::Circle;
@@ -194,6 +194,51 @@ impl LineMarker {
     }
 }
 
+/// 描边相对路径的对齐方式（Figma 风格）。
+///
+/// - [`StrokeAlign::Center`]：描边骑在轮廓上（半宽在内、半宽在外），缺省值
+/// - [`StrokeAlign::Inside`]：描边完全落在填充内侧
+/// - [`StrokeAlign::Outside`]：描边完全落在填充外侧
+///
+/// 只对闭合形状（矩形、圆、多边形、路径环、画板）生效；开口折线（直线、开口路径）
+/// 仍按居中绘制。JSON 用小写名字，缺省为 Center，旧文档没有该字段时仍可读。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StrokeAlign {
+    /// 骑在轮廓上。缺省值。
+    #[default]
+    Center,
+    /// 完全在内侧。
+    Inside,
+    /// 完全在外侧。
+    Outside,
+}
+
+impl StrokeAlign {
+    /// 属性面板和 JSON 用的名字。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Center => "center",
+            Self::Inside => "inside",
+            Self::Outside => "outside",
+        }
+    }
+
+    /// 解析 `center` / `inside` / `outside`。无法识别时返回 `None`。
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "center" => Some(Self::Center),
+            "inside" => Some(Self::Inside),
+            "outside" => Some(Self::Outside),
+            _ => None,
+        }
+    }
+}
+
+fn align_is_center(align: &StrokeAlign) -> bool {
+    *align == StrokeAlign::Center
+}
+
 /// 元素通用属性
 ///
 /// # 职责
@@ -329,6 +374,9 @@ pub struct ElementStyle {
     /// 线结。缺省斜接。
     #[serde(default, skip_serializing_if = "join_is_miter")]
     pub stroke_join: StrokeJoin,
+    /// 描边对齐。缺省居中。旧 JSON 没有该字段时仍是居中。
+    #[serde(default, skip_serializing_if = "align_is_center")]
+    pub stroke_align: StrokeAlign,
     /// 投影。缺省关闭，关闭时不写入 JSON。命中测试不读它。
     #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
     pub shadow: DropShadow,
@@ -378,6 +426,7 @@ impl ElementStyle {
             stroke_dash: Vec::new(),
             stroke_cap: StrokeCap::Butt,
             stroke_join: StrokeJoin::Miter,
+            stroke_align: StrokeAlign::Center,
             shadow: DropShadow::default(),
             fill_kind: FillKind::Solid,
             fill_stops: Vec::new(),

@@ -3,8 +3,8 @@ use super::blur::{blur_active, gaussian_fill_vertices, gaussian_stroke_vertices}
 use super::gradient::paint_gradient_fill;
 use super::shadow::soft_shadow_vertices;
 use super::stroke::{
-    color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled, transform_vertices,
-    StrokePaint,
+    aligned_circle_radius, color_with_opacity, dash_is_solid, stroke_centerline, stroke_styled,
+    transform_vertices, StrokePaint,
 };
 use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Rect, Vec2, Vertex};
@@ -191,17 +191,17 @@ impl Circle {
         let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
         let transform = &self.props.transform;
         if !dash_is_solid(&self.style.stroke_dash) {
-            let mut local = Vec::with_capacity(segments + 1);
-            let step = 2.0 * PI / segments as f32;
-            for index in 0..=segments {
-                let angle = index as f32 * step;
-                local.push(Vec2::new(
-                    angle.cos() * self.radius,
-                    angle.sin() * self.radius,
-                ));
-            }
+            let radius = aligned_circle_radius(
+                self.radius,
+                self.style.stroke_width,
+                self.style.stroke_align,
+            );
             return transform_vertices(
-                stroke_centerline(&local, color, &self.style.stroke_dash),
+                stroke_centerline(
+                    &circle_outline(radius, segments),
+                    color,
+                    &self.style.stroke_dash,
+                ),
                 transform,
             );
         }
@@ -239,24 +239,21 @@ impl Circle {
         }
         let color = color_with_opacity(stroke, self.style.opacity);
         const SEGMENTS: usize = 32;
+        let radius = aligned_circle_radius(
+            self.radius,
+            self.style.stroke_width,
+            self.style.stroke_align,
+        );
         if blur_active(self.style.blur_radius) {
             return gaussian_stroke_vertices(
-                &circle_outline(self.radius, SEGMENTS),
+                &circle_outline(radius, SEGMENTS),
                 self.style.stroke_width * 0.5,
                 color,
                 self.style.blur_radius,
                 &self.props.transform,
             );
         }
-        let mut points = Vec::with_capacity(SEGMENTS + 1);
-        let step = 2.0 * PI / SEGMENTS as f32;
-        for index in 0..=SEGMENTS {
-            let angle = index as f32 * step;
-            points.push(Vec2::new(
-                angle.cos() * self.radius,
-                angle.sin() * self.radius,
-            ));
-        }
+        let points = circle_outline(radius, SEGMENTS);
         transform_vertices(
             stroke_styled(
                 &points,

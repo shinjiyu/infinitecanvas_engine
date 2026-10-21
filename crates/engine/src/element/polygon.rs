@@ -17,8 +17,8 @@
 use super::blur::{blur_active, gaussian_fill_vertices, gaussian_stroke_vertices};
 use super::gradient::paint_gradient_fill;
 use super::stroke::{
-    color_with_opacity, dash_is_solid, distance_to_polyline, stroke_centerline, stroke_styled,
-    transform_vertices, StrokePaint,
+    aligned_stroke_outline, color_with_opacity, dash_is_solid, distance_to_polyline,
+    stroke_centerline, stroke_styled, transform_vertices, StrokePaint,
 };
 use super::{Element, ElementId, ElementProps, ElementStyle, FillKind};
 use infinitecanvas_math::{Color, Rect, Vec2, Vertex};
@@ -411,7 +411,11 @@ impl Polygon {
             return Vec::new();
         }
         let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
-        let outline = self.closed_outline();
+        let outline = aligned_stroke_outline(
+            &self.closed_outline(),
+            self.style.stroke_width,
+            self.style.stroke_align,
+        );
         if outline.len() < 2 {
             return Vec::new();
         }
@@ -441,7 +445,11 @@ impl Polygon {
             return Vec::new();
         }
         let color = color_with_opacity(stroke, self.style.opacity);
-        let outline = self.closed_outline();
+        let outline = aligned_stroke_outline(
+            &self.closed_outline(),
+            self.style.stroke_width,
+            self.style.stroke_align,
+        );
         if blur_active(self.style.blur_radius) {
             return gaussian_stroke_vertices(
                 &outline,

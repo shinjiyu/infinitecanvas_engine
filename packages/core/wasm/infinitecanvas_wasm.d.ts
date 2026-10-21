@@ -657,7 +657,8 @@ export class InfiniteCanvas {
      * - `fillSupported`：选择里有这个字段
      * - `strokeWidth` / `opacity` / `fontSize` / `cornerRadius`：统一数值，混合或不支持时为 null
      * - `strokeDash`：数字数组，空数组是实线。`strokeCap` 为 `butt` / `round` / `square`，
-     *   `strokeJoin` 为 `miter` / `round` / `bevel`。这三项只统计形状，文本描边不参与
+     *   `strokeJoin` 为 `miter` / `round` / `bevel`，`strokeAlign` 为 `center` / `inside` / `outside`。
+     *   这四项只统计形状，文本描边不参与
      * - `cornerRadius` 只在选择里有矩形时出现（`hasRect` / `cornerRadiusSupported`）。多选半径不一致时 `cornerRadiusMixed` 为 true
      * - `sides` 是多边形边数或星形角数（`hasPolygon` / `hasStar` / `sidesSupported`）。`innerRadius` 只统计星形
      * - `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字。`shadowColor` 是 `#rrggbbaa`（面板只用 RGB，浓度在 `shadowOpacity`）。没有形状、文本或图片时 `shadowSupported` 为 false
@@ -1191,7 +1192,7 @@ export class InfiniteCanvas {
      * `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
      * `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
      * `blurRadius` 也可以写成 `blur_radius`。形状、文本、图片和画板都接受图层模糊。负数收成 0。
-     * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` / `blendMode` 是小写名字。
+     * `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` / `strokeAlign` / `blendMode` 是小写名字。
      * `fillKind` 是 `solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
      * `fillAngle`、`fillRadius` 是数字。`fillCenter` 是 `{x, y}` 或 `[x, y]`。
      * 也接受 `fill_kind`、`fill_stops`、`fill_angle`、`fill_center`、`fill_radius`、`blend_mode`。
