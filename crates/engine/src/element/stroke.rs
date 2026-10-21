@@ -669,6 +669,24 @@ pub(crate) fn arrow_width_for(stroke_width: f32) -> f32 {
     (stroke_width * 3.0).max(6.0)
 }
 
+/// [`super::LineMarker`] 对应的箭杆缩短长度。`None` 为 0。
+pub(crate) fn marker_length_for(marker: super::LineMarker, stroke_width: f32) -> f32 {
+    match marker {
+        super::LineMarker::None => 0.0,
+        super::LineMarker::Arrow => arrow_length_for(stroke_width),
+        super::LineMarker::Triangle => (stroke_width * 3.0).max(8.0),
+    }
+}
+
+/// [`super::LineMarker`] 对应的底边宽度。`None` 为 0。
+pub(crate) fn marker_width_for(marker: super::LineMarker, stroke_width: f32) -> f32 {
+    match marker {
+        super::LineMarker::None => 0.0,
+        super::LineMarker::Arrow => arrow_width_for(stroke_width),
+        super::LineMarker::Triangle => (stroke_width * 3.5).max(8.0),
+    }
+}
+
 /// 箭头三角形：尖端、左翼、右翼。
 ///
 /// `dir` 指向尖端方向。长度或宽度无效时返回 `None`。
@@ -718,6 +736,22 @@ pub(crate) fn shorten_end(points: &mut [Vec2], amount: f32) {
     }
     let back = amount.min(len * 0.95);
     points[last] = end - (delta / len) * back;
+}
+
+/// 将折线起点沿第一段前推，给起点箭头留出箭杆。
+pub(crate) fn shorten_start(points: &mut [Vec2], amount: f32) {
+    if points.len() < 2 || amount <= 0.0 {
+        return;
+    }
+    let start = points[0];
+    let next = points[1];
+    let delta = next - start;
+    let len = delta.length();
+    if len <= 1e-6 {
+        return;
+    }
+    let forward = amount.min(len * 0.95);
+    points[0] = start + (delta / len) * forward;
 }
 
 /// 点集的轴对齐包围盒，四边外扩 `padding`。

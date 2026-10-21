@@ -7,8 +7,8 @@
 use infinitecanvas_engine::{
     apply_sampled_paint, apply_style_snapshot, capture_style, math::Color, math::Vec2,
     sample_paint_at, selection_style, style_locked, style_target_ids, BlendMode, ElementId,
-    FillKind, FontWeight, GradientStop, SampledPaint, SetStyleCommand, StrokeCap, StrokeJoin,
-    StyleField, StylePatch, StyleSnapshot, TextAlign,
+    FillKind, FontWeight, GradientStop, LineMarker, SampledPaint, SetStyleCommand, StrokeCap,
+    StrokeJoin, StyleField, StylePatch, StyleSnapshot, TextAlign,
 };
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
@@ -44,6 +44,7 @@ impl InfiniteCanvas {
     ///   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true。未写出时不改模糊
     /// - `blurRadius` 是图层高斯模糊的标准差。没有形状、文本或图片时 `blurSupported` 为 false。多选不一致时 `blurRadiusMixed` 为 true。画板算形状。未写出时不改渐变或混合模式
     /// - `textAlign` 为 `left` / `center` / `right`。`fontWeight` 为 `regular` / `bold`。只统计文本。多选不一致时对应的 `*Mixed` 为 true
+    /// - `startMarker` / `endMarker`：`none` / `arrow` / `triangle`。仅直线（`hasLine`）。多选不一致时对应 `*Mixed` 为 true
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -58,6 +59,7 @@ impl InfiniteCanvas {
         js_set(&obj, "count", JsValue::from(ids.len() as u32));
         js_set(&obj, "hasShape", JsValue::from(style.has_shape));
         js_set(&obj, "hasRect", JsValue::from(style.has_rect));
+        js_set(&obj, "hasLine", JsValue::from(style.has_line));
         js_set(&obj, "hasText", JsValue::from(style.has_text));
         js_set(&obj, "hasImage", JsValue::from(style.has_image));
         write_optional_color(&obj, "fill", &style.fill);
@@ -88,6 +90,8 @@ impl InfiniteCanvas {
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
         write_label(&obj, "strokeJoin", &style.stroke_join, StrokeJoin::as_str);
+        write_label(&obj, "startMarker", &style.start_marker, LineMarker::as_str);
+        write_label(&obj, "endMarker", &style.end_marker, LineMarker::as_str);
         write_label(&obj, "fillKind", &style.fill_kind, FillKind::as_str);
         write_stops(&obj, &style.fill_stops);
         write_number(&obj, "fillAngle", &style.fill_angle);
@@ -458,6 +462,10 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         blend_mode: read_label(value, "blendMode", BlendMode::parse)
             .or_else(|| read_label(value, "blend_mode", BlendMode::parse)),
         blur_radius: read_f32(value, "blurRadius").or_else(|| read_f32(value, "blur_radius")),
+        start_marker: read_label(value, "startMarker", LineMarker::parse)
+            .or_else(|| read_label(value, "start_marker", LineMarker::parse)),
+        end_marker: read_label(value, "endMarker", LineMarker::parse)
+            .or_else(|| read_label(value, "end_marker", LineMarker::parse)),
     })
 }
 

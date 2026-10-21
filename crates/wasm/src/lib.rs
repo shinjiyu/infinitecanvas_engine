@@ -5590,6 +5590,7 @@ mod tests {
         match infinitecanvas_engine::capture_style(scene, id) {
             Some(
                 infinitecanvas_engine::StyleSnapshot::Rectangle { style, .. }
+                | infinitecanvas_engine::StyleSnapshot::Line { style, .. }
                 | infinitecanvas_engine::StyleSnapshot::Shape(style),
             ) => style.fill,
             other => panic!("shape {id}, got {other:?}"),
