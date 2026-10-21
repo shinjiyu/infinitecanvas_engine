@@ -37,7 +37,7 @@ Scene ── elements: rectangle | circle | polygon | image | line | path | text
 
 ## SVG
 
-`export_svg(selected_only)` 走和 PNG 相同的 `elements_in_paint_order`，默认不画参考线。`export_svg_with_guides(..., true)` 在现有 viewBox 里追加 `#3db7ff` 的 `<line>`，不改变 viewBox。标尺不进 SVG。自己或祖先不可见（`Scene::is_effectively_visible`）的元素跳过，也不计入 viewBox。`selected_only` 为 false 时 viewBox 是全部导出叶子的世界包围盒（再外扩 2 个世界单位）；为 true 时包含自身 `selected` 的叶子，以及选中组下的全部可见子孙叶子。没有叶子时 viewBox 是 `0 0 1 1`。
+`export_svg(selected_only)` 走和 PNG 相同的 `elements_in_paint_order`，默认不画参考线。`export_svg_with_guides(..., true)` 在现有 viewBox 里追加 `#3db7ff` 的 `<line>`，不改变 viewBox。标尺不进 SVG。自己或祖先不可见（`Scene::is_effectively_visible`）的元素跳过，也不计入 viewBox。`selected_only` 为 false 时 viewBox 是全部导出叶子的世界包围盒（再外扩 2 个世界单位，并按描边半宽、投影伸出、图层模糊光晕放大，与 PNG 导出范围思路一致）；为 true 时包含自身 `selected` 的叶子，以及选中组下的全部可见子孙叶子。没有叶子时 viewBox 是 `0 0 1 1`。画板裁剪导出（`export_frame_svg` / 选区根全是画板）仍用画板盒，框外光晕被 `overflow="hidden"` 裁掉。
 
 | 元素 | SVG |
 | --- | --- |
@@ -51,7 +51,22 @@ Scene ── elements: rectangle | circle | polygon | image | line | path | text
 | group | 不画几何。子孙已是世界变换，矩阵不再乘组变换。绘制顺序里连成一段时写成不带 `transform` 的 `<g id="eN">`。隐藏组藏住子孙 |
 | frame | `<rect>`，几何与矩形相同。`export_frame_svg` 和「选区根全是画板」的 `export_svg` 把 `viewBox` 设成画板世界包围盒，并写 `overflow="hidden"`。画布上不裁剪 |
 
-变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。非 `normal` 的混合模式写在该叶子的 `<g style="mix-blend-mode:…">` 上，名字与 CSS 相同。`normal` 省略该属性；不认识它的查看器按普通叠加上色。直线和路径的缺省线帽线结仍是 `butt` / `miter`。非默认线帽、线结，以及非空虚线，额外写成 `stroke-linecap`、`stroke-linejoin`、`stroke-dasharray`。图片的 `opacity` 来自 `Image::alpha`。Y 轴向下。文本描边不写虚线、线帽和线结。投影打开时，元素外层 `<g>` 加 `feDropShadow`：`dx` / `dy` 是局部偏移乘上变换，`stdDeviation` 约为模糊乘缩放的一半，`flood-opacity` 只用颜色 alpha（组透明度已经乘过一次）。关闭时不写滤镜。滤镜区域是对象包围盒外扩，很大的偏移在 SVG 里可能被裁切。图层模糊打开时，同一层 `<g>` 改用 `feGaussianBlur`，`stdDeviation` 是半径乘缩放。投影同时打开时先模糊再 `feDropShadow`（`in="soft"`）。只有投影时滤镜 id 仍是 `e{id}-shadow`。这是近似，不保证和画布上的 CDF 环或 5×5 核一致。混合模式和图层模糊互不清掉。
+变换写成 `matrix(a b c d e f)`，与 `Transform::to_matrix` 一致（先缩放，再旋转，后平移）。填充、描边、线宽和 `opacity` 写在图元上；分组的 `opacity` 是 `ElementStyle::opacity`，颜色自身的 alpha 用 `fill-opacity` / `stroke-opacity`。非 `normal` 的混合模式写在该叶子的 `<g style="mix-blend-mode:…">` 上，名字与 CSS 相同。`normal` 省略该属性；不认识它的查看器按普通叠加上色。直线和路径的缺省线帽线结仍是 `butt` / `miter`。非默认线帽、线结，以及非空虚线，额外写成 `stroke-linecap`、`stroke-linejoin`、`stroke-dasharray`。图片的 `opacity` 来自 `Image::alpha`。Y 轴向下。文本描边不写虚线、线帽和线结。
+
+### 渐变 / 投影 / 模糊（保真与近似）
+
+| 画布样式 | SVG | 保真说明 |
+| --- | --- | --- |
+| 线性渐变 | `linearGradient`，`gradientUnits="userSpaceOnUse"`，起止点与包围盒投影轴相同 | 色标、角度与画布 `sample_fill` 一致；非正方形包围盒不再被 objectBoundingBox 单位方拉伸 |
+| 径向渐变 | `radialGradient`，`userSpaceOnUse`，`cx/cy/r` 同 `fill_center` / `radial_radius` | 与画布采样同圆心半径；浏览器径向插值与顶点射线近似可有细微差别 |
+| 外投影 | `feDropShadow`；`dx/dy` 为局部偏移×变换，`stdDeviation ≈ blur×scale×0.5` | 画布是顶点羽化环，不是离屏高斯；滤镜区域按对象包围盒外扩，极大偏移仍可能被 SVG 裁切 |
+| 图层模糊 | `feGaussianBlur`；`stdDeviation = radius×scale` | 形状在画布上是距离 CDF，图片/文本是 5×5 核；SVG 是浏览器高斯，**非整像素一致**。需要像素级交付时用 PNG |
+| 模糊+投影 | 先 `feGaussianBlur`（`result="soft"`）再 `feDropShadow in="soft"`；只有投影时 id 仍是 `e{id}-shadow` | 组合顺序与画布「先本体模糊再投影」接近，核不同 |
+| 渐变+模糊 | SVG 模糊整段渐变填充 | 画布软边用包围盒中心采样色；观感可能不同 |
+| 内阴影 | `feOffset`+`feGaussianBlur`+`feComposite`（可与外投影合成 `e{id}-shadows`） | 画布是向内羽化环；图层模糊打开时 SVG 优先模糊（可带外投影）并省略内阴影滤镜；旧文档无字段仍合法 |
+| 旧文档 | 无 `fill_kind` / `shadow` / `blur_radius` 时仍合法 | `serde(default)`；不写滤镜 / 渐变 defs |
+
+浏览器对 SVG 滤镜的实现差异可接受。Demo 可对同一选区各导出一次 PNG 与 SVG 目视对比。混合模式和图层模糊互不清掉。
 
 ## 导入 SVG
 

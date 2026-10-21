@@ -17,6 +17,16 @@
 //! 先缩放，再绕局部原点旋转，最后平移。Y 轴向下，和画布相同。
 //!
 //! 文本写成 `<text>` / `<tspan>`。锚点与 [`TextAlign`] 相同：左上、上边中点或右上角。
+//!
+//! # 样式保真（渐变 / 投影 / 模糊）
+//!
+//! - 线性 / 径向填充写成 `linearGradient` / `radialGradient`（`userSpaceOnUse`），
+//!   色标、角度、圆心和半径与画布采样同一套局部坐标。
+//! - 外投影写成 `feDropShadow`；内阴影写成 `feOffset`+`feGaussianBlur`+`feComposite`；
+//!   两者同时打开时合成到 `e{id}-shadows`。图层模糊写成 `feGaussianBlur`；与外投影同时打开时先模糊再投影。
+//! - 画布投影/内阴影是顶点羽化环，模糊是距离 CDF 或 5×5 核；SVG 滤镜是浏览器高斯，不保证像素一致。
+//! - 图层模糊打开时 SVG 优先输出模糊（可带外投影）；此时内阴影滤镜省略（近似边界，见 README）。
+//! - viewBox 会为描边、外投影偏移/模糊和图层模糊光晕留边，避免默认导出裁切光晕。
 
 use crate::blend::BlendMode;
 use crate::element::{
@@ -886,10 +896,7 @@ fn wrap_group(
         group.push_str(blend.as_str());
         group.push('"');
     }
-    group.push_str(
-        ">
-",
-    );
+    group.push_str(">\n");
     if blurred {
         if let Some(filter) = blur_filter(id, transform, shadow, blur_radius) {
             group.push_str(&filter);
@@ -906,10 +913,7 @@ fn wrap_group(
         group.push_str(&filter);
     }
     group.push_str(body);
-    group.push_str(
-        "  </g>
-",
-    );
+    group.push_str("  </g>\n");
     group
 }
 
@@ -1093,8 +1097,11 @@ fn push_fill_stroke(
     shape.push_str(" stroke=\"none\"");
 }
 
-/// SVG 渐变。线性用 objectBoundingBox，和采样时把包围盒投到角度上是同一条轴。
-/// 径向用形状局部坐标（userSpaceOnUse），圆心和半径与 [`ElementStyle`] 相同。
+/// SVG 渐变。线性与径向都用形状局部坐标（`userSpaceOnUse`）。
+///
+/// 线性起止点来自 [`ElementStyle::linear_axis_endpoints`]，与画布
+/// [`ElementStyle::gradient_offset`] 同一条轴，非正方形包围盒上的斜角不再被
+/// objectBoundingBox 单位方拉伸。径向圆心和半径与 [`ElementStyle`] 相同。
 fn gradient_def(name: &str, style: &ElementStyle, bounds: Rect) -> String {
     let mut body = String::new();
     match style.fill_kind {
@@ -1108,13 +1115,13 @@ fn gradient_def(name: &str, style: &ElementStyle, bounds: Rect) -> String {
             ));
         }
         FillKind::Linear | FillKind::Solid => {
-            let (x1, y1, x2, y2) = linear_svg_line(style.fill_angle);
+            let (start, end) = style.linear_axis_endpoints(bounds);
             body.push_str(&format!(
-                "      <linearGradient id=\"{name}\" gradientUnits=\"objectBoundingBox\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">\n",
-                fmt_num(x1),
-                fmt_num(y1),
-                fmt_num(x2),
-                fmt_num(y2),
+                "      <linearGradient id=\"{name}\" gradientUnits=\"userSpaceOnUse\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">\n",
+                fmt_num(start.x),
+                fmt_num(start.y),
+                fmt_num(end.x),
+                fmt_num(end.y),
             ));
         }
     }
@@ -1132,24 +1139,6 @@ fn gradient_def(name: &str, style: &ElementStyle, bounds: Rect) -> String {
         FillKind::Linear | FillKind::Solid => body.push_str("      </linearGradient>\n"),
     }
     body
-}
-
-/// 包围盒 `[0,1]²` 上，角度 0 为从左到右，90 为从上到下。
-fn linear_svg_line(angle_deg: f32) -> (f32, f32, f32, f32) {
-    let radians = if angle_deg.is_finite() {
-        angle_deg.to_radians()
-    } else {
-        0.0
-    };
-    let dx = radians.cos();
-    let dy = radians.sin();
-    let half = (dx.abs() + dy.abs()) * 0.5;
-    (
-        0.5 - dx * half,
-        0.5 - dy * half,
-        0.5 + dx * half,
-        0.5 + dy * half,
-    )
 }
 
 fn push_shape_line_style(shape: &mut String, style: &ElementStyle) {
@@ -1229,7 +1218,13 @@ fn export_bounds(element: &AnyElement) -> Option<Rect> {
     {
         return None;
     }
-    Some(base.inflate(stroke_overflow(element)))
+    // 与 PNG 导出一致：描边半宽 + 投影伸出 + 图层模糊光晕，避免 viewBox 裁切滤镜。
+    // 画板裁剪路径（crop）仍用画板盒，不走这里。
+    let (shadow, transform) = crate::persist::element_shadow(element);
+    let pad = stroke_overflow(element)
+        + crate::persist::shadow_reach(shadow, transform)
+        + crate::persist::blur_reach(element);
+    Some(base.inflate(pad))
 }
 
 /// 描边画出局部包围盒之外的部分。直线和路径的 `local_bounds` 已经含线宽。
@@ -1379,7 +1374,7 @@ fn fmt_num(value: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::{DropShadow, Element, ElementStyle, GradientStop};
+    use crate::element::{DropShadow, Element, ElementStyle, GradientStop, InnerShadow};
     use crate::snap::GuideAxis;
     use infinitecanvas_math::Color;
     use std::f32::consts::FRAC_PI_2;
@@ -1472,8 +1467,9 @@ mod tests {
 
         let svg = export_svg(&scene, false);
         assert!(svg.contains("<linearGradient id=\"fill-e1\""));
-        assert!(svg.contains("gradientUnits=\"objectBoundingBox\""));
-        assert!(svg.contains("x1=\"0.5\" y1=\"0\" x2=\"0.5\" y2=\"1\""));
+        assert!(svg.contains("gradientUnits=\"userSpaceOnUse\""));
+        // 40×20 矩形局部盒 y∈[-10,10]，角度 90° → 从上到下
+        assert!(svg.contains("x1=\"0\" y1=\"-10\" x2=\"0\" y2=\"10\""));
         assert!(svg.contains("stop-color=\"#ff0000\""));
         assert!(svg.contains("stop-color=\"#0000ff\""));
         assert!(svg.contains("fill=\"url(#fill-e1)\""));
@@ -2060,5 +2056,150 @@ mod tests {
         assert!(svg.contains("<feDropShadow "));
         assert!(!svg.contains("feGaussianBlur"));
         assert!(!svg.contains("e1-blur"));
+    }
+
+    #[test]
+    fn inner_shadow_writes_fe_composite_chain_and_combines_with_outer() {
+        let mut style = ElementStyle::fill_only(Color::RED);
+        style.inner_shadow = InnerShadow::new(
+            Vec2::new(2.0, 3.0),
+            4.0,
+            1.0,
+            Color::new(0.0, 0.0, 0.0, 0.4),
+        );
+        let mut scene = Scene::new();
+        scene.add_rect(rect(1, Vec2::ZERO, Vec2::new(20.0, 20.0), style.clone()));
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains("filter=\"url(#e1-inner-shadow)\""));
+        assert!(svg.contains("<feOffset "));
+        assert!(svg.contains("feComposite"));
+        assert!(svg.contains("operator=\"arithmetic\""));
+        assert!(!svg.contains("e1-shadow\""));
+
+        style.shadow = DropShadow::new(Vec2::new(4.0, 0.0), 6.0, Color::new(0.0, 0.0, 0.0, 0.5));
+        let mut both = Scene::new();
+        both.add_rect(rect(1, Vec2::ZERO, Vec2::new(20.0, 20.0), style.clone()));
+        let combined = export_svg(&both, false);
+        assert!(combined.contains("filter=\"url(#e1-shadows)\""));
+        assert!(combined.contains("<feDropShadow "));
+        assert!(combined.contains("feComposite"));
+
+        // 图层模糊打开时优先模糊滤镜，内阴影省略（近似边界）
+        style.blur_radius = 3.0;
+        let mut blurred = Scene::new();
+        blurred.add_rect(rect(1, Vec2::ZERO, Vec2::new(20.0, 20.0), style));
+        let blur_svg = export_svg(&blurred, false);
+        assert!(blur_svg.contains("filter=\"url(#e1-blur)\""));
+        assert!(!blur_svg.contains("inner-shadow"));
+        assert!(!blur_svg.contains("e1-shadows"));
+    }
+
+    #[test]
+    fn linear_gradient_user_space_matches_non_square_bounds() {
+        let mut scene = Scene::new();
+        let mut shape = Rectangle::new(1, Vec2::ZERO, Vec2::new(40.0, 10.0));
+        shape.style.fill_kind = FillKind::Linear;
+        shape.style.fill_angle = 0.0;
+        shape.style.fill_stops = vec![
+            GradientStop {
+                offset: 0.0,
+                color: Color::RED,
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::BLUE,
+            },
+        ];
+        scene.add_rect(shape);
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains("<linearGradient id=\"fill-e1\""));
+        assert!(svg.contains("gradientUnits=\"userSpaceOnUse\""));
+        // 宽 40 局部 x∈[-20,20]，角度 0° → 从左到右
+        assert!(svg.contains("x1=\"-20\" y1=\"0\" x2=\"20\" y2=\"0\""));
+        assert!(!svg.contains("objectBoundingBox"));
+    }
+
+    #[test]
+    fn view_box_pads_for_drop_shadow_and_layer_blur() {
+        let mut plain = Scene::new();
+        plain.add_rect(rect(
+            1,
+            Vec2::ZERO,
+            Vec2::new(20.0, 20.0),
+            ElementStyle::fill_only(Color::RED),
+        ));
+        let plain_svg = export_svg(&plain, false);
+
+        let mut shadowed = Scene::new();
+        let mut style = ElementStyle::fill_only(Color::RED);
+        style.shadow = DropShadow::new(Vec2::new(20.0, 0.0), 8.0, Color::new(0.0, 0.0, 0.0, 0.5));
+        shadowed.add_rect(rect(1, Vec2::ZERO, Vec2::new(20.0, 20.0), style));
+        let shadow_svg = export_svg(&shadowed, false);
+        assert!(shadow_svg.contains("filter=\"url(#e1-shadow)\""));
+        // 投影伸出后 viewBox 必须比无样式矩形更宽
+        assert!(view_box_width(&shadow_svg) > view_box_width(&plain_svg) + 10.0);
+
+        let mut blurred = Scene::new();
+        let mut blur_style = ElementStyle::fill_only(Color::RED);
+        blur_style.blur_radius = 6.0;
+        blurred.add_rect(rect(1, Vec2::ZERO, Vec2::new(20.0, 20.0), blur_style));
+        let blur_svg = export_svg(&blurred, false);
+        assert!(blur_svg.contains("filter=\"url(#e1-blur)\""));
+        assert!(view_box_width(&blur_svg) > view_box_width(&plain_svg));
+    }
+
+    #[test]
+    fn frame_with_gradient_and_shadow_exports_valid_svg() {
+        use crate::element::Frame;
+
+        let mut scene = Scene::new();
+        let mut frame = Frame::new(1, Vec2::new(40.0, 30.0), Vec2::new(80.0, 60.0));
+        frame.style.fill_kind = FillKind::Linear;
+        frame.style.fill_angle = 45.0;
+        frame.style.fill_stops = vec![
+            GradientStop {
+                offset: 0.0,
+                color: Color::new(1.0, 0.0, 0.0, 0.8),
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::new(0.0, 0.0, 1.0, 0.8),
+            },
+        ];
+        frame.style.shadow =
+            DropShadow::new(Vec2::new(4.0, 4.0), 6.0, Color::new(0.0, 0.0, 0.0, 0.35));
+        scene.add_frame(frame);
+        let svg = export_frame_svg(&scene, 1).unwrap();
+        assert!(svg.contains("overflow=\"hidden\""));
+        assert!(svg.contains("<linearGradient "));
+        assert!(svg.contains("stop-opacity=\"0.8\""));
+        assert!(svg.contains("feDropShadow"));
+        assert!(svg.contains("viewBox=\"0 0 80 60\""));
+    }
+
+    #[test]
+    fn old_style_json_without_shadow_blur_or_gradient_still_exports() {
+        // 最小旧文档：没有 shadow / blur_radius / fill_kind / fill_stops。
+        let json = r#"{"version":1,"next_id":2,"elements":[{"type":"rectangle","data":{"props":{"id":1},"size":[10,10],"style":{"fill":[1,0,0,1]}}}]}"#;
+        let scene = Scene::from_json(json).unwrap();
+        let svg = export_svg(&scene, false);
+        assert!(svg.contains("<rect"));
+        assert!(svg.contains("fill=\"#ff0000\""));
+        assert!(!svg.contains("linearGradient"));
+        assert!(!svg.contains("feDropShadow"));
+        assert!(!svg.contains("feGaussianBlur"));
+        assert!(!svg.contains("filter="));
+    }
+
+    fn view_box_width(svg: &str) -> f32 {
+        let marker = "viewBox=\"";
+        let start = svg.find(marker).expect("viewBox") + marker.len();
+        let end = svg[start..].find('"').expect("viewBox end") + start;
+        let mut parts = svg[start..end]
+            .split_whitespace()
+            .map(|part| part.parse::<f32>().unwrap());
+        let _x = parts.next().unwrap();
+        let _y = parts.next().unwrap();
+        parts.next().unwrap()
     }
 }

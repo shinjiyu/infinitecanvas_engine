@@ -2,6 +2,15 @@
 
 **更新时间**: 2026-10-21
 
+## Issue #107: SVG 导出增强（渐变 / 投影 / 模糊保真）
+
+- [x] 线性渐变改为 `userSpaceOnUse`，起止点与画布投影轴一致（非正方形包围盒不再被 objectBoundingBox 拉伸）
+- [x] 径向渐变保持 `userSpaceOnUse`；色标 / 圆心 / 半径与 `ElementStyle` 相同
+- [x] 外投影 `feDropShadow`、图层模糊 `feGaussianBlur`、两者链式组合；旧文档无字段仍合法
+- [x] viewBox 为投影伸出与模糊光晕留边（与 PNG 导出思路对齐）；画板裁剪仍裁到画板盒
+- [x] README / scene-persistence / property-panel / demo 注明近似边界；内阴影（#89 已合入）用 `feComposite` 链导出，模糊打开时省略内阴影滤镜
+- [x] 不新增快捷键
+
 ## Issue #109: Yjs 协同 polish（远端光标与选区）
 
 - [x] `PresenceState` / `CollabSession::{set_local_presence,clear_local_presence,remote_presences,encode/apply_awareness_update}`

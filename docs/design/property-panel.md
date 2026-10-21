@@ -43,7 +43,7 @@ SetStyleCommand ── apply / undo ──► Scene::mark_dirty
 
 WebGPU 把渐变烤进填充顶点：线性按色标把凸轮廓切成条带，条带内插值是准确的；径向从圆心（在形外时改用轮廓重心）发出射线，沿射线取色，射线之间是近似。描边仍是纯色。不透明度乘进顶点 alpha。隐藏元素和被隐藏的组不产生填充三角形，绘制顺序不变。
 
-PNG 按像素采样同一套渐变，描边像素仍是纯色。SVG 写成 `linearGradient`（objectBoundingBox）或 `radialGradient`（userSpaceOnUse）；没有渐变的形状仍是原来的 `fill` 颜色。投影另写 `feDropShadow`。
+PNG 按像素采样同一套渐变，描边像素仍是纯色。SVG 写成 `linearGradient` / `radialGradient`（均为 `userSpaceOnUse`，与画布采样同轴）；没有渐变的形状仍是原来的 `fill` 颜色。投影另写 `feDropShadow`；图层模糊另写 `feGaussianBlur`（近似，见 scene-persistence）。
 
 吸管不走面板上的滑块预览。它采样一个叶子的填充和描边，再经同一条 `SetStyle` 写到当前选择。渐变上取的是该点的颜色，写回去时收成纯色。圆角、边数、内径、线宽、不透明度、投影、混合模式和图层模糊都不动。落在光晕上、未模糊包围盒外的点仍然是空白。
 

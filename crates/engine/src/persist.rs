@@ -728,7 +728,7 @@ fn element_blur_radius(element: &AnyElement) -> f32 {
 }
 
 /// 光晕在世界空间里伸出包围盒的距离。关闭时为 0。命中盒不调用这里。
-fn blur_reach(element: &AnyElement) -> f32 {
+pub(crate) fn blur_reach(element: &AnyElement) -> f32 {
     let sigma = sanitize_blur(element_blur_radius(element));
     if sigma <= 1.0e-4 {
         return 0.0;
@@ -737,7 +737,7 @@ fn blur_reach(element: &AnyElement) -> f32 {
     BLUR_EXTENT * sigma * scale_extent(transform)
 }
 
-fn element_shadow(element: &AnyElement) -> (DropShadow, &Transform) {
+pub(crate) fn element_shadow(element: &AnyElement) -> (DropShadow, &Transform) {
     match element {
         AnyElement::Rectangle(rect) => (rect.style.shadow, &rect.props.transform),
         AnyElement::Circle(circle) => (circle.style.shadow, &circle.props.transform),
@@ -752,7 +752,7 @@ fn element_shadow(element: &AnyElement) -> (DropShadow, &Transform) {
 }
 
 /// 阴影在世界空间里可能伸出包围盒的距离。关闭时为 0，命中盒不受影响。
-fn shadow_reach(shadow: DropShadow, transform: &Transform) -> f32 {
+pub(crate) fn shadow_reach(shadow: DropShadow, transform: &Transform) -> f32 {
     if shadow.is_off() {
         return 0.0;
     }
