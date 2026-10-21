@@ -22,6 +22,7 @@ use font8x8::UnicodeFonts;
 use infinitecanvas_math::{Color, Rect, Transform, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 
+use super::blur::{blur_active, BLUR_EXTENT};
 use super::shadow::quad_shadow;
 use super::DropShadow;
 use web_time::{Duration, Instant};
@@ -322,6 +323,15 @@ pub struct Text {
     /// 有纹理且不在编辑时，按文字块包围盒画偏移羽化，不进字形光栅。
     #[serde(default, skip_serializing_if = "DropShadow::is_unset")]
     pub shadow: DropShadow,
+    /// 图层高斯模糊的标准差，世界单位。缺省 0。不进字形光栅。
+    ///
+    /// 0 不写入 JSON。纹理着色器用 5×5 核。命中仍是未模糊的文字块。
+    #[serde(default, skip_serializing_if = "text_blur_is_zero")]
+    pub blur_radius: f32,
+}
+
+fn text_blur_is_zero(value: &f32) -> bool {
+    !value.is_finite() || *value <= 0.0
 }
 
 impl Text {
@@ -351,6 +361,7 @@ impl Text {
             pending_revision: 0,
             editing: false,
             shadow: DropShadow::default(),
+            blur_radius: 0.0,
         }
     }
 
@@ -417,6 +428,7 @@ impl Text {
         self.pending_revision = 0;
         self.editing = false;
         self.shadow = self.shadow.sanitized();
+        self.blur_radius = crate::element::blur::sanitize_blur(self.blur_radius);
     }
 
     /// 丢掉纹理和编辑状态，保留文案、字号和对齐。
@@ -683,19 +695,57 @@ impl Text {
             return Vec::new();
         }
         let bounds = self.local_bounds();
+        let sigma = crate::element::blur::sanitize_blur(self.blur_radius);
+        let margin = if blur_active(self.blur_radius) {
+            BLUR_EXTENT * sigma
+        } else {
+            0.0
+        };
+        let x0 = bounds.x - margin;
+        let y0 = bounds.y - margin;
+        let x1 = bounds.x + bounds.width + margin;
+        let y1 = bounds.y + bounds.height + margin;
         let transform = &self.props.transform;
         let corners = [
-            transform.transform_point(Vec2::new(bounds.x, bounds.y)),
-            transform.transform_point(Vec2::new(bounds.x + bounds.width, bounds.y)),
-            transform.transform_point(Vec2::new(bounds.x, bounds.y + bounds.height)),
-            transform.transform_point(Vec2::new(bounds.x + bounds.width, bounds.y + bounds.height)),
+            transform.transform_point(Vec2::new(x0, y0)),
+            transform.transform_point(Vec2::new(x1, y0)),
+            transform.transform_point(Vec2::new(x0, y1)),
+            transform.transform_point(Vec2::new(x1, y1)),
         ];
+        let u = |x: f32| {
+            if bounds.width.abs() > 1.0e-6 {
+                (x - bounds.x) / bounds.width
+            } else {
+                0.0
+            }
+        };
+        let v = |y: f32| {
+            if bounds.height.abs() > 1.0e-6 {
+                (y - bounds.y) / bounds.height
+            } else {
+                0.0
+            }
+        };
+        let blur_u = if margin > 0.0 && bounds.width.abs() > 1.0e-6 {
+            sigma / bounds.width.abs()
+        } else {
+            0.0
+        };
+        let blur_v = if margin > 0.0 && bounds.height.abs() > 1.0e-6 {
+            sigma / bounds.height.abs()
+        } else {
+            0.0
+        };
         // 字形颜色在纹理里。tint 的 alpha 是元素不透明度，拖动滑块不必重新光栅化。
         let color = Color::new(1.0, 1.0, 1.0, self.opacity.clamp(0.0, 1.0));
-        let v0 = Vertex::with_uv(corners[0].x, corners[0].y, color, 0.0, 0.0);
-        let v1 = Vertex::with_uv(corners[1].x, corners[1].y, color, 1.0, 0.0);
-        let v2 = Vertex::with_uv(corners[2].x, corners[2].y, color, 0.0, 1.0);
-        let v3 = Vertex::with_uv(corners[3].x, corners[3].y, color, 1.0, 1.0);
+        let vert = |index: usize, x: f32, y: f32| {
+            Vertex::with_uv(corners[index].x, corners[index].y, color, u(x), v(y))
+                .with_blur_uv(blur_u, blur_v)
+        };
+        let v0 = vert(0, x0, y0);
+        let v1 = vert(1, x1, y0);
+        let v2 = vert(2, x0, y1);
+        let v3 = vert(3, x1, y1);
         vec![v0, v2, v1, v1, v2, v3]
     }
 }

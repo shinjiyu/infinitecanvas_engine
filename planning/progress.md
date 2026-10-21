@@ -2,10 +2,29 @@
 
 **更新时间**: 2026-10-14
 
+## Issue #80: 图层高斯模糊
+
+- [x] 叶子 `blur_radius`（f32，缺省 0，`serde(default)`）。旧 JSON 仍有效。0 不写入文件
+- [x] 形状（含画板）用轮廓 CDF 环；图片和文本用 5×5 纹理核。图片绕裁剪窗口外扩 3σ，不清 `crop`。命中仍是未模糊包围盒。布尔填充路径的孔不被扇形填实
+- [x] 一次 `SetStyle` 改模糊。空选、锁定、没有变化不入栈。文本不重做光栅。`mark_dirty` 后顶点重写。不改渐变、混合模式或裁剪
+- [x] WASM 与属性面板「图层模糊」滑块和数字框。多选不一致为 mixed。不新增快捷键
+- [x] PNG 按同一近似采样并放大导出范围。图片核在裁剪窗口外的样本是透明。画板导出区域不外扩。SVG 用 `feGaussianBlur`，只有投影时仍是 `e{id}-shadow`。渐变同时打开时软边用包围盒中心的一个颜色
+
+```text
+面板滑块松手
+        │
+        ▼
+StylePatch.blur_radius ── SetStyle ── 一条历史
+        │
+        ├─ 形状 / 画板：填充缓冲里的高斯环
+        └─ 图片 / 文本：外扩四边形 + fs_blur
+命中 AABB 不变；JSON 字段 blur_radius，默认省略
+```
+
 ## Issue #90: 图片裁剪
 
 - [x] `Image::crop` 是归一化窗口，`serde(default)` 为整张图，与缺省值相同时不写入。旧 JSON 仍有效
-- [x] 裁剪不改 `props.transform`、显示尺寸和资源像素。命中、选中框、顶点和投影都跟窗口走
+- [x] 裁剪不改 `props.transform`、显示尺寸、资源像素和 `blur_radius`。命中、选中框、顶点和投影都跟窗口走
 - [x] 一条 `SetImageCrop`。空选、锁定或没有变化不入栈。执行和撤销 `mark_dirty`
 - [x] WebGPU 采样合成后的 UV。PNG 只采样窗口。SVG 把嵌套 `<svg>` 收到窗口上，变换矩阵不动
 - [x] 属性面板给出 0–1 的左/上/宽/高，多选不一致为 mixed。预览松手一条历史。「裁剪手柄」复用缩放手柄，不新增快捷键。Esc 先退出裁剪模式
@@ -25,7 +44,7 @@ CropPatch ── SetImageCrop ── 一条历史
 
 - [x] `BlendMode`：`normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。`serde(default = Normal)`，Normal 不写入 JSON
 - [x] 形状写在 `ElementStyle`，文本和图片各有字段。组展开到子孙叶子。画板用自己的样式
-- [x] 改混合模式是一条 `SetStyle`。空选、锁定、无变化不入栈。`mark_dirty` 刷新绘制区间。和投影、渐变一样，未写出的字段保持原值
+- [x] 改混合模式是一条 `SetStyle`。空选、锁定、无变化不入栈。`mark_dirty` 刷新绘制区间。和投影、渐变、图层模糊一样，未写出的字段保持原值
 - [x] WebGPU：全部为 Normal 时仍批量绘制。有非 Normal 叶子时按 z 逐叶子合成（填充+描边+纹理一层，再 W3C 混合）
 - [x] 属性面板下拉。多选不一致为 mixed。不新增快捷键
 - [x] PNG 使用同一套公式。SVG 映射到 CSS `mix-blend-mode`，Normal 省略

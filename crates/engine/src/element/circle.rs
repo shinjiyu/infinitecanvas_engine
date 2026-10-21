@@ -1,4 +1,5 @@
 //! 圆形元素
+use super::blur::{blur_active, gaussian_fill_vertices, gaussian_stroke_vertices};
 use super::gradient::paint_gradient_fill;
 use super::shadow::soft_shadow_vertices;
 use super::stroke::{
@@ -9,6 +10,17 @@ use super::{Element, ElementId, ElementProps, ElementStyle};
 use infinitecanvas_math::{Rect, Vec2, Vertex};
 use serde::{Deserialize, Serialize};
 use std::f32::consts::PI;
+
+fn circle_outline(radius: f32, segments: usize) -> Vec<Vec2> {
+    let segments = segments.max(3);
+    let mut points = Vec::with_capacity(segments + 1);
+    let step = 2.0 * PI / segments as f32;
+    for index in 0..=segments {
+        let angle = index as f32 * step;
+        points.push(Vec2::new(angle.cos() * radius, angle.sin() * radius));
+    }
+    points
+}
 
 /// 圆形元素
 ///
@@ -101,6 +113,20 @@ impl Circle {
             return Vec::new();
         }
 
+        if blur_active(self.style.blur_radius) {
+            let bounds = self.local_bounds();
+            let sampled = self
+                .style
+                .sample_fill(bounds.center(), bounds)
+                .unwrap_or(infinitecanvas_math::Color::BLACK);
+            let color = color_with_opacity(sampled, self.style.opacity);
+            return gaussian_fill_vertices(
+                &circle_outline(self.radius, segments),
+                color,
+                self.style.blur_radius,
+                &self.props.transform,
+            );
+        }
         let transform = &self.props.transform;
         if self.style.uses_gradient() {
             let mut outline = Vec::with_capacity(segments);
@@ -158,6 +184,9 @@ impl Circle {
         if self.style.stroke.is_none() || self.style.stroke_width <= 0.0 || segments < 3 {
             return Vec::new();
         }
+        if blur_active(self.style.blur_radius) {
+            return Vec::new();
+        }
 
         let color = color_with_opacity(self.style.stroke.unwrap(), self.style.opacity);
         let transform = &self.props.transform;
@@ -210,6 +239,15 @@ impl Circle {
         }
         let color = color_with_opacity(stroke, self.style.opacity);
         const SEGMENTS: usize = 32;
+        if blur_active(self.style.blur_radius) {
+            return gaussian_stroke_vertices(
+                &circle_outline(self.radius, SEGMENTS),
+                self.style.stroke_width * 0.5,
+                color,
+                self.style.blur_radius,
+                &self.props.transform,
+            );
+        }
         let mut points = Vec::with_capacity(SEGMENTS + 1);
         let step = 2.0 * PI / SEGMENTS as f32;
         for index in 0..=SEGMENTS {

@@ -41,7 +41,8 @@ impl InfiniteCanvas {
     ///   `fillAngle` 为度，`fillCenter` 为 `{x, y}`，`fillRadius` 为局部半径（0 表示自动）。
     ///   这几项只统计形状。多选不一致时对应的 `*Mixed` 为 true
     /// - `blendMode` 为 `normal` / `multiply` / `screen` / `overlay` / `darken` / `lighten`。
-    ///   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true
+    ///   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true。未写出时不改模糊
+    /// - `blurRadius` 是图层高斯模糊的标准差。没有形状、文本或图片时 `blurSupported` 为 false。多选不一致时 `blurRadiusMixed` 为 true。画板算形状。未写出时不改渐变或混合模式
     ///
     /// # 示例（JavaScript）
     /// ```js
@@ -78,6 +79,8 @@ impl InfiniteCanvas {
             "shadowSupported",
             JsValue::from(style.shadow_supported),
         );
+        write_number(&obj, "blurRadius", &style.blur_radius);
+        js_set(&obj, "blurSupported", JsValue::from(style.blur_supported));
         write_color(&obj, "textColor", &style.text_color);
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
@@ -100,6 +103,7 @@ impl InfiniteCanvas {
     /// `textColor` 是十六进制颜色。圆角只写到矩形上。
     /// `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
     /// `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
+    /// `blurRadius` 也可以写成 `blur_radius`。形状、文本、图片和画板都接受图层模糊。负数收成 0。
     /// `strokeDash` 是数字数组（空数组改回实线）。`strokeCap` / `strokeJoin` / `blendMode` 是小写名字。
     /// `fillKind` 是 `solid` / `linear` / `radial`。`fillStops` 是 `{offset, color}` 数组。
     /// `fillAngle`、`fillRadius` 是数字。`fillCenter` 是 `{x, y}` 或 `[x, y]`。
@@ -444,6 +448,7 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         fill_radius: read_f32(value, "fillRadius").or_else(|| read_f32(value, "fill_radius")),
         blend_mode: read_label(value, "blendMode", BlendMode::parse)
             .or_else(|| read_label(value, "blend_mode", BlendMode::parse)),
+        blur_radius: read_f32(value, "blurRadius").or_else(|| read_f32(value, "blur_radius")),
     })
 }
 

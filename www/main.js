@@ -1528,7 +1528,7 @@ function syncRange(id, labelId, value, mixed, format) {
 /**
  * 按当前选择显示或隐藏属性面板，并把公共样式填进控件。
  * 多选不一致时标成「多种」，下一次编辑会写到全部选中元素。
- * 只选中图片时留下不透明度、投影、混合模式和裁剪；填充和描边仍只出现在形状或文本上。
+ * 只选中图片时留下不透明度、图层模糊、投影、混合模式和裁剪；填充和描边仍只出现在形状或文本上。
  *
  * @param {WasmCanvas} engine
  */
@@ -1582,6 +1582,7 @@ function syncPropertyPanel(engine) {
   );
   syncCornerRadius(style);
   syncPolygonFields(style);
+  syncLayerBlur(style);
   syncShadow(style);
   syncImageCrop(engine);
   syncGradient(style);
@@ -1835,6 +1836,7 @@ function bindPropertyPanel(engine) {
   bindRange('prop-opacity', 'opacity', 'prop-opacity-label', (value) => `${Math.round(value * 100)}%`);
   bindCornerRadius(engine);
   bindPolygonFields(engine);
+  bindLayerBlur(engine);
   bindShadow(engine);
   bindImageCrop(engine);
   bindRange('prop-font-size', 'fontSize', 'prop-font-size-label', (value) => String(Math.round(value)));
@@ -2195,6 +2197,56 @@ function syncPolygonFields(style) {
     const number = document.getElementById('prop-inner-radius-number');
     if (range instanceof HTMLInputElement) range.value = String(style.innerRadius);
     if (number instanceof HTMLInputElement) number.value = String(style.innerRadius);
+  }
+}
+
+/**
+ * 图层模糊对形状、文本、图片和画板都出现。和投影的「模糊」不是同一个滑块。
+ * 滑块和数字框写同一个 `blurRadius`，松手收成一条历史。
+ *
+ * @param {Record<string, unknown>} style
+ */
+function syncLayerBlur(style) {
+  const block = document.getElementById('prop-layer-blur');
+  if (block) block.hidden = !style.blurSupported;
+  const mixedEl = document.getElementById('prop-blur-radius-mixed');
+  if (mixedEl) mixedEl.hidden = !style.blurRadiusMixed;
+  const active =
+    activeStyleControl === 'prop-blur-radius' ||
+    activeStyleControl === 'prop-blur-radius-number';
+  if (active) return;
+  const range = document.getElementById('prop-blur-radius');
+  const number = document.getElementById('prop-blur-radius-number');
+  if (typeof style.blurRadius === 'number' && Number.isFinite(style.blurRadius)) {
+    if (range instanceof HTMLInputElement) range.value = String(style.blurRadius);
+    if (number instanceof HTMLInputElement) number.value = String(style.blurRadius);
+  }
+}
+
+/**
+ * @param {WasmCanvas} engine
+ */
+function bindLayerBlur(engine) {
+  const range = document.getElementById('prop-blur-radius');
+  const number = document.getElementById('prop-blur-radius-number');
+  const preview = (source, value) => {
+    if (!Number.isFinite(value) || value < 0) return;
+    activeStyleControl = source;
+    if (range instanceof HTMLInputElement && source !== 'prop-blur-radius') {
+      range.value = String(Math.min(value, Number(range.max)));
+    }
+    if (number instanceof HTMLInputElement && source !== 'prop-blur-radius-number') {
+      number.value = String(value);
+    }
+    engine.preview_selection_style({ blurRadius: value });
+  };
+  if (range instanceof HTMLInputElement) {
+    range.addEventListener('input', () => preview('prop-blur-radius', Number(range.value)));
+    range.addEventListener('change', () => finishStyleEdit(engine));
+  }
+  if (number instanceof HTMLInputElement) {
+    number.addEventListener('input', () => preview('prop-blur-radius-number', Number(number.value)));
+    number.addEventListener('change', () => finishStyleEdit(engine));
   }
 }
 

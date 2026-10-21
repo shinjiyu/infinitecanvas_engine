@@ -3,8 +3,13 @@
 //! 沿采样点生成带线宽的三角形带，拐角按斜接/斜角处理。
 //! 命中测试使用点到各线段的距离，而不是包围盒。
 
+use super::blur::{
+    blur_active, edge_coverage, gaussian_capsule_vertices, gaussian_edge_feather_signed,
+    gaussian_fill_vertices, gaussian_stroke_vertices, offset_outline_signed, shade_coverage,
+    BLUR_EXTENT,
+};
 use super::gradient::paint_gradient_fill;
-use super::shadow::{soft_shadow_vertices, stroke_capsule_shadow};
+use super::shadow::{open_ring, outward_normals, soft_shadow_vertices, stroke_capsule_shadow};
 use super::stroke::{
     bounds_containing, color_with_opacity, distance_to_polyline, effective_width, paint_color,
     stroke_styled, transform_vertices, StrokePaint, HIT_SLOP, MITER_LIMIT,
@@ -262,12 +267,25 @@ impl Path {
     ///
     /// 自由画笔是描边带。填充路径是耳切三角形加上闭合描边带。
     /// 线性渐变按色标切开每张三角形；径向在顶点取样，孔仍留在耳切结果之外。
+    /// 模糊打开时自由画笔改成胶囊 CDF；填充路径用中心色的软边，孔不被扇形填上。
     /// 投影由 [`Path::shadow_vertices`] 另画。
     pub fn generate_vertices(&self) -> Vec<Vertex> {
         if self.is_filled() {
+            if blur_active(self.style.blur_radius) {
+                return self.blurred_shape_vertices();
+            }
             let mut vertices = self.fill_vertices();
             vertices.extend(self.shape_stroke_vertices());
             return vertices;
+        }
+        if blur_active(self.style.blur_radius) {
+            return gaussian_capsule_vertices(
+                &self.points,
+                self.stroke_width() * 0.5,
+                paint_color(&self.style),
+                self.style.blur_radius,
+                &self.props.transform,
+            );
         }
         let vertices = stroke_styled(
             &self.points,
@@ -371,6 +389,121 @@ impl Path {
 
     fn hit_radius(&self) -> f32 {
         self.stroke_width() * 0.5 + HIT_SLOP
+    }
+
+    /// 填充路径的软边。无孔时和矩形一样做整圈 CDF。有孔时内缩 3σ 再耳切，避免扇形盖住孔。
+    fn blurred_shape_vertices(&self) -> Vec<Vertex> {
+        let sigma = self.style.blur_radius;
+        let transform = &self.props.transform;
+        let bounds = self.local_bounds();
+        let mut vertices = Vec::new();
+        if self.style.has_paintable_fill() {
+            let sampled = self
+                .style
+                .sample_fill(bounds.center(), bounds)
+                .unwrap_or(Color::BLACK);
+            let color = color_with_opacity(sampled, self.style.opacity);
+            if color.a > 0.0 {
+                for shape in &self.shapes {
+                    vertices.extend(self.blurred_shape_fill(shape, color, sigma));
+                }
+            }
+        }
+        if let Some(stroke) = self.style.stroke {
+            if self.style.stroke_width > 0.0 && stroke.a > 0.0 {
+                let color = color_with_opacity(stroke, self.style.opacity);
+                let half = self.style.stroke_width * 0.5;
+                for shape in &self.shapes {
+                    for ring in &shape.rings {
+                        vertices.extend(gaussian_stroke_vertices(
+                            ring, half, color, sigma, transform,
+                        ));
+                    }
+                }
+            }
+        }
+        vertices
+    }
+
+    fn blurred_shape_fill(&self, shape: &FillShape, color: Color, sigma: f32) -> Vec<Vertex> {
+        let Some(exterior) = shape.rings.first() else {
+            return Vec::new();
+        };
+        let transform = &self.props.transform;
+        let has_hole = shape.rings.iter().skip(1).any(|ring| ring.len() >= 3);
+        if !has_hole {
+            return gaussian_fill_vertices(exterior, color, sigma, transform);
+        }
+        let core = shade_coverage(color, edge_coverage(-BLUR_EXTENT * sigma, sigma));
+        let mut inset = FillShape { rings: Vec::new() };
+        let mut vertices = Vec::new();
+        let exterior_sign = normal_sign_out_of_material(shape, exterior);
+        if open_ring(exterior).len() >= 3 {
+            let inner = offset_outline_signed(exterior, -BLUR_EXTENT * sigma, exterior_sign);
+            if inner.len() >= 3 {
+                inset.rings.push(inner);
+                for hole in shape.rings.iter().skip(1) {
+                    if hole.len() < 3 {
+                        continue;
+                    }
+                    let sign = normal_sign_out_of_material(shape, hole);
+                    let inner = offset_outline_signed(hole, -BLUR_EXTENT * sigma, sign);
+                    if inner.len() >= 3 {
+                        inset.rings.push(inner);
+                    }
+                }
+            }
+            vertices.extend(gaussian_edge_feather_signed(
+                exterior,
+                color,
+                sigma,
+                transform,
+                exterior_sign,
+            ));
+        }
+        for hole in shape.rings.iter().skip(1) {
+            if hole.len() < 3 {
+                continue;
+            }
+            vertices.extend(gaussian_edge_feather_signed(
+                hole,
+                color,
+                sigma,
+                transform,
+                normal_sign_out_of_material(shape, hole),
+            ));
+        }
+        if inset.rings.first().is_some_and(|ring| ring.len() >= 3) {
+            for triangle in triangulate_shape(&inset) {
+                for point in triangle {
+                    let world = transform.transform_point(point);
+                    vertices.push(Vertex::new(world.x, world.y, core));
+                }
+            }
+        }
+        vertices
+    }
+}
+
+/// 外法线已经指向材质外侧时为 1，否则为 -1。反转点序不会改 `outward_normals` 的朝向。
+fn normal_sign_out_of_material(shape: &FillShape, ring: &[Vec2]) -> f32 {
+    let open = open_ring(ring);
+    if open.len() < 3 {
+        return 1.0;
+    }
+    let normals = outward_normals(&open);
+    let Some(normal) = normals
+        .iter()
+        .copied()
+        .find(|normal| normal.length_squared() > 1.0e-8)
+    else {
+        return 1.0;
+    };
+    let probe = open[0] + normal * 0.25;
+    if shape_contains(probe, shape) {
+        -1.0
+    } else {
+        1.0
     }
 }
 
@@ -551,7 +684,7 @@ mod tests {
     use crate::command::{AddElementCommand, CommandHistory};
     use crate::scene::{AnyElement, Scene};
     use crate::Element;
-    use infinitecanvas_math::Color;
+    use infinitecanvas_math::{Color, Vertex};
 
     fn sample() -> Path {
         Path::from_world_points(
@@ -607,6 +740,75 @@ mod tests {
         assert_eq!(path.points().len(), 3);
         assert!(path.contains_point(Vec2::new(20.0, 20.0)));
         assert!((path.props().transform.translation - Vec2::new(10.0, 10.0)).length() < 1e-4);
+    }
+
+    #[test]
+    fn blur_softens_freehand_without_hitting_the_halo_and_keeps_holes() {
+        let mut stroke = sample();
+        stroke.style.blur_radius = 4.0;
+        assert!(stroke.generate_vertices().len() > 12);
+        assert!(!stroke.contains_point(Vec2::new(50.0, 0.0)));
+
+        let mut style = ElementStyle::fill_only(Color::RED);
+        style.blur_radius = 4.0;
+        let mut path = Path::from_world_points(3, &[], style);
+        path.shapes = vec![FillShape {
+            rings: vec![
+                vec![
+                    Vec2::new(-40.0, -40.0),
+                    Vec2::new(40.0, -40.0),
+                    Vec2::new(40.0, 40.0),
+                    Vec2::new(-40.0, 40.0),
+                ],
+                vec![
+                    Vec2::new(-10.0, -10.0),
+                    Vec2::new(10.0, -10.0),
+                    Vec2::new(10.0, 10.0),
+                    Vec2::new(-10.0, 10.0),
+                ],
+            ],
+        }];
+        assert!(path.contains_point(Vec2::new(30.0, 0.0)));
+        assert!(!path.contains_point(Vec2::ZERO));
+        assert!(!path.contains_point(Vec2::new(44.0, 0.0)));
+        let vertices = path.generate_vertices();
+        assert!(opaque_covers(&vertices, Vec2::new(30.0, 0.0)));
+        assert!(!opaque_covers(&vertices, Vec2::ZERO));
+        assert_eq!(path.style.fill, Some(Color::RED));
+    }
+
+    fn opaque_covers(vertices: &[Vertex], point: Vec2) -> bool {
+        vertices.chunks(3).any(|triangle| {
+            if triangle.len() < 3 {
+                return false;
+            }
+            let alpha = triangle
+                .iter()
+                .map(|vertex| vertex.color[3])
+                .fold(0.0_f32, f32::max);
+            alpha > 0.5 && point_in_triangle(point, triangle)
+        })
+    }
+
+    fn point_in_triangle(point: Vec2, triangle: &[Vertex]) -> bool {
+        let a = Vec2::new(triangle[0].position[0], triangle[0].position[1]);
+        let b = Vec2::new(triangle[1].position[0], triangle[1].position[1]);
+        let c = Vec2::new(triangle[2].position[0], triangle[2].position[1]);
+        let v0 = c - a;
+        let v1 = b - a;
+        let v2 = point - a;
+        let dot00 = v0.dot(v0);
+        let dot01 = v0.dot(v1);
+        let dot02 = v0.dot(v2);
+        let dot11 = v1.dot(v1);
+        let dot12 = v1.dot(v2);
+        let denom = dot00 * dot11 - dot01 * dot01;
+        if denom.abs() < 1.0e-8 {
+            return false;
+        }
+        let u = (dot11 * dot02 - dot01 * dot12) / denom;
+        let v = (dot00 * dot12 - dot01 * dot02) / denom;
+        u >= -1.0e-3 && v >= -1.0e-3 && u + v <= 1.0 + 1.0e-3
     }
 
     #[test]
