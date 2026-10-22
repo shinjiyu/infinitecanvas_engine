@@ -1,7 +1,7 @@
 //! 选中元素的样式读取和修改。
 //!
 //! 矩形、圆、多边形、星形、直线、路径共用 [`ElementStyle`]。文本另外记录字号、文字颜色、
-//! 不透明度、可选描边、水平对齐、字重、行高和字距。图片参与不透明度（[`crate::element::Image::alpha`]）和投影，
+//! 不透明度、可选描边、水平对齐、字重、行高、字距和字体族。图片参与不透明度（[`crate::element::Image::alpha`]）和投影，
 //! 填充和描边不写到图片上，资源表也不动。组没有自己的样式：读和写都会展开到子孙叶子。
 //! 画板有自己的填充和描边；选中画板只改画板，不把样式写到子元素上。
 //!
@@ -14,7 +14,7 @@
 //!                 ├─ selection_style  多选不一致 → StyleField::Mixed
 //!                 └─ StylePatch ──► SetStyleCommand ──► mark_dirty
 //!                                      │
-//!                                      ├─ 文本字号 / 颜色 / 描边 / 对齐 / 字重 / 行高 / 字距变化时丢掉光栅
+//!                                      ├─ 文本字号 / 颜色 / 描边 / 对齐 / 字重 / 行高 / 字距 / 字体族变化时丢掉光栅
 //!                                      ├─ 矩形圆角（其它元素忽略该字段）
 //!                                      ├─ 多边形边数 / 星形内径（其它元素忽略）
 //!                                      ├─ 形状渐变（种类、色标、角度、圆心、半径）
@@ -43,7 +43,7 @@ pub enum StyleField<T> {
     Mixed,
 }
 
-/// 文本上属性面板能改的外观。不含内容和字体族，那些走文本编辑命令。
+/// 文本上属性面板能改的外观。不含内容，内容走文本编辑命令。
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextPaint {
     /// 世界单位字号。
@@ -64,6 +64,8 @@ pub struct TextPaint {
     pub line_height: f32,
     /// 字距（世界单位）。
     pub letter_spacing: f32,
+    /// CSS font-family。空串视为默认栈。
+    pub font_family: String,
     /// 投影。文本不把它画进字形纹理。
     pub shadow: DropShadow,
     /// 内阴影。文本不把它画进字形纹理。
@@ -150,6 +152,8 @@ pub struct StylePatch {
     pub line_height: Option<f32>,
     /// 文本字距（世界单位）。只写到文本上。
     pub letter_spacing: Option<f32>,
+    /// 文本字体族。只写到文本上；空串回退到默认栈。
+    pub font_family: Option<String>,
     /// 形状虚线。空数组表示改回实线。文本描边不读这个字段。
     pub stroke_dash: Option<Vec<f32>>,
     /// 形状线帽。文本描边不读这个字段。
@@ -233,6 +237,8 @@ pub struct SelectionStyle {
     pub line_height: StyleField<f32>,
     /// 文本字距（世界单位）。
     pub letter_spacing: StyleField<f32>,
+    /// 文本字体族。
+    pub font_family: StyleField<String>,
     /// 形状虚线。空数组是实线。文本不参与。
     pub stroke_dash: StyleField<Vec<f32>>,
     /// 形状线帽。文本不参与。
@@ -391,6 +397,9 @@ impl StyleSnapshot {
                 if let Some(spacing) = finite_letter_spacing(patch.letter_spacing) {
                     text.letter_spacing = spacing;
                 }
+                if let Some(family) = patch.font_family.as_ref() {
+                    text.font_family = crate::element::sanitize_font_family(family);
+                }
                 if let Some(mode) = patch.blend_mode {
                     text.blend_mode = mode;
                 }
@@ -502,6 +511,7 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
             font_weight: text.font_weight,
             line_height: text.line_height,
             letter_spacing: text.letter_spacing,
+            font_family: text.font_family.clone(),
             shadow: text.shadow,
             inner_shadow: text.inner_shadow,
             blend_mode: text.blend_mode,
@@ -521,7 +531,7 @@ pub fn capture_style(scene: &Scene, id: ElementId) -> Option<StyleSnapshot> {
 
 /// 写回样式快照，并 [`Scene::mark_dirty`]。
 ///
-/// 文本的字号、颜色、描边、对齐、字重、行高或字距变化会丢掉光栅纹理。不透明度只改 tint，不重新光栅化。
+/// 文本的字号、颜色、描边、对齐、字重、行高、字距或字体族变化会丢掉光栅纹理。不透明度只改 tint，不重新光栅化。
 pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSnapshot) {
     let applied = match scene.get_mut(id) {
         Some(AnyElement::Rectangle(rect)) => assign_rectangle(rect, snapshot),
@@ -544,6 +554,7 @@ pub fn apply_style_snapshot(scene: &mut Scene, id: ElementId, snapshot: &StyleSn
                     paint.font_weight,
                     paint.line_height,
                     paint.letter_spacing,
+                    paint.font_family.clone(),
                 );
                 // 投影和图层模糊都不进字形纹理，只标脏让顶点重写。
                 text.shadow = paint.shadow;
@@ -593,6 +604,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
     let mut font_weights = Vec::new();
     let mut line_heights = Vec::new();
     let mut letter_spacings = Vec::new();
+    let mut font_families = Vec::new();
     let mut dashes = Vec::new();
     let mut caps = Vec::new();
     let mut joins = Vec::new();
@@ -819,6 +831,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
                 font_weights.push(text.font_weight);
                 line_heights.push(text.line_height);
                 letter_spacings.push(text.letter_spacing);
+                font_families.push(text.font_family.clone());
                 blends.push(text.blend_mode);
                 push_shadow(
                     &mut shadow_xs,
@@ -883,6 +896,7 @@ pub fn selection_style(scene: &Scene, ids: &[ElementId]) -> SelectionStyle {
         font_weight: fold(font_weights),
         line_height: fold(line_heights),
         letter_spacing: fold(letter_spacings),
+        font_family: fold(font_families),
         stroke_dash: fold(dashes),
         stroke_cap: fold(caps),
         stroke_join: fold(joins),
@@ -2883,6 +2897,142 @@ mod tests {
                 assert!((text.line_height - DEFAULT_LINE_HEIGHT).abs() < 1e-5);
                 assert!((text.letter_spacing - DEFAULT_LETTER_SPACING).abs() < 1e-5);
             }
+            other => panic!("text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn text_font_family_is_one_undoable_set_style() {
+        use crate::element::DEFAULT_FONT_FAMILY;
+
+        let mut scene = Scene::new();
+        scene.add_text(Text::new(1, Vec2::ZERO, "Hello"));
+        scene.add_text(Text::new(2, Vec2::new(40.0, 0.0), "World").with_font_family("serif"));
+        scene.add_rect(Rectangle::new(
+            3,
+            Vec2::new(80.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        ));
+
+        let mixed = selection_style(&scene, &[1, 2]);
+        assert_eq!(mixed.font_family, StyleField::Mixed);
+        let shape_only = selection_style(&scene, &[3]);
+        assert_eq!(shape_only.font_family, StyleField::Absent);
+
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[3],
+            &StylePatch {
+                font_family: Some("monospace".to_string()),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+        assert!(SetStyleCommand::from_patch(
+            &scene,
+            &[1],
+            &StylePatch {
+                font_family: Some(DEFAULT_FONT_FAMILY.to_string()),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let mut locked = Scene::new();
+        let mut text = Text::new(1, Vec2::ZERO, "Lock");
+        text.props.locked = true;
+        locked.add_text(text);
+        assert!(SetStyleCommand::from_patch(
+            &locked,
+            &[1],
+            &StylePatch {
+                font_family: Some("serif".to_string()),
+                ..StylePatch::default()
+            },
+        )
+        .is_none());
+
+        let mut history = CommandHistory::new();
+        let mut textured = Text::new(4, Vec2::new(0.0, 40.0), "Raster");
+        textured.texture_id = Some("glyph".to_string());
+        textured.raster_revision = textured.revision;
+        scene.add_text(textured);
+
+        history.execute(
+            Box::new(
+                SetStyleCommand::from_patch(
+                    &scene,
+                    &[1, 4],
+                    &StylePatch {
+                        font_family: Some("sans-serif".to_string()),
+                        ..StylePatch::default()
+                    },
+                )
+                .unwrap(),
+            ),
+            &mut scene,
+        );
+        assert_eq!(history.undo_count(), 1);
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.font_family, "sans-serif");
+                assert!(text.texture_id.is_none());
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        let uniform = selection_style(&scene, &[1, 4]);
+        assert_eq!(
+            uniform.font_family,
+            StyleField::Uniform("sans-serif".to_string())
+        );
+
+        assert!(history.undo(&mut scene));
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => {
+                assert_eq!(text.font_family, DEFAULT_FONT_FAMILY);
+            }
+            other => panic!("text, got {other:?}"),
+        }
+        assert!(history.redo(&mut scene));
+
+        // empty patch value falls back to default stack
+        history.execute(
+            Box::new(
+                SetStyleCommand::from_patch(
+                    &scene,
+                    &[1],
+                    &StylePatch {
+                        font_family: Some("   ".to_string()),
+                        ..StylePatch::default()
+                    },
+                )
+                .unwrap(),
+            ),
+            &mut scene,
+        );
+        match scene.get(1).unwrap() {
+            AnyElement::Text(text) => assert_eq!(text.font_family, DEFAULT_FONT_FAMILY),
+            other => panic!("text, got {other:?}"),
+        }
+
+        let json = scene.to_json().unwrap();
+        assert!(json.contains("\"font_family\""));
+        let restored = Scene::from_json(&json).unwrap();
+        match restored.get(1).unwrap() {
+            AnyElement::Text(text) => assert_eq!(text.font_family, DEFAULT_FONT_FAMILY),
+            other => panic!("text, got {other:?}"),
+        }
+
+        let legacy = serde_json::json!({
+            "version": 1,
+            "elements": [{
+                "type": "text",
+                "data": { "props": { "id": 9 }, "content": "Old" }
+            }]
+        });
+        let old = Scene::from_json(&legacy.to_string()).unwrap();
+        match old.get(9).unwrap() {
+            AnyElement::Text(text) => assert_eq!(text.font_family, DEFAULT_FONT_FAMILY),
             other => panic!("text, got {other:?}"),
         }
     }

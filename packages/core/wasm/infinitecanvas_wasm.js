@@ -2233,7 +2233,8 @@ export class InfiniteCanvas {
      * `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
      * `textColor` 是十六进制颜色。`textAlign` 为 `left` / `center` / `right`，也可写成 `text_align` / `align`。
      * `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。
-     * `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。对齐、字重、行高与字距只写到文本上。圆角只写到矩形上。
+     * `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。
+     * `fontFamily` 是 CSS 字体族字符串，也可写成 `font_family`；空串回退默认栈。对齐、字重、行高、字距与字体族只写到文本上。圆角只写到矩形上。
      * `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
      * `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
      * `innerShadowOffsetX` / `innerShadowOffsetY` / `innerShadowBlur` / `innerShadowSpread` / `innerShadowOpacity` 同理，也可蛇形命名。`innerShadowColor` 只改 RGB。

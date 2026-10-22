@@ -151,6 +151,16 @@ pub fn sanitize_letter_spacing(value: f32) -> f32 {
     }
 }
 
+/// 空或纯空白时回退到 [`DEFAULT_FONT_FAMILY`]。
+pub fn sanitize_font_family(value: impl AsRef<str>) -> String {
+    let trimmed = value.as_ref().trim();
+    if trimmed.is_empty() {
+        DEFAULT_FONT_FAMILY.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// 把缩放量化到 LOD 档。
 ///
 /// 同一档内不重新光栅化。档位按 `log2(zoom)` 四舍五入到 1/4，
@@ -533,9 +543,9 @@ impl Text {
         self
     }
 
-    /// 设置 CSS font-family。
+    /// 设置 CSS font-family。空串回退到默认栈。
     pub fn with_font_family(mut self, font_family: impl Into<String>) -> Self {
-        self.font_family = font_family.into();
+        self.font_family = sanitize_font_family(font_family.into());
         self
     }
 
@@ -549,9 +559,7 @@ impl Text {
         } else if self.font_size < 1.0 {
             self.font_size = 1.0;
         }
-        if self.font_family.trim().is_empty() {
-            self.font_family = DEFAULT_FONT_FAMILY.to_string();
-        }
+        self.font_family = sanitize_font_family(&self.font_family);
         if !self.opacity.is_finite() {
             self.opacity = 1.0;
         } else {
@@ -691,7 +699,7 @@ impl Text {
         self.font_weight = visual.font_weight;
         self.line_height = sanitize_line_height(visual.line_height);
         self.letter_spacing = sanitize_letter_spacing(visual.letter_spacing);
-        self.font_family = visual.font_family.clone();
+        self.font_family = sanitize_font_family(&visual.font_family);
         self.size = visual.size;
         self.editing = false;
         self.invalidate_raster()
@@ -763,20 +771,23 @@ impl Text {
         }
     }
 
-    /// 写入对齐、字重、行高与字距。变化时丢掉光栅纹理。
+    /// 写入对齐、字重、行高、字距与字体族。变化时丢掉光栅纹理。
     pub(crate) fn set_typography(
         &mut self,
         align: TextAlign,
         font_weight: FontWeight,
         line_height: f32,
         letter_spacing: f32,
+        font_family: impl Into<String>,
     ) {
         let line_height = sanitize_line_height(line_height);
         let letter_spacing = sanitize_letter_spacing(letter_spacing);
+        let font_family = sanitize_font_family(font_family.into());
         if self.align == align
             && self.font_weight == font_weight
             && self.line_height == line_height
             && self.letter_spacing == letter_spacing
+            && self.font_family == font_family
         {
             return;
         }
@@ -784,6 +795,7 @@ impl Text {
         self.font_weight = font_weight;
         self.line_height = line_height;
         self.letter_spacing = letter_spacing;
+        self.font_family = font_family;
         self.size = estimate_size(
             &self.content,
             self.font_size,

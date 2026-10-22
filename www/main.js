@@ -1743,6 +1743,7 @@ function syncPropertyPanel(engine) {
   );
   syncChoice('prop-text-align', style.textAlign, style.textAlignMixed);
   syncChoice('prop-font-weight', style.fontWeight, style.fontWeightMixed);
+  syncFontFamily(style);
   syncRange(
     'prop-line-height',
     'prop-line-height-label',
@@ -1761,6 +1762,8 @@ function syncPropertyPanel(engine) {
   if (textAlignMixed) textAlignMixed.hidden = !style.textAlignMixed;
   const fontWeightMixed = document.getElementById('prop-font-weight-mixed');
   if (fontWeightMixed) fontWeightMixed.hidden = !style.fontWeightMixed;
+  const fontFamilyMixed = document.getElementById('prop-font-family-mixed');
+  if (fontFamilyMixed) fontFamilyMixed.hidden = !style.fontFamilyMixed;
   const lineHeightMixed = document.getElementById('prop-line-height-mixed');
   if (lineHeightMixed) lineHeightMixed.hidden = !style.lineHeightMixed;
   const letterSpacingMixed = document.getElementById('prop-letter-spacing-mixed');
@@ -2150,7 +2153,83 @@ function bindPropertyPanel(engine) {
   bindChoice('prop-blend-mode', 'blendMode', (value) => value);
   bindChoice('prop-text-align', 'textAlign', (value) => value);
   bindChoice('prop-font-weight', 'fontWeight', (value) => value);
+  bindFontFamily(engine);
   bindGradient(engine);
+}
+
+/** 与引擎 DEFAULT_FONT_FAMILY 一致的 CJK 回退栈（面板「默认」选项）。 */
+const DEFAULT_TEXT_FONT_FAMILY =
+  '"WenQuanYi Micro Hei", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", "Droid Sans Fallback", sans-serif';
+
+/**
+ * 把引擎里的 fontFamily 映射到下拉选项 value。
+ * @param {unknown} family
+ * @returns {string}
+ */
+function fontFamilyChoiceValue(family) {
+  if (typeof family !== 'string' || !family) return '';
+  if (family === DEFAULT_TEXT_FONT_FAMILY) return 'default';
+  const known = [
+    'sans-serif',
+    'serif',
+    'monospace',
+    'Arial, Helvetica, sans-serif',
+    "Georgia, 'Times New Roman', serif",
+    "'Courier New', Courier, monospace",
+  ];
+  return known.includes(family) ? family : '';
+}
+
+/**
+ * @param {Record<string, unknown>} style
+ */
+function syncFontFamily(style) {
+  const input = document.getElementById('prop-font-family');
+  if (!(input instanceof HTMLSelectElement)) return;
+  if (style.fontFamilyMixed) {
+    input.value = '';
+    return;
+  }
+  if (!style.fontFamilySupported) {
+    input.value = '';
+    return;
+  }
+  const mapped = fontFamilyChoiceValue(style.fontFamily);
+  if (mapped) {
+    input.value = mapped;
+    return;
+  }
+  // 自定义栈：临时 option，便于显示当前值
+  const custom = typeof style.fontFamily === 'string' ? style.fontFamily : '';
+  let opt = Array.from(input.options).find((o) => o.dataset.custom === '1');
+  if (custom) {
+    if (!opt) {
+      opt = document.createElement('option');
+      opt.dataset.custom = '1';
+      input.appendChild(opt);
+    }
+    opt.value = custom;
+    opt.textContent = custom.length > 28 ? `${custom.slice(0, 28)}…` : custom;
+    input.value = custom;
+  } else if (opt) {
+    opt.remove();
+    input.value = '';
+  }
+}
+
+/**
+ * @param {WasmCanvas} engine
+ */
+function bindFontFamily(engine) {
+  const input = document.getElementById('prop-font-family');
+  if (!(input instanceof HTMLSelectElement)) return;
+  input.addEventListener('change', () => {
+    if (!input.value) return;
+    const family = input.value === 'default' ? DEFAULT_TEXT_FONT_FAMILY : input.value;
+    engine.set_selection_style({ fontFamily: family });
+    scheduleAutosave(engine);
+    syncPropertyPanel(engine);
+  });
 }
 
 /**

@@ -27,8 +27,9 @@ pub use rect::Rectangle;
 pub use shadow::{DropShadow, InnerShadow};
 pub use text::{
     estimate_size, lod_bucket, lod_scale, padding_world, raster_params, raster_texture_id,
-    sanitize_letter_spacing, sanitize_line_height, FontWeight, RasterParams, Text, TextAlign,
-    TextClickResolver, TextPlacement, TextVisual, DEFAULT_LETTER_SPACING, DEFAULT_LINE_HEIGHT,
+    sanitize_font_family, sanitize_letter_spacing, sanitize_line_height, FontWeight, RasterParams,
+    Text, TextAlign, TextClickResolver, TextPlacement, TextVisual, DEFAULT_FONT_FAMILY,
+    DEFAULT_LETTER_SPACING, DEFAULT_LINE_HEIGHT,
 };
 
 use crate::blend::BlendMode;
