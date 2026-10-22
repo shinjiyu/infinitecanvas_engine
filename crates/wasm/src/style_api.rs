@@ -103,6 +103,7 @@ impl InfiniteCanvas {
         write_label(&obj, "fontWeight", &style.font_weight, FontWeight::as_str);
         write_number(&obj, "lineHeight", &style.line_height);
         write_number(&obj, "letterSpacing", &style.letter_spacing);
+        write_string(&obj, "fontFamily", &style.font_family);
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
         write_label(&obj, "strokeJoin", &style.stroke_join, StrokeJoin::as_str);
@@ -131,7 +132,8 @@ impl InfiniteCanvas {
     /// `innerRadius` 也可以写成 `inner_radius`，只作用于星形，并钳到 0.05–0.95。
     /// `textColor` 是十六进制颜色。`textAlign` 为 `left` / `center` / `right`，也可写成 `text_align` / `align`。
     /// `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。
-    /// `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。对齐、字重、行高与字距只写到文本上。圆角只写到矩形上。
+    /// `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。
+    /// `fontFamily` 是 CSS 字体族字符串，也可写成 `font_family`；空串回退默认栈。对齐、字重、行高、字距与字体族只写到文本上。圆角只写到矩形上。
     /// `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
     /// `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
     /// `innerShadowOffsetX` / `innerShadowOffsetY` / `innerShadowBlur` / `innerShadowSpread` / `innerShadowOpacity` 同理，也可蛇形命名。`innerShadowColor` 只改 RGB。
@@ -446,6 +448,26 @@ fn write_number(obj: &Object, name: &str, field: &StyleField<f32>) {
     }
 }
 
+fn write_string(obj: &Object, name: &str, field: &StyleField<String>) {
+    match field {
+        StyleField::Absent => {
+            js_set(obj, name, JsValue::NULL);
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(false));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(false));
+        }
+        StyleField::Mixed => {
+            js_set(obj, name, JsValue::NULL);
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(true));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(true));
+        }
+        StyleField::Uniform(value) => {
+            js_set(obj, name, JsValue::from_str(value));
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(false));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(true));
+        }
+    }
+}
+
 fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
     if !value.is_object() {
         return None;
@@ -465,6 +487,7 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         line_height: read_f32(value, "lineHeight").or_else(|| read_f32(value, "line_height")),
         letter_spacing: read_f32(value, "letterSpacing")
             .or_else(|| read_f32(value, "letter_spacing")),
+        font_family: read_string(value, "fontFamily").or_else(|| read_string(value, "font_family")),
         stroke_dash: read_dash(value, "strokeDash"),
         stroke_cap: read_label(value, "strokeCap", StrokeCap::parse),
         stroke_join: read_label(value, "strokeJoin", StrokeJoin::parse),
@@ -706,6 +729,14 @@ fn read_f32(value: &JsValue, key: &str) -> Option<f32> {
     } else {
         None
     }
+}
+
+fn read_string(value: &JsValue, key: &str) -> Option<String> {
+    if !has_key(value, key) {
+        return None;
+    }
+    let current = Reflect::get(value, &JsValue::from_str(key)).ok()?;
+    current.as_string()
 }
 
 fn has_key(value: &JsValue, key: &str) -> bool {
