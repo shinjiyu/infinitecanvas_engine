@@ -1212,7 +1212,8 @@ export class InfiniteCanvas {
      *   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true。未写出时不改模糊
      * - `blurRadius` 是图层高斯模糊的标准差。没有形状、文本或图片时 `blurSupported` 为 false。多选不一致时 `blurRadiusMixed` 为 true。画板算形状。未写出时不改渐变或混合模式
      * - `textAlign` 为 `left` / `center` / `right`。`fontWeight` 为 `regular` / `bold`。
-     *   `lineHeight` 为行高倍数，`letterSpacing` 为世界单位字距。只统计文本。多选不一致时对应的 `*Mixed` 为 true
+     *   `lineHeight` 为行高倍数，`letterSpacing` 为世界单位字距。
+     *   `underline` / `strikethrough` 为布尔。只统计文本。多选不一致时对应的 `*Mixed` 为 true
      * - `startMarker` / `endMarker`：`none` / `arrow` / `triangle`。仅直线（`hasLine`）。多选不一致时对应 `*Mixed` 为 true
      *
      * # 示例（JavaScript）
@@ -2234,7 +2235,8 @@ export class InfiniteCanvas {
      * `textColor` 是十六进制颜色。`textAlign` 为 `left` / `center` / `right`，也可写成 `text_align` / `align`。
      * `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。
      * `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。
-     * `fontFamily` 是 CSS 字体族字符串，也可写成 `font_family`；空串回退默认栈。对齐、字重、行高、字距与字体族只写到文本上。圆角只写到矩形上。
+     * `underline` / `strikethrough` 是布尔，也可写成蛇形名字。
+     * `fontFamily` 是 CSS 字体族字符串，也可写成 `font_family`；空串回退默认栈。对齐、字重、行高、字距、装饰线与字体族只写到文本上。圆角只写到矩形上。
      * `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
      * `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
      * `innerShadowOffsetX` / `innerShadowOffsetY` / `innerShadowBlur` / `innerShadowSpread` / `innerShadowOpacity` 同理，也可蛇形命名。`innerShadowColor` 只改 RGB。
@@ -2392,7 +2394,7 @@ export class InfiniteCanvas {
      *
      * # 返回
      * 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
-     * `color`, `align`, `fontWeight`, `lineHeight`, `letterSpacing`, `fontFamily`, `paddingWorld`, `textureId`
+     * `color`, `align`, `fontWeight`, `lineHeight`, `letterSpacing`, `underline`, `strikethrough`, `fontFamily`, `paddingWorld`, `textureId`
      * @returns {Array<any>}
      */
     take_text_raster_jobs() {

@@ -1768,6 +1768,8 @@ function syncPropertyPanel(engine) {
   if (lineHeightMixed) lineHeightMixed.hidden = !style.lineHeightMixed;
   const letterSpacingMixed = document.getElementById('prop-letter-spacing-mixed');
   if (letterSpacingMixed) letterSpacingMixed.hidden = !style.letterSpacingMixed;
+  syncTextDecoration('prop-underline', style.underline, style.underlineMixed, style.hasText);
+  syncTextDecoration('prop-strikethrough', style.strikethrough, style.strikethroughMixed, style.hasText);
 
   const lineStyle = document.getElementById('prop-line-style');
   if (lineStyle) lineStyle.hidden = !style.hasShape;
@@ -2032,6 +2034,26 @@ function renameFrameAt(engine, point) {
   }
 }
 
+/**
+ * 文本装饰勾选：单选/多选同值勾选；mixed 为 indeterminate；非 Text 禁用。
+ *
+ * @param {string} id
+ * @param {unknown} value
+ * @param {unknown} mixed
+ * @param {unknown} hasText
+ */
+function syncTextDecoration(id, value, mixed, hasText) {
+  const input = document.getElementById(id);
+  const mixedEl = document.getElementById(`${id}-mixed`);
+  if (mixedEl) mixedEl.hidden = !mixed;
+  if (!(input instanceof HTMLInputElement)) return;
+  const supported = Boolean(hasText);
+  input.disabled = !supported;
+  if (activeStyleControl === id) return;
+  input.indeterminate = Boolean(mixed);
+  input.checked = supported && !mixed && Boolean(value);
+}
+
 function bindPropertyPanel(engine) {
   const bindRange = (id, key, labelId, format) => {
     const input = document.getElementById(id);
@@ -2154,6 +2176,20 @@ function bindPropertyPanel(engine) {
   bindChoice('prop-text-align', 'textAlign', (value) => value);
   bindChoice('prop-font-weight', 'fontWeight', (value) => value);
   bindFontFamily(engine);
+
+  const bindDecoration = (id, key) => {
+    const input = document.getElementById(id);
+    if (!(input instanceof HTMLInputElement)) return;
+    input.addEventListener('change', () => {
+      activeStyleControl = id;
+      engine.set_selection_style({ [key]: input.checked });
+      scheduleAutosave(engine);
+      syncPropertyPanel(engine);
+      activeStyleControl = null;
+    });
+  };
+  bindDecoration('prop-underline', 'underline');
+  bindDecoration('prop-strikethrough', 'strikethrough');
   bindGradient(engine);
 }
 
@@ -3643,6 +3679,10 @@ function openTextEditor(engine, info) {
   const zoom = (Number(info.screenFontSize) || 0) / (Number(info.fontSize) || 1) || 1;
   const spacingScreen = Number.isFinite(letterSpacing) ? letterSpacing * zoom : 0;
   node.style.letterSpacing = `${spacingScreen}px`;
+  const decorations = [];
+  if (info.underline) decorations.push('underline');
+  if (info.strikethrough) decorations.push('line-through');
+  node.style.textDecoration = decorations.length ? decorations.join(' ') : 'none';
   placeTextEditor(info);
   engine.set_text_editing(info.id, true);
   node.focus();

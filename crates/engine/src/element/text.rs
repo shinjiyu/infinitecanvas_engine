@@ -311,6 +311,10 @@ pub struct TextVisual {
     pub line_height: f32,
     /// 字距（世界单位）。
     pub letter_spacing: f32,
+    /// 下划线。
+    pub underline: bool,
+    /// 删除线。
+    pub strikethrough: bool,
     /// CSS font-family。
     pub font_family: String,
     /// 世界单位布局尺寸。
@@ -343,7 +347,7 @@ fn default_line_height() -> f32 {
 ///
 /// 场景 JSON 只保存排版字段。`texture_id`、LOD、`revision`、`editing` 用 `#[serde(skip)]`，
 /// 导入后按当前缩放重新光栅化。缺省的 `font_size`、`color`、`opacity`、`stroke`、
-/// `stroke_width`、`align`、`font_weight`、`line_height`、`letter_spacing`、`font_family`、`size`
+/// `stroke_width`、`align`、`font_weight`、`line_height`、`letter_spacing`、`underline`、`strikethrough`、`font_family`、`size`
 /// 使用 serde 默认值；未知字段会被忽略。
 ///
 /// # 示例
@@ -397,6 +401,12 @@ pub struct Text {
     /// 字距（世界单位）。JSON 中可省略，缺省 0。
     #[serde(default)]
     pub letter_spacing: f32,
+    /// 下划线。JSON 中可省略，缺省 false。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub underline: bool,
+    /// 删除线。JSON 中可省略，缺省 false。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub strikethrough: bool,
     /// CSS font-family。JSON 中可省略。
     #[serde(default = "default_font_family")]
     pub font_family: String,
@@ -469,6 +479,8 @@ impl Text {
             font_weight: FontWeight::Regular,
             line_height: DEFAULT_LINE_HEIGHT,
             letter_spacing: DEFAULT_LETTER_SPACING,
+            underline: false,
+            strikethrough: false,
             font_family: DEFAULT_FONT_FAMILY.to_string(),
             texture_id: None,
             raster_lod: None,
@@ -540,6 +552,18 @@ impl Text {
                 self.letter_spacing,
             );
         }
+        self
+    }
+
+    /// 设置下划线。
+    pub fn with_underline(mut self, underline: bool) -> Self {
+        self.underline = underline;
+        self
+    }
+
+    /// 设置删除线。
+    pub fn with_strikethrough(mut self, strikethrough: bool) -> Self {
+        self.strikethrough = strikethrough;
         self
     }
 
@@ -682,6 +706,8 @@ impl Text {
             font_weight: self.font_weight,
             line_height: self.line_height,
             letter_spacing: self.letter_spacing,
+            underline: self.underline,
+            strikethrough: self.strikethrough,
             font_family: self.font_family.clone(),
             size: self.size,
         }
@@ -699,6 +725,8 @@ impl Text {
         self.font_weight = visual.font_weight;
         self.line_height = sanitize_line_height(visual.line_height);
         self.letter_spacing = sanitize_letter_spacing(visual.letter_spacing);
+        self.underline = visual.underline;
+        self.strikethrough = visual.strikethrough;
         self.font_family = sanitize_font_family(&visual.font_family);
         self.size = visual.size;
         self.editing = false;
@@ -771,13 +799,16 @@ impl Text {
         }
     }
 
-    /// 写入对齐、字重、行高、字距与字体族。变化时丢掉光栅纹理。
+    /// 写入对齐、字重、行高、字距、装饰线与字体族。变化时丢掉光栅纹理。
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn set_typography(
         &mut self,
         align: TextAlign,
         font_weight: FontWeight,
         line_height: f32,
         letter_spacing: f32,
+        underline: bool,
+        strikethrough: bool,
         font_family: impl Into<String>,
     ) {
         let line_height = sanitize_line_height(line_height);
@@ -787,6 +818,8 @@ impl Text {
             && self.font_weight == font_weight
             && self.line_height == line_height
             && self.letter_spacing == letter_spacing
+            && self.underline == underline
+            && self.strikethrough == strikethrough
             && self.font_family == font_family
         {
             return;
@@ -795,6 +828,8 @@ impl Text {
         self.font_weight = font_weight;
         self.line_height = line_height;
         self.letter_spacing = letter_spacing;
+        self.underline = underline;
+        self.strikethrough = strikethrough;
         self.font_family = font_family;
         self.size = estimate_size(
             &self.content,

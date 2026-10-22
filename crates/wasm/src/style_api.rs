@@ -46,7 +46,8 @@ impl InfiniteCanvas {
     ///   形状、文本、图片和画板都参与。多选不一致时 `blendModeMixed` 为 true。未写出时不改模糊
     /// - `blurRadius` 是图层高斯模糊的标准差。没有形状、文本或图片时 `blurSupported` 为 false。多选不一致时 `blurRadiusMixed` 为 true。画板算形状。未写出时不改渐变或混合模式
     /// - `textAlign` 为 `left` / `center` / `right`。`fontWeight` 为 `regular` / `bold`。
-    ///   `lineHeight` 为行高倍数，`letterSpacing` 为世界单位字距。只统计文本。多选不一致时对应的 `*Mixed` 为 true
+    ///   `lineHeight` 为行高倍数，`letterSpacing` 为世界单位字距。
+    ///   `underline` / `strikethrough` 为布尔。只统计文本。多选不一致时对应的 `*Mixed` 为 true
     /// - `startMarker` / `endMarker`：`none` / `arrow` / `triangle`。仅直线（`hasLine`）。多选不一致时对应 `*Mixed` 为 true
     ///
     /// # 示例（JavaScript）
@@ -103,6 +104,8 @@ impl InfiniteCanvas {
         write_label(&obj, "fontWeight", &style.font_weight, FontWeight::as_str);
         write_number(&obj, "lineHeight", &style.line_height);
         write_number(&obj, "letterSpacing", &style.letter_spacing);
+        write_bool(&obj, "underline", &style.underline);
+        write_bool(&obj, "strikethrough", &style.strikethrough);
         write_string(&obj, "fontFamily", &style.font_family);
         write_dash(&obj, &style.stroke_dash);
         write_label(&obj, "strokeCap", &style.stroke_cap, StrokeCap::as_str);
@@ -133,7 +136,8 @@ impl InfiniteCanvas {
     /// `textColor` 是十六进制颜色。`textAlign` 为 `left` / `center` / `right`，也可写成 `text_align` / `align`。
     /// `fontWeight` 为 `regular` / `bold`（或 `400` / `700`），也可写成 `font_weight`。
     /// `lineHeight` / `letterSpacing` 是数字，也可写成 `line_height` / `letter_spacing`。
-    /// `fontFamily` 是 CSS 字体族字符串，也可写成 `font_family`；空串回退默认栈。对齐、字重、行高、字距与字体族只写到文本上。圆角只写到矩形上。
+    /// `underline` / `strikethrough` 是布尔，也可写成蛇形名字。
+    /// `fontFamily` 是 CSS 字体族字符串，也可写成 `font_family`；空串回退默认栈。对齐、字重、行高、字距、装饰线与字体族只写到文本上。圆角只写到矩形上。
     /// `shadowOffsetX` / `shadowOffsetY` / `shadowBlur` / `shadowOpacity` 是数字，也可以写成 `shadow_offset_x` 等蛇形名字。
     /// `shadowColor` 只改 RGB，浓度用 `shadowOpacity`。形状、文本和图片都接受投影。
     /// `innerShadowOffsetX` / `innerShadowOffsetY` / `innerShadowBlur` / `innerShadowSpread` / `innerShadowOpacity` 同理，也可蛇形命名。`innerShadowColor` 只改 RGB。
@@ -487,6 +491,8 @@ fn parse_style_patch(value: &JsValue) -> Option<StylePatch> {
         line_height: read_f32(value, "lineHeight").or_else(|| read_f32(value, "line_height")),
         letter_spacing: read_f32(value, "letterSpacing")
             .or_else(|| read_f32(value, "letter_spacing")),
+        underline: read_bool(value, "underline"),
+        strikethrough: read_bool(value, "strikethrough"),
         font_family: read_string(value, "fontFamily").or_else(|| read_string(value, "font_family")),
         stroke_dash: read_dash(value, "strokeDash"),
         stroke_cap: read_label(value, "strokeCap", StrokeCap::parse),
@@ -707,6 +713,43 @@ fn read_color_update(value: &JsValue, key: &str) -> Option<Option<Color>> {
         return Some(None);
     }
     Color::from_hex(&text).ok().map(Some)
+}
+
+fn write_bool(obj: &Object, name: &str, field: &StyleField<bool>) {
+    match field {
+        StyleField::Absent => {
+            js_set(obj, name, JsValue::NULL);
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(false));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(false));
+        }
+        StyleField::Mixed => {
+            js_set(obj, name, JsValue::NULL);
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(true));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(true));
+        }
+        StyleField::Uniform(value) => {
+            js_set(obj, name, JsValue::from(*value));
+            js_set(obj, &format!("{name}Mixed"), JsValue::from(false));
+            js_set(obj, &format!("{name}Supported"), JsValue::from(true));
+        }
+    }
+}
+
+fn read_bool(value: &JsValue, key: &str) -> Option<bool> {
+    if !has_key(value, key) {
+        return None;
+    }
+    let current = Reflect::get(value, &JsValue::from_str(key)).ok()?;
+    if let Some(flag) = current.as_bool() {
+        return Some(flag);
+    }
+    // 兼容 0/1 数字
+    if let Some(number) = current.as_f64() {
+        if number.is_finite() {
+            return Some(number != 0.0);
+        }
+    }
+    None
 }
 
 fn read_color(value: &JsValue, key: &str) -> Option<Color> {
