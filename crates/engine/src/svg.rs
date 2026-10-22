@@ -887,6 +887,17 @@ fn write_text(text: &Text) -> Option<String> {
         body.push_str(&fmt_num(letter_spacing));
         body.push('"');
     }
+    let decoration = match (text.underline, text.strikethrough) {
+        (true, true) => Some("underline line-through"),
+        (true, false) => Some("underline"),
+        (false, true) => Some("line-through"),
+        (false, false) => None,
+    };
+    if let Some(value) = decoration {
+        body.push_str(" text-decoration=\"");
+        body.push_str(value);
+        body.push('"');
+    }
     push_alpha_attr(&mut body, "fill-opacity", text.color.a);
     if text.stroke_width > 0.0 {
         let stroke = text.stroke.unwrap_or(text.color);
@@ -2010,6 +2021,17 @@ mod tests {
         let svg = export_svg(&spaced, false);
         assert!(svg.contains("letter-spacing=\"4\""));
         assert!(svg.contains("<tspan x=\"0\" y=\"20\">B</tspan>"));
+
+        let mut decorated = Scene::new();
+        decorated.add_text(
+            Text::new(4, Vec2::ZERO, "Hi")
+                .with_font_size(12.0)
+                .with_underline(true)
+                .with_strikethrough(true)
+                .with_font_family("sans-serif"),
+        );
+        let svg = export_svg(&decorated, false);
+        assert!(svg.contains("text-decoration=\"underline line-through\""));
     }
 
     #[test]

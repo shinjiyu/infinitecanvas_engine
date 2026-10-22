@@ -1559,6 +1559,16 @@ impl InfiniteCanvas {
                 );
                 let _ = Reflect::set(
                     &obj,
+                    &JsValue::from_str("underline"),
+                    &JsValue::from(text.underline),
+                );
+                let _ = Reflect::set(
+                    &obj,
+                    &JsValue::from_str("strikethrough"),
+                    &JsValue::from(text.strikethrough),
+                );
+                let _ = Reflect::set(
+                    &obj,
                     &JsValue::from_str("fontFamily"),
                     &JsValue::from_str(&text.font_family),
                 );
@@ -2837,7 +2847,7 @@ impl InfiniteCanvas {
     ///
     /// # 返回
     /// 对象数组：`id`, `revision`, `lod`, `rasterScale`, `content`, `fontSizePx`,
-    /// `color`, `align`, `fontWeight`, `lineHeight`, `letterSpacing`, `fontFamily`, `paddingWorld`, `textureId`
+    /// `color`, `align`, `fontWeight`, `lineHeight`, `letterSpacing`, `underline`, `strikethrough`, `fontFamily`, `paddingWorld`, `textureId`
     #[wasm_bindgen]
     pub fn take_text_raster_jobs(&mut self) -> Array {
         let lod = lod_bucket(self.viewport.zoom());
@@ -2864,6 +2874,8 @@ impl InfiniteCanvas {
             let font_weight = text.font_weight.as_str();
             let line_height = text.line_height;
             let letter_spacing = text.letter_spacing;
+            let underline = text.underline;
+            let strikethrough = text.strikethrough;
             let font_family = text.font_family.clone();
             let revision = text.revision as f64;
             text.mark_raster_pending(lod);
@@ -2911,6 +2923,16 @@ impl InfiniteCanvas {
                 &obj,
                 &JsValue::from_str("letterSpacing"),
                 &JsValue::from(letter_spacing),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("underline"),
+                &JsValue::from(underline),
+            );
+            let _ = Reflect::set(
+                &obj,
+                &JsValue::from_str("strikethrough"),
+                &JsValue::from(strikethrough),
             );
             let _ = Reflect::set(
                 &obj,
@@ -4967,6 +4989,16 @@ impl InfiniteCanvas {
             &obj,
             &JsValue::from_str("letterSpacing"),
             &JsValue::from(text.letter_spacing),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("underline"),
+            &JsValue::from(text.underline),
+        );
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("strikethrough"),
+            &JsValue::from(text.strikethrough),
         );
         let _ = Reflect::set(
             &obj,
